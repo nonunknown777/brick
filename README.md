@@ -35,6 +35,9 @@ package HELLO
 
 using IO
 
+block global = 64MB
+block temp   = 8KB
+
 struct Greeter {
     String message
 
@@ -48,8 +51,10 @@ struct Greeter {
 }
 
 fn main() {
-    Greeter g = Greeter("Hello, World!")
+    Greeter g = Greeter("Hello, World!") @temp
     g.greet()
+    temp.reset()
+    global.reset()
 }
 ```
 
