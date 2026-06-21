@@ -1,0 +1,13 @@
+# Build: meta_runtime — Block memory allocator + I/O + Hot Reload (C)
+Import('env', 'has_hotreload', 'has_x11')
+
+runtime_src = ['block_memory.c', 'io.c']
+
+if has_hotreload:
+    runtime_src.append('hot_reload.c')
+    if has_x11:
+        runtime_src.append('libs/window/window_hr.c')
+
+lib_runtime = env.Library('#build/meta_runtime', runtime_src)
+
+Return('lib_runtime')

@@ -1,0 +1,232 @@
+# Meta-C Language Specification v0.1
+
+## Filosofia
+## Philosophy
+Linguagem OOP que compila para C. Performance máxima, gerenciamento
+explícito de memória por blocos, hot reload nativo. Sem stack pra dados
+do usuário — tudo em blocos gerenciados.
+OOP language that compiles to C. Maximum performance, explicit block-based
+memory management, native hot reload. No stack for user data — everything
+in managed blocks.
+
+## Sintaxe Base
+## Base Syntax
+Inspirada em GDScript com chaves { } e tipos explícitos.
+Indentação: 4 espaços.
+Inspired by GDScript with braces { } and explicit types.
+Indentation: 4 spaces.
+
+## Packages
+```meta-c
+package SPRITES              // declara package
+package SPRITES.EFFECTS      // sub-package hierárquico
+
+using SPRITES                // importa package
+using SPRITES.EFFECTS
+
+private int internal_var     // visível só no próprio package
+```
+
+## Structs (OOP)
+```meta-c
+struct Player extends Entity {
+    int hp
+    String name
+
+    fn Player(int h, String n) {    // construtor = nome da struct
+        hp = h
+        name = n
+    }
+
+    fn take_damage(int dmg) {
+        hp -= dmg
+    }
+}
+
+interface Damageable {
+    fn take_damage(int d)
+}
+```
+
+## Memória (Blocos)
+## Memory (Blocks)
+```meta-c
+// Declaração de blocos (no arquivo main principal)
+block global = 256MB
+block game   = 64MB
+block temp   = 8KB
+
+// Alocação implícita (vai pro bloco global, que é o default)
+int x = 5
+String s = "olá"
+
+// Escopo de bloco
+block game {
+    Player p = Player(100, "Felipe")
+    Enemy e = Enemy(50)
+}
+
+// Alocação inline explícita
+float f = 2.0 @temp
+int[] arr = int[10] @game
+
+// Reset
+game.reset()     // libera TUDO no bloco game
+```
+
+### Regras de Memória
+### Memory Rules
+- `block nome = N KB/MB/GB` declara e aloca um bloco
+- `global` é o bloco default — vars sem `@` ou `block:` vão pra ele
+- `block nome:` muda o bloco default dentro do escopo
+- Sem free individual — só `block.reset()` libera tudo
+- Bloco cheio → `error("block overflow")` (panic)
+- Ponteiros entre blocos são permitidos (refs cruzadas)
+- Um bloco anônimo interno (compiler) gerencia params e retornos
+- `block name = N KB/MB/GB` declares and allocates a block
+- `global` is the default block — vars without `@` or `block:` go to it
+- `block name:` changes the default block within scope
+- No individual free — only `block.reset()` releases everything
+- Full block → `error("block overflow")` (panic)
+- Pointers across blocks are allowed (cross-references)
+- An internal anonymous block (compiler) manages params and returns
+
+## Tipos
+## Types
+```meta-c
+int          // inteiro 64-bit / 64-bit integer
+float        // ponto flutuante 64-bit / 64-bit floating point
+bool         // true | false
+char         // caractere 8-bit / 8-bit character
+String       // string built-in (dinâmica, alocada em bloco) / built-in string (dynamic, block-allocated)
+int[N]       // array fixo de N elementos / fixed array of N elements
+null         // ponteiro nulo / null pointer
+```
+
+## Funções
+## Functions
+```meta-c
+fn main() { }                // entry point
+
+fn add(int a, int b) -> int {
+    return a + b
+}
+
+fn void log(String msg) {
+    // params e retorno: gerenciados pelo bloco anônimo interno
+    // params and return: managed by the internal anonymous block
+}
+```
+
+## Controle de Fluxo
+## Flow Control
+```meta-c
+if cond { }
+else { }
+
+while cond { }
+
+for int i = 0; i < 10; i++ { }
+
+return expr
+```
+
+## Erros
+## Errors
+```meta-c
+error("msg")     // imprime e aborta (panic) / prints and aborts (panic)
+```
+
+## I/O (Package IO)
+```meta-c
+using IO
+
+fn main() {
+    print(42)                    // imprime "42\n"
+    print(3.14)                  // imprime "3.140000\n"
+    print(true)                  // imprime "true\n"
+    print('a')                   // imprime "a\n"
+    print("hello")               // imprime "hello\n"
+    print()                      // imprime "\n"
+    print("x = {0}", 10)         // imprime "x = 10\n"
+    print("{0} + {1} = {2}", 1, 2, 3)  // imprime "1 + 2 = 3\n"
+}
+```
+
+**Regras:**
+- `using IO;` é obrigatório para usar `print()`
+- `print()` sempre adiciona `\n` no final (println semantics)
+- Tipos suportados: int, float, bool, char, String
+- Formatação: `{0}`, `{1}` etc. referem-se aos argumentos posicionalmente
+- Implementação: codegen gera chamadas para `runtime/io.c` (wrappers de printf)
+
+**Rules:**
+- `using IO;` is required to use `print()`
+- `print()` always adds `\n` at the end (println semantics)
+- Supported types: int, float, bool, char, String
+- Formatting: `{0}`, `{1}` etc. refer to arguments positionally
+- Implementation: codegen generates calls to `runtime/io.c` (printf wrappers)
+
+## Compilação
+## Compilation
+```bash
+meta-c input.mc -o output.c    # gera C (com #line directives)
+gcc -O3 output.c runtime/block_memory.c runtime/io.c -o programa
+gcc -g output.c runtime/block_memory.c runtime/hot_reload.c runtime/io.c -o programa   # debug
+```
+
+## Debugging
+- `#line` directives no código C gerado mapeiam .mc → .c
+- GDB mostra código-fonte Meta-C original, não o C gerado
+- GDB pretty-printers para BlockCtx (info blocks, block name)
+- VS Code webview com visualização gráfica dos blocos de memória
+- Comandos GDB custom: `info blocks`, `block <nome>`, `block-watch`
+- `#line` directives in the generated C code map .mc → .c
+- GDB shows the original Meta-C source, not the generated C
+- GDB pretty-printers for BlockCtx (info blocks, block name)
+- VS Code webview with graphical visualization of memory blocks
+- Custom GDB commands: `info blocks`, `block <name>`, `block-watch`
+
+## Hot Reload
+Programas compilados com Meta-C suportam hot reload via dlopen.
+Cada package compila para um .so separado.
+Monitoramento via inotify. Swap atômico de ponteiros de função.
+Programs compiled with Meta-C support hot reload via dlopen.
+Each package compiles to a separate .so.
+Monitoring via inotify. Atomic swap of function pointers.
+
+## Arquitetura do Compilador
+## Compiler Architecture
+```
+.mc file
+  → Lexer (tokens)
+  → Parser (AST + package resolution)
+  → Codegen (type check + geração C com #line)
+  → output.c + runtime.c → gcc -O3 → binário
+  ↑
+  └── Tester/Optimizer (task 10) testa, otimiza e documenta tudo
+```
+
+```
+.mc file
+  → Lexer (tokens)
+  → Parser (AST + package resolution)
+  → Codegen (type check + C generation with #line)
+  → output.c + runtime.c → gcc -O3 → binary
+  ↑
+  └── Tester/Optimizer (task 10) tests, optimizes and documents everything
+```
+
+## Tester/Optimizer (Task 10)
+Task sênior do projeto. Responsável por:
+- Executar testes unitários e de integração
+- Otimizar performance do compilador, runtime e código gerado
+- Documentar código inline (comentários simples) + docs .md
+- Atualizar STATE.md das tasks 01-09 com progresso e descobertas
+- Verificar consistência entre interfaces (TokenType, AST, etc)
+Senior task of the project. Responsible for:
+- Running unit and integration tests
+- Optimizing performance of compiler, runtime and generated code
+- Documenting inline code (simple comments) + docs .md
+- Updating STATE.md of tasks 01-09 with progress and findings
+- Checking consistency between interfaces (TokenType, AST, etc)

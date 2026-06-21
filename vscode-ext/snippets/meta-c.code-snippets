@@ -1,0 +1,119 @@
+{
+    "Struct declaration": {
+        "prefix": "struct",
+        "body": [
+            "struct ${1:Name}${2: extends ${3:Base}} {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "Declare a struct"
+    },
+    "Function": {
+        "prefix": "fn",
+        "body": [
+            "fn ${1:name}(${2:params})${3: -> ${4:type}} {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "Declare a function"
+    },
+    "Constructor": {
+        "prefix": "fninit",
+        "body": [
+            "fn ${1:StructName}(${2:params}) {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "Declare a constructor"
+    },
+    "Block declaration": {
+        "prefix": "block",
+        "body": "block ${1:name} = ${2:64}MB",
+        "description": "Declare a memory block"
+    },
+    "Block scope": {
+        "prefix": "blockscope",
+        "body": [
+            "block ${1:name} {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "Block memory scope"
+    },
+    "Interface": {
+        "prefix": "interface",
+        "body": [
+            "interface ${1:Name} {",
+            "\tfn ${2:method}($3)${4: -> $5}",
+            "}"
+        ],
+        "description": "Declare an interface"
+    },
+    "If statement": {
+        "prefix": "if",
+        "body": [
+            "if (${1:condition}) {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "If statement"
+    },
+    "If-else": {
+        "prefix": "ifelse",
+        "body": [
+            "if (${1:condition}) {",
+            "\t${2}",
+            "} else {",
+            "\t${3}",
+            "}"
+        ],
+        "description": "If-else statement"
+    },
+    "While loop": {
+        "prefix": "while",
+        "body": [
+            "while (${1:condition}) {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "While loop"
+    },
+    "For loop": {
+        "prefix": "for",
+        "body": [
+            "for (${1:int i = 0}; ${2:i < 10}; ${3:i++}) {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "For loop"
+    },
+    "Package": {
+        "prefix": "package",
+        "body": "package ${1:NAME}",
+        "description": "Package declaration"
+    },
+    "Using": {
+        "prefix": "using",
+        "body": "using ${1:NAME}",
+        "description": "Import package"
+    },
+    "Alloc inline": {
+        "prefix": "at",
+        "body": "@${1:block_name}",
+        "description": "Inline block allocation"
+    },
+    "Reset": {
+        "prefix": "reset",
+        "body": "${1:block}.reset()",
+        "description": "Reset a block"
+    },
+    "Main function": {
+        "prefix": "main",
+        "body": [
+            "fn main() {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "Main entry point"
+    }
+}

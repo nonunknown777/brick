@@ -1,0 +1,40 @@
+// basic.mc — Minimal Meta-C window example
+// Uses the Window library to create a resizable 800x600 window.
+//
+// Compile:
+//   meta-c basic.mc -o basic.c
+//   gcc -O3 basic.c runtime/libs/window/window_linux.c runtime/block_memory.c -lX11 -lm -o basic
+//   ./basic
+
+using Window
+
+block global = 64MB
+
+fn main() {
+    Window w = Window.create("Meta-C Window", 800, 600, Window.RESIZABLE | Window.VSYNC)
+
+    if w == null {
+        error("Failed to create window")
+    }
+
+    while !w.should_close() {
+        w.poll_events()
+
+        // Process events in queue
+        Event e
+        while w.next_event(e) {
+            if e.type == Event.KEY_DOWN {
+                if e.data_key_keycode == 256 {  // ESC
+                    break
+                }
+            }
+        }
+
+        // Clear to dark blue
+        // (rendering will go here once framebuffer API is added)
+
+        w.swap_buffers()
+    }
+
+    w.destroy()
+}

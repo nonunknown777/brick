@@ -1,0 +1,121 @@
+#ifndef META_C_BLOCK_MEMORY_H
+#define META_C_BLOCK_MEMORY_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct BlockCtx {
+    uint8_t*  data;
+    size_t    capacity;
+    size_t    used;
+    size_t    peak_used;
+    size_t    allocation_count;
+} BlockCtx;
+
+typedef struct {
+    size_t total_size;
+    size_t used_size;
+    size_t free_size;
+    size_t peak_used;
+    size_t allocation_count;
+    float  fragmentation_percent;
+} BlockStats;
+
+// ─── Registry API (optional — requires -DMETA_C_TRACK_BLOCKS) ─
+// ─── API do Registro (opcional — requer -DMETA_C_TRACK_BLOCKS) ─
+#ifdef META_C_TRACK_BLOCKS
+
+#define META_C_BLOCK_NAME_MAX 32
+#define META_C_MAX_BLOCKS 64
+
+typedef struct {
+    char     name[META_C_BLOCK_NAME_MAX];
+    size_t   capacity;
+    size_t   used;
+    size_t   peak_used;
+    size_t   allocation_count;
+} BlockInfo;
+
+#define META_C_SHM_MAGIC 0x4D455441  // "META"
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint32_t version;
+    int32_t  pid;
+    uint32_t block_count;
+    uint64_t timestamp_us;
+} MetaCShmHeader;
+
+void     block_register(BlockCtx* ctx, const char* name);
+void     block_unregister(BlockCtx* ctx);
+BlockCtx* block_find(const char* name);
+size_t   block_snapshot(BlockInfo* out, size_t max_count);
+int      block_shm_export(void);
+
+#else
+// No-op stubs — compiler optimizes these away entirely
+// Stubs no-op — compilador otimiza esses totalmente
+#define META_C_MAX_BLOCKS 1
+#define META_C_BLOCK_NAME_MAX 1
+#define block_register(ctx, name)     ((void)(ctx), (void)(name))
+#define block_unregister(ctx)         ((void)(ctx))
+#define block_find(name)              ((void)(name), (BlockCtx*)NULL)
+#define block_snapshot(out, max)      ((void)(out), (void)(max), (size_t)0)
+#define block_shm_export()            (-1)
+#endif
+
+// ─── Block API ───────────────────────────────────────────────
+// ─── API de Blocos ────────────────────────────────────────────
+
+// Create a new memory block of N megabytes
+// Cria um novo bloco de memoria de N megabytes
+BlockCtx* block_create(size_t megabytes);
+
+// Create a block with custom byte size
+// Cria um bloco com tamanho personalizado em bytes
+BlockCtx* block_create_bytes(size_t bytes);
+
+// Allocate memory from a block (bump allocator)
+// Aloca memoria de um bloco (bump allocator)
+void* block_alloc(BlockCtx* ctx, size_t size);
+
+// Allocate with alignment
+// Aloca com alinhamento
+void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment);
+
+// Reset the block (O(1) — just resets bump pointer)
+// Reseta o bloco (O(1) — apenas reseta o ponteiro bump)
+void block_reset(BlockCtx* ctx);
+
+// Destroy the block and free its memory
+// Destroi o bloco e libera sua memoria
+void block_destroy(BlockCtx* ctx);
+
+// Get block statistics
+// Obtem estatisticas do bloco
+BlockStats block_stats(BlockCtx* ctx);
+
+// Get the default alignment
+// Obtem o alinhamento padrao
+size_t block_alignment(void);
+
+// Freeze all block allocations (spin-wait until thawed)
+// Congela todas as alocacoes de bloco (espera ocupada ate descongelar)
+// Used by hot reload to ensure no allocations during code swap
+// Usado pelo hot reload para garantir nenhuma alocacao durante troca de codigo
+void block_freeze(void);
+
+// Thaw block allocations after hot reload swap
+// Descongela alocacoes de bloco apos troca de hot reload
+void block_thaw(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // META_C_BLOCK_MEMORY_H
+     // META_C_BLOCK_MEMORY_H

@@ -1,0 +1,241 @@
+{
+    "publisher": "meta-c",
+    "name": "meta-c-language",
+    "displayName": "Meta-C Language",
+    "description": "Meta-C language support: syntax highlighting, snippets, LSP, and debugger",
+    "version": "0.2.0",
+    "engines": {
+        "vscode": "^1.80.0"
+    },
+    "categories": [
+        "Programming Languages",
+        "Debuggers"
+    ],
+    "activationEvents": [
+        "onLanguage:meta-c",
+        "onDebug"
+    ],
+    "main": "./out/extension.js",
+    "scripts": {
+        "vscode:prepublish": "npm run compile",
+        "compile": "tsc -p ./",
+        "watch": "tsc -watch -p ./",
+        "lint": "eslint src --ext ts"
+    },
+    "extensionDependencies": [
+        "ms-vscode.cpptools"
+    ],
+    "devDependencies": {
+        "@types/node": "^20.19.43",
+        "@types/vscode": "^1.80.0",
+        "typescript": "^5.3.0"
+    },
+    "contributes": {
+        "languages": [
+            {
+                "id": "meta-c",
+                "aliases": [
+                    "Meta-C",
+                    "meta-c",
+                    "mc"
+                ],
+                "extensions": [
+                    ".mc"
+                ],
+                "configuration": "./language-configuration.json"
+            }
+        ],
+        "grammars": [
+            {
+                "language": "meta-c",
+                "scopeName": "source.mc",
+                "path": "./syntaxes/meta-c.tmLanguage.json"
+            }
+        ],
+        "snippets": [
+            {
+                "language": "meta-c",
+                "path": "./snippets/meta-c.code-snippets"
+            }
+        ],
+        "views": {
+            "debug": [
+                {
+                    "id": "meta-c.memoryView",
+                    "name": "Meta-C Memory",
+                    "type": "webview"
+                }
+            ]
+        },
+        "commands": [
+            {
+                "command": "meta-c.initWorkspace",
+                "title": "Meta-C: Init Workspace (create launch.json + tasks.json)"
+            },
+            {
+                "command": "meta-c.debugProgram",
+                "title": "Meta-C: Debug Program"
+            }
+        ],
+        "semanticTokenScopes": [
+            {
+                "scopes": {
+                    "keyword": [
+                        "keyword.control.mc"
+                    ],
+                    "type": [
+                        "storage.type.mc",
+                        "entity.name.type.struct.mc"
+                    ],
+                    "class": [
+                        "entity.name.type.struct.mc"
+                    ],
+                    "interface": [
+                        "entity.name.type.interface.mc"
+                    ],
+                    "function": [
+                        "entity.name.function.mc"
+                    ],
+                    "method": [
+                        "entity.name.function.method.mc"
+                    ],
+                    "property": [
+                        "variable.other.mc"
+                    ],
+                    "variable": [
+                        "variable.other.mc"
+                    ],
+                    "string": [
+                        "string.quoted.mc"
+                    ],
+                    "number": [
+                        "constant.numeric.mc"
+                    ],
+                    "comment": [
+                        "comment.mc"
+                    ],
+                    "operator": [
+                        "keyword.operator.mc"
+                    ],
+                    "parameter": [
+                        "variable.parameter.mc"
+                    ],
+                    "struct": [
+                        "entity.name.type.struct.mc"
+                    ]
+                }
+            }
+        ],
+        "colorize": true,
+        "configurationDefaults": {
+            "[meta-c]": {
+                "editor.semanticHighlighting.enabled": true
+            }
+        },
+        "debuggers": [
+            {
+                "type": "cppdbg",
+                "label": "Meta-C",
+                "configurationSnippets": [
+                    {
+                        "label": "Meta-C: Debug Compiler",
+                        "description": "Debug the Meta-C compiler compiling the current .mc file",
+                        "body": {
+                            "name": "Debug Compiler (current file)",
+                            "type": "cppdbg",
+                            "request": "launch",
+                            "program": "${workspaceFolder}/build/meta-c",
+                            "args": [
+                                "${file}",
+                                "-o",
+                                "${workspaceFolder}/build/${fileBasenameNoExtension}.c"
+                            ],
+                            "cwd": "${workspaceFolder}",
+                            "MIMode": "gdb",
+                            "setupCommands": [
+                                {
+                                    "description": "Enable pretty-printing for gdb",
+                                    "text": "-enable-pretty-printing",
+                                    "ignoreFailures": true
+                                }
+                            ],
+                            "preLaunchTask": "Build (debug)"
+                        }
+                    },
+                    {
+                        "label": "Meta-C: Debug Program",
+                        "description": "Compile and debug the current .mc file as a binary",
+                        "body": {
+                            "name": "Debug Compiled Program",
+                            "type": "cppdbg",
+                            "request": "launch",
+                            "program": "${workspaceFolder}/build/${fileBasenameNoExtension}",
+                            "args": [],
+                            "cwd": "${workspaceFolder}",
+                            "MIMode": "gdb",
+                            "setupCommands": [
+                                {
+                                    "description": "Enable pretty-printing",
+                                    "text": "-enable-pretty-printing",
+                                    "ignoreFailures": true
+                                },
+                                {
+                                    "description": "Load Meta-C printers",
+                                    "text": "source ${workspaceFolder}/debugger/.gdbinit",
+                                    "ignoreFailures": true
+                                }
+                            ],
+                            "preLaunchTask": "Compile this .mc file"
+                        }
+                    },
+                    {
+                        "label": "Meta-C: Run Program",
+                        "description": "Compile and run the current .mc file (no debugger UI)",
+                        "body": {
+                            "name": "Run Compiled Program",
+                            "type": "cppdbg",
+                            "request": "launch",
+                            "program": "${workspaceFolder}/build/${fileBasenameNoExtension}",
+                            "args": [],
+                            "cwd": "${workspaceFolder}",
+                            "MIMode": "gdb",
+                            "preLaunchTask": "Compile this .mc file (release)"
+                        }
+                    }
+                ],
+                "configurationAttributes": {
+                    "launch": {
+                        "required": [
+                            "program"
+                        ],
+                        "properties": {
+                            "program": {
+                                "type": "string",
+                                "description": "Path to the compiled binary"
+                            },
+                            "args": {
+                                "type": "array",
+                                "description": "Command line arguments to pass to the program"
+                            },
+                            "cwd": {
+                                "type": "string",
+                                "description": "Working directory for the debugged program"
+                            },
+                            "MIMode": {
+                                "type": "string",
+                                "enum": [
+                                    "gdb",
+                                    "lldb"
+                                ],
+                                "description": "Debugger backend (gdb recommended)"
+                            }
+                        }
+                    }
+                }
+            }
+        ]
+    },
+    "dependencies": {
+        "vscode-languageclient": "^10.0.0"
+    }
+}

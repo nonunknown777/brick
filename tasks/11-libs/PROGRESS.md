@@ -1,0 +1,37 @@
+# Progress - Official Libraries
+# Progresso - Bibliotecas Oficiais
+
+- [x] Define window.h public API
+- [x] Define API pública window.h
+- [x] Meta-C binding definition (using Window)
+- [x] Definição de binding Meta-C (using Window)
+- [x] Linux X11 backend (create, poll, swap, destroy)
+- [x] Backend Linux X11 (create, poll, swap, destroy)
+- [ ] Windows Win32 backend (create, poll, swap, destroy) — untested on Linux
+- [ ] Backend Windows Win32 (create, poll, swap, destroy) — não testado no Linux
+- [x] Block allocator integration (event queue + struct allocation)
+- [x] Integração com alocador de blocos (fila de eventos + alocação de struct)
+- [x] Hot reload support (function pointer table + .so build)
+- [x] Suporte a hot reload (tabela de ponteiros de função + build .so)
+- [x] SCons build integration (auto-detect OS + libs)
+- [x] Integração de build SCons (detecção automática de SO + libs)
+- [x] Example .mc (basic window)
+- [x] Exemplo .mc (janela básica)
+- [ ] Example .mc (fullscreen + input)
+- [ ] Exemplo .mc (tela cheia + input)
+- [x] Test suite for Window library (X11) — 15 tests
+- [x] Suite de testes para biblioteca Window (X11) — 15 testes
+- [x] Test suite for Window HR — 3 tests
+- [x] Suite de testes para Window HR — 3 testes
+- [ ] Input library
+- [ ] Biblioteca Input
+- [ ] Audio library
+- [ ] Biblioteca Audio
+- [ ] File I/O library
+- [ ] Biblioteca File I/O
+- [ ] Networking library
+- [ ] Biblioteca Networking
+- [ ] Math library
+- [ ] Biblioteca Math
+- [ ] Tests for all libraries
+- [ ] Testes para todas as bibliotecas

@@ -1,0 +1,35 @@
+package HELLO
+
+using IO
+
+block global = 64MB
+block temp = 8MB
+block test = 5KB
+
+
+struct Greeter {
+    String message
+
+    fn Greeter(String msg) {
+        message = msg
+    }
+
+    fn greet() {
+        print(message)
+    }
+}
+
+fn main() {
+    print("Hello from Meta-C!")
+    print(42)
+    print(3.14)
+    print(true)
+
+    Greeter g = Greeter("Hello World!") @temp
+    g.greet()
+
+    print("done with {0} blocks", 2)
+
+    temp.reset()
+    global.reset()
+}

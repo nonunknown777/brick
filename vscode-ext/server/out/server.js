@@ -1,0 +1,731 @@
+"use strict";
+Object.defineProperty(exports, "__esModule", { value: true });
+const node_1 = require("vscode-languageserver/node");
+const vscode_languageserver_textdocument_1 = require("vscode-languageserver-textdocument");
+const compilerService_1 = require("./compilerService");
+const fs_1 = require("fs");
+const languageService_1 = require("./languageService");
+const connection = (0, node_1.createConnection)();
+const documents = new node_1.TextDocuments(vscode_languageserver_textdocument_1.TextDocument);
+const compilerResults = new Map();
+const scanCache = new Map();
+const tokenTypes = [
+    'keyword', 'type', 'class', 'interface', 'function', 'method',
+    'property', 'variable', 'string', 'number', 'comment', 'operator',
+    'parameter', 'struct', 'enum',
+];
+const tokenModifiers = ['declaration', 'definition', 'readonly', 'static', 'deprecated', 'abstract'];
+const legend = {
+    tokenTypes: tokenTypes,
+    tokenModifiers: tokenModifiers,
+};
+const typeKeywordSet = new Set(['int', 'float', 'bool', 'char', 'String', 'void']);
+const keywordSet = new Set([
+    'package', 'using', 'private', 'public',
+    'struct', 'extends', 'interface', 'fn', 'return',
+    'block', 'reset',
+    'if', 'else', 'while', 'for', 'error',
+    'null', 'true', 'false',
+]);
+const keywordCompletions = [
+    { label: 'package', kind: node_1.CompletionItemKind.Keyword, detail: 'package declaration', insertText: 'package ', insertTextFormat: 1 },
+    { label: 'using', kind: node_1.CompletionItemKind.Keyword, detail: 'import package', insertText: 'using ', insertTextFormat: 1 },
+    { label: 'private', kind: node_1.CompletionItemKind.Keyword, detail: 'private visibility' },
+    { label: 'public', kind: node_1.CompletionItemKind.Keyword, detail: 'public visibility' },
+    { label: 'struct', kind: node_1.CompletionItemKind.Keyword, detail: 'struct declaration' },
+    { label: 'extends', kind: node_1.CompletionItemKind.Keyword, detail: 'inherit from struct' },
+    { label: 'interface', kind: node_1.CompletionItemKind.Keyword, detail: 'interface declaration' },
+    { label: 'fn', kind: node_1.CompletionItemKind.Keyword, detail: 'function declaration' },
+    { label: 'return', kind: node_1.CompletionItemKind.Keyword, detail: 'return from function' },
+    { label: 'block', kind: node_1.CompletionItemKind.Keyword, detail: 'memory block declaration' },
+    { label: 'reset', kind: node_1.CompletionItemKind.Keyword, detail: 'reset memory block' },
+    { label: 'if', kind: node_1.CompletionItemKind.Keyword, detail: 'if condition { }' },
+    { label: 'else', kind: node_1.CompletionItemKind.Keyword, detail: 'else { }' },
+    { label: 'while', kind: node_1.CompletionItemKind.Keyword, detail: 'while condition { }' },
+    { label: 'for', kind: node_1.CompletionItemKind.Keyword, detail: 'for init; cond; inc { }' },
+    { label: 'error', kind: node_1.CompletionItemKind.Keyword, detail: 'panic with message' },
+    { label: 'int', kind: node_1.CompletionItemKind.Keyword, detail: '64-bit integer type' },
+    { label: 'float', kind: node_1.CompletionItemKind.Keyword, detail: '64-bit float type' },
+    { label: 'bool', kind: node_1.CompletionItemKind.Keyword, detail: 'boolean type' },
+    { label: 'char', kind: node_1.CompletionItemKind.Keyword, detail: 'character type' },
+    { label: 'String', kind: node_1.CompletionItemKind.Keyword, detail: 'dynamic string type' },
+    { label: 'void', kind: node_1.CompletionItemKind.Keyword, detail: 'void type' },
+    { label: 'null', kind: node_1.CompletionItemKind.Constant, detail: 'null literal' },
+    { label: 'true', kind: node_1.CompletionItemKind.Constant, detail: 'boolean true' },
+    { label: 'false', kind: node_1.CompletionItemKind.Constant, detail: 'boolean false' },
+];
+const snippetCompletions = [
+    { label: 'struct', kind: node_1.CompletionItemKind.Snippet, detail: 'struct declaration', insertText: 'struct $1 {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'fn', kind: node_1.CompletionItemKind.Snippet, detail: 'function declaration', insertText: 'fn $1($2)$3 {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'if', kind: node_1.CompletionItemKind.Snippet, detail: 'if statement', insertText: 'if $1 {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'while', kind: node_1.CompletionItemKind.Snippet, detail: 'while loop', insertText: 'while $1 {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'for', kind: node_1.CompletionItemKind.Snippet, detail: 'for loop', insertText: 'for $1 $2 = $3; $4; $5 {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'block', kind: node_1.CompletionItemKind.Snippet, detail: 'block declaration', insertText: 'block $1 = ${2:64}MB', insertTextFormat: 2 },
+    { label: 'block-scope', kind: node_1.CompletionItemKind.Snippet, detail: 'block scope', insertText: 'block $1 {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'interface', kind: node_1.CompletionItemKind.Snippet, detail: 'interface declaration', insertText: 'interface $1 {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'package', kind: node_1.CompletionItemKind.Snippet, detail: 'package declaration', insertText: 'package $1', insertTextFormat: 2 },
+    { label: 'using', kind: node_1.CompletionItemKind.Snippet, detail: 'using declaration', insertText: 'using $1', insertTextFormat: 2 },
+    { label: 'main', kind: node_1.CompletionItemKind.Snippet, detail: 'main function', insertText: 'fn main() {\n\t$0\n}', insertTextFormat: 2 },
+];
+function getFilePath(uri) {
+    return uri.replace(/^file:\/\//, '');
+}
+function isMetaCFile(uri) {
+    return uri.endsWith('.mc') || uri.includes('file:');
+}
+function runFastScanner(doc) {
+    const cached = scanCache.get(doc.uri);
+    if (cached)
+        return cached;
+    const result = (0, languageService_1.scanDocument)(doc.getText());
+    scanCache.set(doc.uri, result);
+    return result;
+}
+function invalidateCache(uri) {
+    scanCache.delete(uri);
+    compilerResults.delete(uri);
+}
+function runCompilerOnDoc(doc) {
+    const filePath = getFilePath(doc.uri);
+    if (!(0, fs_1.existsSync)(filePath)) {
+        const result = {
+            success: false,
+            output: { tokens: [], symbols: [], errors: [{ message: `File not found: ${filePath}`, line: 0, col: 0, file: filePath, severity: 1 }] },
+            raw: '',
+        };
+        compilerResults.set(doc.uri, result);
+        return result;
+    }
+    const result = (0, compilerService_1.runCompiler)(filePath);
+    compilerResults.set(doc.uri, result);
+    return result;
+}
+function computeDiagnostics(doc) {
+    const diagnostics = [];
+    const fastResult = runFastScanner(doc);
+    // Quick syntax-level errors from fast scanner
+    for (const err of fastResult.errors) {
+        diagnostics.push({
+            severity: node_1.DiagnosticSeverity.Error,
+            range: node_1.Range.create(Math.max(0, err.line - 1), Math.max(0, err.col - 1), Math.max(0, err.line - 1), err.col),
+            message: err.message,
+            source: 'meta-c',
+        });
+    }
+    // Merge compiler errors (more accurate but slower)
+    const compilerResult = compilerResults.get(doc.uri);
+    if (compilerResult) {
+        for (const err of compilerResult.output.errors) {
+            const severity = err.severity === 1 ? node_1.DiagnosticSeverity.Error
+                : err.severity === 2 ? node_1.DiagnosticSeverity.Warning
+                    : node_1.DiagnosticSeverity.Information;
+            diagnostics.push({
+                severity,
+                range: node_1.Range.create(Math.max(0, err.line - 1), Math.max(0, err.col - 1), Math.max(0, err.line - 1), err.col),
+                message: err.message,
+                source: 'meta-c',
+            });
+        }
+    }
+    return diagnostics;
+}
+function validateDocument(doc, useCompiler = false) {
+    invalidateCache(doc.uri);
+    runFastScanner(doc);
+    if (useCompiler) {
+        runCompilerOnDoc(doc);
+    }
+    const diagnostics = computeDiagnostics(doc);
+    connection.sendDiagnostics({ uri: doc.uri, diagnostics });
+}
+// Debounce compiler calls
+let compileTimer = null;
+const DEBOUNCE_MS = 800;
+function debouncedCompilerRun(doc) {
+    if (compileTimer)
+        clearTimeout(compileTimer);
+    compileTimer = setTimeout(() => {
+        compileTimer = null;
+        runCompilerOnDoc(doc);
+        const diagnostics = computeDiagnostics(doc);
+        connection.sendDiagnostics({ uri: doc.uri, diagnostics });
+    }, DEBOUNCE_MS);
+}
+connection.onInitialize((params) => {
+    return {
+        capabilities: {
+            textDocumentSync: {
+                openClose: true,
+                change: 2,
+            },
+            completionProvider: {
+                triggerCharacters: ['.', '@', ' ', ':'],
+                completionItem: {
+                    labelDetailsSupport: true,
+                },
+            },
+            hoverProvider: true,
+            definitionProvider: true,
+            signatureHelpProvider: {
+                triggerCharacters: ['(', ','],
+            },
+            documentSymbolProvider: true,
+            semanticTokensProvider: {
+                legend,
+                full: true,
+                range: false,
+            },
+        },
+    };
+});
+// ─── Document Sync ────────────────────────────────────────
+documents.onDidOpen((event) => {
+    validateDocument(event.document, true);
+});
+documents.onDidChangeContent((event) => {
+    invalidateCache(event.document.uri);
+    runFastScanner(event.document);
+    debouncedCompilerRun(event.document);
+});
+documents.onDidClose((event) => {
+    scanCache.delete(event.document.uri);
+    compilerResults.delete(event.document.uri);
+});
+// ─── Completions ──────────────────────────────────────────
+connection.onCompletion((params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc)
+        return [];
+    const text = doc.getText();
+    const line = params.position.line;
+    const col = params.position.character;
+    const scan = runFastScanner(doc);
+    const context = (0, languageService_1.getCompletionContext)(text, line, col, params.context?.triggerCharacter);
+    const items = [];
+    // Context-aware completions
+    if (context.isAfterDot) {
+        const linePrefix = context.linePrefix;
+        const objMatch = linePrefix.match(/\.\s*([a-zA-Z_][a-zA-Z0-9_]*)?$/);
+        const objWord = linePrefix.match(/([a-zA-Z_][a-zA-Z0-9_]*)\.\s*[a-zA-Z0-9_]*$/);
+        if (objWord) {
+            const objName = objWord[1];
+            // Check if it's a block (for .reset())
+            if (scan.blocks.find(b => b.name === objName)) {
+                items.push({
+                    label: 'reset',
+                    kind: node_1.CompletionItemKind.Method,
+                    detail: '() → void',
+                    insertText: 'reset()',
+                    insertTextFormat: 1,
+                });
+            }
+            // Check if it's a struct name or variable of struct type
+            const structType = scan.structs.get(objName);
+            if (structType) {
+                for (const f of structType.fields) {
+                    items.push({ label: f.name, kind: node_1.CompletionItemKind.Field, detail: `${f.type}` });
+                }
+                for (const m of structType.methods) {
+                    const params = m.params.join(', ');
+                    items.push({ label: m.name, kind: node_1.CompletionItemKind.Method, detail: `(${params}) → ${m.return_type}` });
+                }
+            }
+            else {
+                // Variable of struct type
+                const varSym = scan.symbols.find(s => s.name === objName && s.type_name && scan.structs.has(s.type_name));
+                if (varSym) {
+                    const st = scan.structs.get(varSym.type_name);
+                    if (st) {
+                        for (const f of st.fields) {
+                            items.push({ label: f.name, kind: node_1.CompletionItemKind.Field, detail: `${f.type}` });
+                        }
+                        for (const m of st.methods) {
+                            const params = m.params.join(', ');
+                            items.push({ label: m.name, kind: node_1.CompletionItemKind.Method, detail: `(${params}) → ${m.return_type}` });
+                        }
+                    }
+                }
+            }
+        }
+        return items;
+    }
+    if (context.isAfterAt) {
+        for (const b of scan.blocks) {
+            items.push({ label: b.name, kind: node_1.CompletionItemKind.Struct, detail: `memory block` });
+        }
+        return items;
+    }
+    if (context.isAfterKeyword) {
+        const kw = context.isAfterKeyword;
+        if (kw === 'struct' || kw === 'interface') {
+            items.push({ label: 'MyName', kind: node_1.CompletionItemKind.Class, detail: 'PascalCase name' });
+            return items;
+        }
+        if (kw === 'extends') {
+            for (const [, s] of scan.structs) {
+                items.push({ label: s.name, kind: node_1.CompletionItemKind.Class, detail: 'struct' });
+            }
+            return items;
+        }
+        if (kw === 'using') {
+            items.push({ label: 'IO', kind: node_1.CompletionItemKind.Module, detail: 'Standard I/O package (print)' });
+            return items;
+        }
+        if (kw === 'block') {
+            items.push({ label: 'name', kind: node_1.CompletionItemKind.Variable, detail: 'block name = SIZE UNIT (e.g. 64MB)' });
+            return items;
+        }
+        if (kw === 'private' || kw === 'public') {
+            for (const t of ['fn', 'int', 'float', 'bool', 'char', 'String', 'void']) {
+                items.push({ label: t, kind: node_1.CompletionItemKind.Keyword, detail: `${kw} ${t}` });
+            }
+            return items;
+        }
+        if (kw === 'package') {
+            items.push({ label: 'PACKAGE_NAME', kind: node_1.CompletionItemKind.Module, detail: 'package name in UPPER case' });
+            return items;
+        }
+    }
+    // Default: keywords + snippets + document symbols
+    for (const kw of keywordCompletions) {
+        if (!context.currentWord || kw.label.startsWith(context.currentWord) || context.currentWord.startsWith(kw.label)) {
+            items.push(kw);
+        }
+    }
+    for (const snip of snippetCompletions) {
+        if (!context.currentWord || snip.label.startsWith(context.currentWord) || context.currentWord.startsWith(snip.label)) {
+            items.push(snip);
+        }
+    }
+    // Add user-defined symbols
+    for (const sym of scan.symbols) {
+        let kind = node_1.CompletionItemKind.Reference;
+        switch (sym.kind) {
+            case 'struct':
+                kind = node_1.CompletionItemKind.Class;
+                break;
+            case 'interface':
+                kind = node_1.CompletionItemKind.Interface;
+                break;
+            case 'function':
+            case 'constructor':
+                kind = node_1.CompletionItemKind.Function;
+                break;
+            case 'field':
+                kind = node_1.CompletionItemKind.Field;
+                break;
+            case 'variable':
+                kind = node_1.CompletionItemKind.Variable;
+                break;
+            case 'param':
+                kind = node_1.CompletionItemKind.Variable;
+                break;
+            case 'block':
+                kind = node_1.CompletionItemKind.Struct;
+                break;
+            case 'package':
+                kind = node_1.CompletionItemKind.Module;
+                break;
+        }
+        const exists = items.find(i => i.label === sym.name);
+        if (!exists) {
+            items.push({
+                label: sym.name,
+                kind,
+                detail: `${sym.kind}${sym.type_name ? `: ${sym.type_name}` : ''}`,
+            });
+        }
+    }
+    return items;
+});
+connection.onCompletionResolve((item) => {
+    return item;
+});
+// ─── Hover ────────────────────────────────────────────────
+connection.onHover((params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc)
+        return null;
+    const text = doc.getText();
+    const word = (0, languageService_1.getWordAtPosition)(text, params.position.line, params.position.character);
+    if (!word)
+        return null;
+    // Check keyword docs
+    const kwDoc = (0, languageService_1.getKeywordDoc)(word);
+    if (kwDoc) {
+        return {
+            contents: {
+                kind: 'markdown',
+                value: `**\`${word}\`**\n\n${kwDoc}`,
+            },
+        };
+    }
+    // Check scanned symbols
+    const scan = runFastScanner(doc);
+    const sym = scan.symbols.find(s => s.name === word);
+    if (sym) {
+        const parentInfo = sym.parent ? ` — member of \`${sym.parent}\`` : '';
+        return {
+            contents: {
+                kind: 'markdown',
+                value: `**\`${sym.name}\`**\n\n_${sym.kind}_${sym.type_name ? ` — \`${sym.type_name}\`` : ''}${parentInfo}\n\nLine ${sym.line}:${sym.col}`,
+            },
+        };
+    }
+    // Check structs
+    const structObj = scan.structs.get(word);
+    if (structObj) {
+        let md = `**\`${structObj.name}\`** _(struct)_\n\n`;
+        if (structObj.fields.length > 0) {
+            md += '**Fields:**\n';
+            for (const f of structObj.fields) {
+                md += `- \`${f.name}: ${f.type}\`\n`;
+            }
+            md += '\n';
+        }
+        if (structObj.methods.length > 0) {
+            md += '**Methods:**\n';
+            for (const m of structObj.methods) {
+                md += `- \`${m.name}(${m.params.join(', ')}) → ${m.return_type}\`\n`;
+            }
+        }
+        return { contents: { kind: 'markdown', value: md } };
+    }
+    return null;
+});
+// ─── Go to Definition ─────────────────────────────────────
+connection.onDefinition((params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc)
+        return null;
+    const text = doc.getText();
+    const word = (0, languageService_1.getWordAtPosition)(text, params.position.line, params.position.character);
+    if (!word)
+        return null;
+    const scan = runFastScanner(doc);
+    const sym = scan.symbols.find(s => s.name === word);
+    if (sym && sym.line > 0) {
+        return {
+            uri: params.textDocument.uri,
+            range: node_1.Range.create(Math.max(0, sym.line - 1), Math.max(0, sym.col - 1), Math.max(0, sym.line - 1), sym.col + word.length - 1),
+        };
+    }
+    return null;
+});
+// ─── Signature Help ───────────────────────────────────────
+connection.onSignatureHelp((sigParams) => {
+    const doc = documents.get(sigParams.textDocument.uri);
+    if (!doc)
+        return null;
+    const text = doc.getText();
+    const lines = text.split('\n');
+    const line = sigParams.position.line;
+    const col = sigParams.position.character;
+    if (line >= lines.length)
+        return null;
+    const currentLine = lines[line];
+    const prefix = currentLine.substring(0, col);
+    // Find the function name before '('
+    const callMatch = prefix.match(/([a-zA-Z_][a-zA-Z0-9_]*)\s*\([^)]*$/);
+    if (!callMatch)
+        return null;
+    const funcName = callMatch[1];
+    const scan = runFastScanner(doc);
+    // Look for the function in symbols
+    let fnParams = [];
+    let returnType = 'void';
+    let found = false;
+    // Check struct methods
+    for (const [, st] of scan.structs) {
+        const method = st.methods.find(m => m.name === funcName);
+        if (method) {
+            fnParams = method.params;
+            returnType = method.return_type;
+            found = true;
+            break;
+        }
+    }
+    // Check top-level function symbols
+    if (!found) {
+        const funcSym = scan.symbols.find(s => s.name === funcName && (s.kind === 'function' || s.kind === 'constructor'));
+        if (funcSym) {
+            const funcLine = (0, languageService_1.getCurrentLine)(text, funcSym.line - 1);
+            const paramMatch = funcLine.match(/\(([^)]*)\)/);
+            if (paramMatch) {
+                const raw = paramMatch[1];
+                if (raw.trim()) {
+                    fnParams = raw.split(',').map(p => {
+                        const trimmed = p.trim();
+                        const parts = trimmed.split(/\s+/);
+                        return parts.length >= 2 ? parts[parts.length - 1] : parts[0];
+                    });
+                }
+            }
+            found = true;
+        }
+    }
+    if (!found) {
+        if (funcName === 'print') {
+            return {
+                signatures: [{
+                        label: 'print(...values)',
+                        documentation: 'Prints values to stdout with newline. Supports format strings: `print("{0} = {1}", x, y)`',
+                        parameters: [
+                            node_1.ParameterInformation.create('values', 'Values or format string with positional args'),
+                        ],
+                    }],
+                activeSignature: 0,
+                activeParameter: 0,
+            };
+        }
+        if (funcName === 'error') {
+            return {
+                signatures: [{
+                        label: 'error(String message)',
+                        documentation: 'Prints message and aborts execution (panic).',
+                        parameters: [
+                            node_1.ParameterInformation.create('message', 'Error message string'),
+                        ],
+                    }],
+                activeSignature: 0,
+                activeParameter: 0,
+            };
+        }
+        if (funcName === 'reset') {
+            return {
+                signatures: [{
+                        label: 'block.reset()',
+                        documentation: 'Resets (frees all allocations in) a memory block.',
+                        parameters: [],
+                    }],
+                activeSignature: 0,
+                activeParameter: 0,
+            };
+        }
+        return null;
+    }
+    // Count commas in current call to determine active parameter
+    const callText = prefix.substring(prefix.lastIndexOf('('));
+    let commaCount = 0;
+    let parenDepth = 0;
+    for (let i = 0; i < callText.length; i++) {
+        if (callText[i] === '(')
+            parenDepth++;
+        else if (callText[i] === ')')
+            parenDepth--;
+        else if (callText[i] === ',' && parenDepth === 1)
+            commaCount++;
+    }
+    const sigInfo = {
+        label: `${funcName}(${fnParams.join(', ')}) → ${returnType}`,
+        parameters: fnParams.map(p => node_1.ParameterInformation.create(p)),
+    };
+    return {
+        signatures: [sigInfo],
+        activeSignature: 0,
+        activeParameter: Math.min(commaCount, Math.max(0, fnParams.length - 1)),
+    };
+});
+// ─── Document Symbols ─────────────────────────────────────
+connection.onDocumentSymbol((params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc)
+        return [];
+    const scan = runFastScanner(doc);
+    const symbols = [];
+    // Add package
+    if (scan.packageName) {
+        symbols.push({
+            name: scan.packageName,
+            kind: node_1.SymbolKind.Module,
+            range: node_1.Range.create(0, 0, 0, scan.packageName.length),
+            selectionRange: node_1.Range.create(0, 0, 0, scan.packageName.length),
+            detail: 'package',
+        });
+    }
+    // Add blocks
+    for (const b of scan.blocks) {
+        symbols.push({
+            name: b.name,
+            kind: node_1.SymbolKind.Struct,
+            range: node_1.Range.create(b.line - 1, 0, b.line - 1, b.name.length),
+            selectionRange: node_1.Range.create(b.line - 1, 0, b.line - 1, b.name.length),
+            detail: 'memory block',
+        });
+    }
+    // Add structs with children
+    for (const [, st] of scan.structs) {
+        const children = [];
+        for (const f of st.fields) {
+            children.push({
+                name: f.name,
+                kind: node_1.SymbolKind.Field,
+                range: node_1.Range.create(f.line - 1, 0, f.line - 1, f.name.length),
+                selectionRange: node_1.Range.create(f.line - 1, 0, f.line - 1, f.name.length),
+                detail: f.type,
+            });
+        }
+        for (const m of st.methods) {
+            const isCtor = m.name === st.name;
+            children.push({
+                name: m.name,
+                kind: isCtor ? node_1.SymbolKind.Constructor : node_1.SymbolKind.Method,
+                range: node_1.Range.create(m.line - 1, 0, m.line - 1, m.name.length),
+                selectionRange: node_1.Range.create(m.line - 1, 0, m.line - 1, m.name.length),
+                detail: `${m.return_type} (${m.params.join(', ')})`,
+            });
+        }
+        symbols.push({
+            name: st.name,
+            kind: node_1.SymbolKind.Class,
+            range: node_1.Range.create(st.line - 1, 0, st.line - 1, st.name.length),
+            selectionRange: node_1.Range.create(st.line - 1, 0, st.line - 1, st.name.length),
+            children,
+        });
+    }
+    // Add top-level functions
+    const topFunctions = scan.symbols.filter(s => (s.kind === 'function' || s.kind === 'constructor') && s.line > 0 && !s.parent);
+    for (const f of topFunctions) {
+        symbols.push({
+            name: f.name,
+            kind: f.kind === 'constructor' ? node_1.SymbolKind.Constructor : node_1.SymbolKind.Function,
+            range: node_1.Range.create(f.line - 1, 0, f.line - 1, f.name.length),
+            selectionRange: node_1.Range.create(f.line - 1, 0, f.line - 1, f.name.length),
+            detail: f.type_name,
+        });
+    }
+    return symbols;
+});
+// ─── Semantic Tokens ──────────────────────────────────────
+connection.languages.semanticTokens.on((params) => {
+    const doc = documents.get(params.textDocument.uri);
+    if (!doc)
+        return { data: [] };
+    const text = doc.getText();
+    const scan = runFastScanner(doc);
+    const data = [];
+    // Build a set of symbol names for quick lookup
+    const symbolNames = new Set(scan.symbols.map(s => s.name));
+    const structNames = new Set(scan.structs.keys());
+    const blockNames = new Set(scan.blocks.map(b => b.name));
+    const typeNames = new Set([...structNames, ...typeKeywordSet]);
+    let prevLine = 0;
+    let prevCol = 0;
+    function pushToken(line, col, length, typeIdx, modIdx = 0) {
+        const deltaLine = line - prevLine;
+        const deltaCol = deltaLine === 0 ? col - prevCol : col;
+        data.push(deltaLine, deltaCol, length, typeIdx, modIdx);
+        prevLine = line;
+        prevCol = deltaLine === 0 ? col : col;
+    }
+    for (const tok of scan.tokens) {
+        const line = tok.line - 1;
+        const col = tok.col - 1;
+        const len = tok.lexeme.length;
+        switch (tok.type) {
+            case 'COMMENT':
+                pushToken(line, col, len, 10);
+                break;
+            case 'STRING':
+            case 'CHAR':
+                pushToken(line, col, len, 8);
+                break;
+            case 'INT':
+            case 'FLOAT':
+                pushToken(line, col, len, 9);
+                break;
+            case 'PACKAGE':
+            case 'USING':
+            case 'PRIVATE':
+            case 'PUBLIC':
+            case 'STRUCT':
+            case 'EXTENDS':
+            case 'INTERFACE':
+            case 'FN':
+            case 'RETURN':
+            case 'IF':
+            case 'ELSE':
+            case 'WHILE':
+            case 'FOR':
+            case 'BLOCK':
+            case 'RESET':
+            case 'ERROR':
+                pushToken(line, col, len, 0);
+                break;
+            case 'TRUE':
+            case 'FALSE':
+            case 'NULL':
+                pushToken(line, col, len, 20);
+                break;
+            case 'IDENTIFIER': {
+                if (typeNames.has(tok.lexeme)) {
+                    pushToken(line, col, len, 1, 1);
+                }
+                else if (blockNames.has(tok.lexeme)) {
+                    pushToken(line, col, len, 13);
+                }
+                else if (symbolNames.has(tok.lexeme)) {
+                    const sym = scan.symbols.find(s => s.name === tok.lexeme);
+                    if (sym) {
+                        switch (sym.kind) {
+                            case 'function':
+                            case 'constructor':
+                                pushToken(line, col, len, 3, 1);
+                                break;
+                            case 'field':
+                                pushToken(line, col, len, 6);
+                                break;
+                            case 'param':
+                                pushToken(line, col, len, 12);
+                                break;
+                            case 'variable':
+                                pushToken(line, col, len, 7);
+                                break;
+                            default:
+                                pushToken(line, col, len, 7);
+                        }
+                    }
+                    else {
+                        pushToken(line, col, len, 7);
+                    }
+                }
+                else if (/^[A-Z]/.test(tok.lexeme) && tok.lexeme !== 'IO') {
+                    pushToken(line, col, len, 2, 1);
+                }
+                else {
+                    pushToken(line, col, len, 7);
+                }
+                break;
+            }
+            case 'AT':
+                pushToken(line, col, len, 11);
+                break;
+            case 'ARROW':
+            case 'ASSIGN':
+            case 'PLUS_ASSIGN':
+            case 'MINUS_ASSIGN':
+            case 'EQ':
+            case 'NEQ':
+            case 'LT':
+            case 'GT':
+            case 'LE':
+            case 'GE':
+            case 'AND':
+            case 'OR':
+            case 'NOT':
+            case 'PLUS':
+            case 'MINUS':
+            case 'MUL':
+            case 'DIV':
+                pushToken(line, col, len, 11);
+                break;
+            default:
+                break;
+        }
+    }
+    return { data };
+});
+// ─── Startup ──────────────────────────────────────────────
+documents.listen(connection);
+connection.listen();
+//# sourceMappingURL=server.js.map

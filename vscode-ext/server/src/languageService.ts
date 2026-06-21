@@ -1,0 +1,622 @@
+import { TextDocument } from 'vscode-languageserver-textdocument';
+
+export interface MCToken {
+    type: string;
+    lexeme: string;
+    line: number;
+    col: number;
+}
+
+export interface MCSymbol {
+    name: string;
+    kind: string;
+    type_name: string;
+    line: number;
+    col: number;
+    parent?: string;
+}
+
+export interface MCBlock {
+    name: string;
+    line: number;
+}
+
+export interface MCStruct {
+    name: string;
+    fields: { name: string; type: string; line: number }[];
+    methods: { name: string; params: string[]; return_type: string; line: number }[];
+    line: number;
+    col: number;
+}
+
+export interface ScanResult {
+    tokens: MCToken[];
+    symbols: MCSymbol[];
+    blocks: MCBlock[];
+    structs: Map<string, MCStruct>;
+    errors: { message: string; line: number; col: number }[];
+    packageName: string;
+    usings: string[];
+}
+
+const KEYWORDS = new Set([
+    'package', 'using', 'private', 'public',
+    'struct', 'extends', 'interface', 'fn', 'return',
+    'block', 'reset',
+    'if', 'else', 'while', 'for', 'error',
+    'int', 'float', 'bool', 'char', 'String', 'void',
+    'null', 'true', 'false',
+]);
+
+const KEYWORD_DOCS: Record<string, string> = {
+    package: 'Declares a package namespace. Example: `package SPRITES`',
+    using: 'Imports a package. Example: `using IO`',
+    private: 'Makes the following declaration visible only within the package.',
+    public: 'Makes the following declaration visible to all packages.',
+    struct: 'Declares a struct (class-like type with fields and methods).',
+    extends: 'Inherits from another struct. Example: `struct Player extends Entity`',
+    interface: 'Declares an interface with method signatures.',
+    fn: 'Declares a function or method.',
+    return: 'Returns a value from a function.',
+    block: 'Declares or scopes a memory block. Example: `block game = 64MB`',
+    reset: 'Frees all allocations in a memory block. Example: `game.reset()`',
+    if: 'Conditional branch. Parentheses are optional.',
+    else: 'Alternative branch for if statements.',
+    while: 'Loop while condition is true. Parentheses are optional.',
+    for: 'C-style for loop: `for int i = 0; i < 10; i++ { }`',
+    error: 'Panics with a message and aborts execution.',
+    int: '64-bit signed integer type.',
+    float: '64-bit floating point type.',
+    bool: 'Boolean type (`true` or `false`).',
+    char: '8-bit character type.',
+    String: 'Dynamic string type (heap-allocated in a block).',
+    void: 'No return type.',
+    null: 'Null pointer literal, assignable to any type.',
+    true: 'Boolean true literal.',
+    false: 'Boolean false literal.',
+};
+
+const BUILTIN_TYPES = new Set(['int', 'float', 'bool', 'char', 'String', 'void']);
+
+export function scanDocument(text: string): ScanResult {
+    const tokens: MCToken[] = [];
+    const symbols: MCSymbol[] = [];
+    const blocks: MCBlock[] = [];
+    const structs = new Map<string, MCStruct>();
+    const errors: { message: string; line: number; col: number }[] = [];
+    const usings: string[] = [];
+    let packageName = '';
+
+    const lines = text.split('\n');
+    let inBlockComment = false;
+
+    // First pass: collect structs with their bodies for context
+    const structBodies = new Map<string, { startLine: number; endLine: number }>();
+
+    // State tracking
+    let braceDepth = 0;
+    let structBraceDepth = 0;
+    let inStructBody = false;
+
+    for (let lineIdx = 0; lineIdx < lines.length; lineIdx++) {
+        let line = lines[lineIdx];
+        let col = 0;
+        const len = line.length;
+
+        while (col < len) {
+            const ch = line[col];
+
+            // Skip whitespace
+            if (ch === ' ' || ch === '\t') { col++; continue; }
+
+            // Line comment
+            if (ch === '/' && col + 1 < len && line[col + 1] === '/') {
+                tokens.push({ type: 'COMMENT', lexeme: line.slice(col), line: lineIdx + 1, col: col + 1 });
+                break;
+            }
+
+            // Strings
+            if (ch === '"') {
+                const start = col;
+                col++;
+                while (col < len && line[col] !== '"') {
+                    if (line[col] === '\\') col++;
+                    col++;
+                }
+                if (col < len && line[col] === '"') col++;
+                const lexeme = line.slice(start, col);
+                tokens.push({ type: 'STRING', lexeme, line: lineIdx + 1, col: start + 1 });
+                continue;
+            }
+
+            // Char literals
+            if (ch === '\'') {
+                const start = col;
+                col++;
+                if (col < len && line[col] === '\\') col++;
+                col++;
+                if (col < len && line[col] === '\'') col++;
+                const lexeme = line.slice(start, col);
+                tokens.push({ type: 'CHAR', lexeme, line: lineIdx + 1, col: start + 1 });
+                continue;
+            }
+
+            // Numbers (int & float)
+            if (ch >= '0' && ch <= '9') {
+                const start = col;
+                let isFloat = false;
+                while (col < len && (line[col] >= '0' && line[col] <= '9')) col++;
+                if (col < len && line[col] === '.') {
+                    isFloat = true;
+                    col++;
+                    while (col < len && (line[col] >= '0' && line[col] <= '9')) col++;
+                }
+                const lexeme = line.slice(start, col);
+                tokens.push({ type: isFloat ? 'FLOAT' : 'INT', lexeme, line: lineIdx + 1, col: start + 1 });
+                continue;
+            }
+
+            // Identifiers & Keywords
+            if ((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || ch === '_') {
+                const start = col;
+                while (col < len && ((line[col] >= 'a' && line[col] <= 'z') || (line[col] >= 'A' && line[col] <= 'Z') || (line[col] >= '0' && line[col] <= '9') || line[col] === '_')) col++;
+                const lexeme = line.slice(start, col);
+
+                if (KEYWORDS.has(lexeme)) {
+                    tokens.push({ type: lexeme.toUpperCase(), lexeme, line: lineIdx + 1, col: start + 1 });
+                } else {
+                    tokens.push({ type: 'IDENTIFIER', lexeme, line: lineIdx + 1, col: start + 1 });
+                }
+                continue;
+            }
+
+            // Multi-char operators
+            if (ch === '=' && col + 1 < len && line[col + 1] === '=') {
+                tokens.push({ type: 'EQ', lexeme: '==', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '!' && col + 1 < len && line[col + 1] === '=') {
+                tokens.push({ type: 'NEQ', lexeme: '!=', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '<' && col + 1 < len && line[col + 1] === '=') {
+                tokens.push({ type: 'LE', lexeme: '<=', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '>' && col + 1 < len && line[col + 1] === '=') {
+                tokens.push({ type: 'GE', lexeme: '>=', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '&' && col + 1 < len && line[col + 1] === '&') {
+                tokens.push({ type: 'AND', lexeme: '&&', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '|' && col + 1 < len && line[col + 1] === '|') {
+                tokens.push({ type: 'OR', lexeme: '||', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '+' && col + 1 < len && line[col + 1] === '=') {
+                tokens.push({ type: 'PLUS_ASSIGN', lexeme: '+=', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '-' && col + 1 < len && line[col + 1] === '=') {
+                tokens.push({ type: 'MINUS_ASSIGN', lexeme: '-=', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '-' && col + 1 < len && line[col + 1] === '>') {
+                tokens.push({ type: 'ARROW', lexeme: '->', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '+' && col + 1 < len && line[col + 1] === '+') {
+                tokens.push({ type: 'PLUSPLUS', lexeme: '++', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '-' && col + 1 < len && line[col + 1] === '-') {
+                tokens.push({ type: 'MINUSMINUS', lexeme: '--', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+
+            // Single char tokens
+            if (ch === '{') { tokens.push({ type: 'LBRACE', lexeme: '{', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '}') { tokens.push({ type: 'RBRACE', lexeme: '}', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '(') { tokens.push({ type: 'LPAREN', lexeme: '(', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === ')') { tokens.push({ type: 'RPAREN', lexeme: ')', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '[') { tokens.push({ type: 'LBRACKET', lexeme: '[', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === ']') { tokens.push({ type: 'RBRACKET', lexeme: ']', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '.') { tokens.push({ type: 'DOT', lexeme: '.', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === ',') { tokens.push({ type: 'COMMA', lexeme: ',', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === ';') { tokens.push({ type: 'SEMICOLON', lexeme: ';', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '@') { tokens.push({ type: 'AT', lexeme: '@', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '=') { tokens.push({ type: 'ASSIGN', lexeme: '=', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '+') { tokens.push({ type: 'PLUS', lexeme: '+', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '-') { tokens.push({ type: 'MINUS', lexeme: '-', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '*') { tokens.push({ type: 'MUL', lexeme: '*', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '/') { tokens.push({ type: 'DIV', lexeme: '/', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '<') { tokens.push({ type: 'LT', lexeme: '<', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '>') { tokens.push({ type: 'GT', lexeme: '>', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '!') { tokens.push({ type: 'NOT', lexeme: '!', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === ':') { tokens.push({ type: 'COLON', lexeme: ':', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+
+            // Unknown char — skip
+            col++;
+        }
+    }
+
+    // Second pass: build symbol table using the tokens
+    let i = 0;
+    const tok = tokens;
+
+    while (i < tok.length) {
+        const t = tok[i];
+
+        // Package declaration
+        if (t.type === 'PACKAGE' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
+            packageName = tok[i + 1].lexeme;
+            symbols.push({ name: packageName, kind: 'package', type_name: 'package', line: t.line, col: t.col });
+            i += 2;
+            continue;
+        }
+
+        // Using declaration
+        if (t.type === 'USING' && i + 1 < tok.length) {
+            let j = i + 1;
+            let usingPath = '';
+            while (j < tok.length && (tok[j].type === 'IDENTIFIER' || tok[j].type === 'DOT')) {
+                usingPath += tok[j].lexeme;
+                j++;
+            }
+            usings.push(usingPath);
+            i = j;
+            continue;
+        }
+
+        // Block declaration: block NAME = NUM UNIT
+        if (t.type === 'BLOCK' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
+            const blockName = tok[i + 1].lexeme;
+            blocks.push({ name: blockName, line: t.line });
+            symbols.push({ name: blockName, kind: 'block', type_name: 'block', line: t.line, col: t.col });
+            i += 2;
+            // skip = SIZE UNIT if present
+            if (i < tok.length && tok[i].type === 'ASSIGN') {
+                i++;
+                if (i < tok.length && (tok[i].type === 'INT' || tok[i].type === 'FLOAT')) {
+                    i++;
+                    if (i < tok.length && tok[i].type === 'IDENTIFIER') i++;
+                }
+            }
+            continue;
+        }
+
+        // Block scope: block NAME { ... }
+        if (t.type === 'BLOCK' && i + 3 < tok.length && tok[i + 1].type === 'IDENTIFIER' && tok[i + 2].type === 'LBRACE') {
+            blocks.push({ name: tok[i + 1].lexeme, line: t.line });
+            i += 3;
+            continue;
+        }
+
+        // Struct declaration: struct NAME ... { ... }
+        if (t.type === 'STRUCT' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
+            const structName = tok[i + 1].lexeme;
+            const structLine = t.line;
+            const structCol = t.col;
+            let extendsName = '';
+            let j = i + 2;
+
+            // Skip optional "extends Name"
+            if (j < tok.length && tok[j].type === 'EXTENDS' && j + 1 < tok.length && tok[j + 1].type === 'IDENTIFIER') {
+                extendsName = tok[j + 1].lexeme;
+                j += 2;
+            }
+
+            // Skip [ and find { to get brace depth
+            let structStartBrace = -1;
+            while (j < tok.length && tok[j].type !== 'LBRACE') j++;
+            if (j < tok.length && tok[j].type === 'LBRACE') {
+                structStartBrace = j;
+                j++;
+            }
+
+            // Find the matching RBRACE
+            let braceCount = 1;
+            let structEndIdx = -1;
+            for (let k = j; k < tok.length; k++) {
+                if (tok[k].type === 'LBRACE') braceCount++;
+                if (tok[k].type === 'RBRACE') braceCount--;
+                if (braceCount === 0) { structEndIdx = k; break; }
+            }
+
+            const structObj: MCStruct = {
+                name: structName,
+                fields: [],
+                methods: [],
+                line: structLine,
+                col: structCol,
+            };
+
+            symbols.push({ name: structName, kind: 'struct', type_name: 'struct', line: structLine, col: structCol });
+
+            // Parse fields and methods inside struct body
+            if (structStartBrace >= 0 && structEndIdx > structStartBrace) {
+                let k = structStartBrace + 1;
+                while (k < structEndIdx) {
+                    // Skip private/public
+                    let isPrivate = false;
+                    if (tok[k].type === 'PRIVATE' || tok[k].type === 'PUBLIC') {
+                        isPrivate = tok[k].type === 'PRIVATE';
+                        k++;
+                    }
+
+                    // Check if it's a field (TYPE NAME) or method (fn NAME)
+                    if (tok[k].type === 'FN' && k + 1 < tok.length && tok[k + 1].type === 'IDENTIFIER') {
+                        // Method
+                        const fnName = tok[k + 1].lexeme;
+                        const fnLine = tok[k].line;
+                        k += 2;
+
+                        // Parameters: ( param1, param2, ... )
+                        const params: string[] = [];
+                        if (k < tok.length && tok[k].type === 'LPAREN') {
+                            k++;
+                            let paramDepth = 1;
+                            while (k < tok.length && paramDepth > 0) {
+                                if (tok[k].type === 'LPAREN') paramDepth++;
+                                if (tok[k].type === 'RPAREN') paramDepth--;
+                                if (paramDepth > 0 && tok[k].type === 'IDENTIFIER' && k > 0 && tok[k - 1].type !== 'DOT') {
+                                    // Check if preceded by a type keyword
+                                    if (k >= 2 && (tok[k - 1].type === 'IDENTIFIER' || BUILTIN_TYPES.has(tok[k - 1].lexeme.toLowerCase()))) {
+                                        params.push(tok[k].lexeme);
+                                    }
+                                }
+                                k++;
+                            }
+                        }
+
+                        // Return type: -> TYPE
+                        let returnType = 'void';
+                        if (k < tok.length && tok[k].type === 'ARROW' && k + 1 < tok.length) {
+                            k++;
+                            if (tok[k].type === 'IDENTIFIER' || BUILTIN_TYPES.has(tok[k].lexeme.toLowerCase())) {
+                                returnType = tok[k].lexeme;
+                                k++;
+                            }
+                        }
+
+                        // Constructor detection
+                        const isCtor = fnName === structName;
+                        symbols.push({
+                            name: fnName,
+                            kind: isCtor ? 'constructor' : 'function',
+                            type_name: returnType,
+                            line: fnLine,
+                            col: tok[k - 1].col,
+                            parent: structName,
+                        });
+
+                        structObj.methods.push({ name: fnName, params, return_type: returnType, line: fnLine });
+
+                        // Skip body { ... }
+                        if (k < tok.length && tok[k].type === 'LBRACE') {
+                            braceCount = 1;
+                            k++;
+                            while (k < tok.length && braceCount > 0) {
+                                if (tok[k].type === 'LBRACE') braceCount++;
+                                if (tok[k].type === 'RBRACE') braceCount--;
+                                if (braceCount > 0) k++;
+                            }
+                            k++;
+                        }
+                    } else {
+                        // Field: TYPE NAME (possibly with @ or =)
+                        // Types can be keyword tokens (INT, FLOAT, STRING, etc.) or IDENTIFIER tokens (user-defined structs)
+                        const typeTokenTypes = new Set(['INT', 'FLOAT', 'BOOL', 'CHAR', 'STRING', 'VOID', 'IDENTIFIER']);
+                        if (typeTokenTypes.has(tok[k].type) && k + 1 < tok.length && tok[k + 1].type === 'IDENTIFIER' && tok[k + 1].lexeme !== '(') {
+                            const fieldType = tok[k].lexeme;
+                            k++;
+                            const fieldName = tok[k].lexeme;
+                            const fieldLine = tok[k].line;
+                            symbols.push({ name: fieldName, kind: 'field', type_name: fieldType, line: fieldLine, col: tok[k].col, parent: structName });
+                            structObj.fields.push({ name: fieldName, type: fieldType, line: fieldLine });
+                            k++;
+                            if (k < tok.length && tok[k].type === 'AT') { k++; if (k < tok.length && tok[k].type === 'IDENTIFIER') k++; }
+                            if (k < tok.length && tok[k].type === 'ASSIGN') { k++; while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN') k++; }
+                        } else {
+                            k++;
+                        }
+                    }
+                }
+            }
+
+            structs.set(structName, structObj);
+            i = structEndIdx >= 0 ? structEndIdx + 1 : j + 1;
+            continue;
+        }
+
+        // Interface declaration: interface NAME { ... }
+        if (t.type === 'INTERFACE' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
+            const ifaceName = tok[i + 1].lexeme;
+            symbols.push({ name: ifaceName, kind: 'interface', type_name: 'interface', line: t.line, col: t.col });
+            i += 2;
+            while (i < tok.length && tok[i].type !== 'LBRACE') i++;
+            if (i < tok.length && tok[i].type === 'LBRACE') {
+                let braceCount = 1;
+                i++;
+                while (i < tok.length && braceCount > 0) {
+                    if (tok[i].type === 'LBRACE') braceCount++;
+                    if (tok[i].type === 'RBRACE') braceCount--;
+                    if (braceCount > 0) i++;
+                }
+                i++;
+            }
+            continue;
+        }
+
+        // Top-level function: fn NAME ( params ) -> Type { ... }
+        if (t.type === 'FN' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
+            const fnName = tok[i + 1].lexeme;
+            const fnLine = t.line;
+            let j = i + 2;
+
+            // Parameters
+            const params: string[] = [];
+            if (j < tok.length && tok[j].type === 'LPAREN') {
+                j++;
+                let paramDepth = 1;
+                while (j < tok.length && paramDepth > 0) {
+                    if (tok[j].type === 'LPAREN') paramDepth++;
+                    if (tok[j].type === 'RPAREN') paramDepth--;
+                    if (paramDepth > 0 && tok[j].type === 'IDENTIFIER' && j > 0 && tok[j - 1].type !== 'DOT') {
+                        if (j >= 2 && (tok[j - 1].type === 'IDENTIFIER' || BUILTIN_TYPES.has(tok[j - 1].lexeme.toLowerCase()))) {
+                            params.push(tok[j].lexeme);
+                        }
+                    }
+                    j++;
+                }
+            }
+
+            let returnType = 'void';
+            if (j < tok.length && tok[j].type === 'ARROW' && j + 1 < tok.length) {
+                j++;
+                if (tok[j].type === 'IDENTIFIER' || BUILTIN_TYPES.has(tok[j].lexeme.toLowerCase())) {
+                    returnType = tok[j].lexeme;
+                    j++;
+                }
+            }
+
+            const isCtor = structs.has(fnName);
+            symbols.push({
+                name: fnName,
+                kind: fnName === 'main' ? 'function' : (isCtor ? 'constructor' : 'function'),
+                type_name: returnType,
+                line: fnLine,
+                col: t.col,
+            });
+
+            // Add params as symbols
+            for (const p of params) {
+                const paramToken = tok.find(tk => tk.type === 'IDENTIFIER' && tk.lexeme === p && tk.line >= fnLine && tk.line <= fnLine + 5);
+                symbols.push({
+                    name: p,
+                    kind: 'param',
+                    type_name: '',
+                    line: paramToken?.line || fnLine,
+                    col: paramToken?.col || 0,
+                    parent: fnName,
+                });
+            }
+
+            // Skip body
+            i = j;
+            if (i < tok.length && tok[i].type === 'LBRACE') {
+                let braceCount = 1;
+                i++;
+                while (i < tok.length && braceCount > 0) {
+                    if (tok[i].type === 'LBRACE') braceCount++;
+                    if (tok[i].type === 'RBRACE') braceCount--;
+                    if (braceCount > 0) i++;
+                }
+                i++;
+            }
+            continue;
+        }
+
+        i++;
+    }
+
+    // Find variables in function bodies (simple pattern: TYPE NAME = ...)
+    for (let idx = 0; idx < tokens.length - 2; idx++) {
+        const t = tokens[idx];
+        if (t.type === 'IDENTIFIER' && BUILTIN_TYPES.has(t.lexeme) &&
+            tokens[idx + 1].type === 'IDENTIFIER' && tokens[idx + 1].lexeme !== '(') {
+            const varName = tokens[idx + 1].lexeme;
+            // Check it's not already a symbol
+            if (!symbols.find(s => s.name === varName && (s.kind === 'field' || s.kind === 'param' || s.kind === 'variable'))) {
+                symbols.push({
+                    name: varName,
+                    kind: 'variable',
+                    type_name: t.lexeme,
+                    line: t.line,
+                    col: t.col,
+                });
+            }
+        }
+        // User-defined type variable: PascalCase NAME = ... (e.g. "Player p = ...")
+        if (t.type === 'IDENTIFIER' && /^[A-Z]/.test(t.lexeme) && t.lexeme.length > 0 &&
+            !KEYWORDS.has(t.lexeme) &&
+            tokens[idx + 1].type === 'IDENTIFIER' && tokens[idx + 1].lexeme !== '(' &&
+            !BUILTIN_TYPES.has(tokens[idx + 1].lexeme)) {
+            const varName = tokens[idx + 1].lexeme;
+            if (!symbols.find(s => s.name === varName && (s.kind === 'field' || s.kind === 'param' || s.kind === 'variable'))) {
+                symbols.push({
+                    name: varName,
+                    kind: 'variable',
+                    type_name: t.lexeme,
+                    line: t.line,
+                    col: t.col,
+                });
+            }
+        }
+    }
+
+    return { tokens, symbols, blocks, structs, errors, packageName, usings };
+}
+
+export function getLinePrefix(text: string, line: number, col: number): string {
+    const lines = text.split('\n');
+    if (line >= lines.length) return '';
+    return lines[line].substring(0, col);
+}
+
+export function getWordAtPosition(text: string, line: number, col: number): string {
+    const lines = text.split('\n');
+    if (line >= lines.length) return '';
+    const l = lines[line];
+    let start = col;
+    let end = col;
+    while (start > 0 && /[a-zA-Z0-9_]/.test(l[start - 1])) start--;
+    while (end < l.length && /[a-zA-Z0-9_]/.test(l[end])) end++;
+    return l.substring(start, end);
+}
+
+export function getCurrentLine(text: string, line: number): string {
+    const lines = text.split('\n');
+    return line < lines.length ? lines[line] : '';
+}
+
+export interface CompletionContext {
+    prefix: string;
+    triggerKind: number;
+    triggerChar?: string;
+    isAfterDot: boolean;
+    isAfterAt: boolean;
+    isAfterColon: boolean;
+    isAfterKeyword: string | null;
+    isAfterType: boolean;
+    currentWord: string;
+    linePrefix: string;
+}
+
+export function getCompletionContext(text: string, line: number, col: number, triggerChar?: string): CompletionContext {
+    const prefix = getLinePrefix(text, line, col);
+    const word = getWordAtPosition(text, line, col);
+
+    // Check for dot before cursor
+    const dotMatch = prefix.match(/\.([a-zA-Z0-9_]*)$/);
+    const atMatch = prefix.match(/@([a-zA-Z0-9_]*)$/);
+    const colonMatch = prefix.match(/:([a-zA-Z0-9_]*)$/);
+
+    // Check if we're after a keyword
+    const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for)\s+([a-zA-Z0-9_]*)$/);
+
+    // Check if we're after a type
+    const typeMatch = prefix.match(/\b(int|float|bool|char|String|void)\s+([a-zA-Z0-9_]*)$/);
+
+    return {
+        prefix,
+        triggerKind: triggerChar ? 2 : 1,
+        triggerChar,
+        isAfterDot: dotMatch !== null,
+        isAfterAt: atMatch !== null,
+        isAfterColon: colonMatch !== null,
+        isAfterKeyword: keywordMatch ? keywordMatch[1] : null,
+        isAfterType: typeMatch !== null,
+        currentWord: word,
+        linePrefix: prefix,
+    };
+}
+
+export function getKeywordDoc(keyword: string): string | undefined {
+    return KEYWORD_DOCS[keyword];
+}
+
+export function getBlockNames(scan: ScanResult): string[] {
+    return scan.blocks.map(b => b.name);
+}

@@ -1,0 +1,1470 @@
+#include "embedded_runtime.h"
+
+namespace meta_c { namespace embedded {
+
+const char _runtime_block_memory_h[] = R"(
+#ifndef META_C_BLOCK_MEMORY_H
+#define META_C_BLOCK_MEMORY_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct BlockCtx {
+    uint8_t*  data;
+    size_t    capacity;
+    size_t    used;
+    size_t    peak_used;
+    size_t    allocation_count;
+} BlockCtx;
+
+typedef struct {
+    size_t total_size;
+    size_t used_size;
+    size_t free_size;
+    size_t peak_used;
+    size_t allocation_count;
+    float  fragmentation_percent;
+} BlockStats;
+
+// ─── Registry API (optional — requires -DMETA_C_TRACK_BLOCKS) ─
+#ifdef META_C_TRACK_BLOCKS
+
+#define META_C_BLOCK_NAME_MAX 32
+#define META_C_MAX_BLOCKS 64
+
+typedef struct {
+    char     name[META_C_BLOCK_NAME_MAX];
+    size_t   capacity;
+    size_t   used;
+    size_t   peak_used;
+    size_t   allocation_count;
+} BlockInfo;
+
+#define META_C_SHM_MAGIC 0x4D455441  // "META"
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint32_t version;
+    int32_t  pid;
+    uint32_t block_count;
+    uint64_t timestamp_us;
+} MetaCShmHeader;
+
+void     block_register(BlockCtx* ctx, const char* name);
+void     block_unregister(BlockCtx* ctx);
+BlockCtx* block_find(const char* name);
+size_t   block_snapshot(BlockInfo* out, size_t max_count);
+int      block_shm_export(void);
+
+#else
+// No-op stubs — compiler optimizes these away entirely
+#define META_C_MAX_BLOCKS 1
+#define META_C_BLOCK_NAME_MAX 1
+#define block_register(ctx, name)     ((void)(ctx), (void)(name))
+#define block_unregister(ctx)         ((void)(ctx))
+#define block_find(name)              ((void)(name), (BlockCtx*)NULL)
+#define block_snapshot(out, max)      ((void)(out), (void)(max), (size_t)0)
+#define block_shm_export()            (-1)
+#endif
+
+// ─── Block API ───────────────────────────────────────────────
+
+// Create a new memory block of N megabytes
+BlockCtx* block_create(size_t megabytes);
+
+// Create a block with custom byte size
+BlockCtx* block_create_bytes(size_t bytes);
+
+// Allocate memory from a block (bump allocator)
+void* block_alloc(BlockCtx* ctx, size_t size);
+
+// Allocate with alignment
+void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment);
+
+// Reset the block (O(1) — just resets bump pointer)
+void block_reset(BlockCtx* ctx);
+
+// Destroy the block and free its memory
+void block_destroy(BlockCtx* ctx);
+
+// Get block statistics
+BlockStats block_stats(BlockCtx* ctx);
+
+// Get the default alignment
+size_t block_alignment(void);
+
+// Freeze all block allocations (spin-wait until thawed)
+// Used by hot reload to ensure no allocations during code swap
+void block_freeze(void);
+
+// Thaw block allocations after hot reload swap
+void block_thaw(void);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // META_C_BLOCK_MEMORY_H
+)";
+const size_t _runtime_block_memory_h_len = sizeof(_runtime_block_memory_h) - 1;
+
+const char _runtime_block_memory_c[] = R"(
+#define _GNU_SOURCE
+#include "block_memory.h"
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdint.h>
+#include <stdatomic.h>
+
+#define DEFAULT_ALIGNMENT 8
+
+static atomic_int block_frozen_flag = 0;
+
+// ─── Global Block Registry ───────────────────────────────────
+#ifdef META_C_TRACK_BLOCKS
+
+#include <pthread.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+
+#define REGISTRY_MAX META_C_MAX_BLOCKS
+
+typedef struct {
+    char      name[META_C_BLOCK_NAME_MAX];
+    BlockCtx* ctx;
+    int       active;
+} RegistryEntry;
+
+static RegistryEntry     registry[REGISTRY_MAX];
+static int               registry_initialized = 0;
+static pthread_mutex_t   registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+static void registry_init(void) {
+    if (!registry_initialized) {
+        memset(registry, 0, sizeof(registry));
+        registry_initialized = 1;
+    }
+}
+
+void block_register(BlockCtx* ctx, const char* name) {
+    registry_init();
+    pthread_mutex_lock(&registry_mutex);
+
+    int slot = -1;
+    for (int i = 0; i < REGISTRY_MAX; i++) {
+        if (!registry[i].active) { slot = i; break; }
+    }
+
+    if (slot >= 0) {
+        strncpy(registry[slot].name, name, META_C_BLOCK_NAME_MAX - 1);
+        registry[slot].name[META_C_BLOCK_NAME_MAX - 1] = '\0';
+        registry[slot].ctx = ctx;
+        registry[slot].active = 1;
+    }
+
+    pthread_mutex_unlock(&registry_mutex);
+}
+
+void block_unregister(BlockCtx* ctx) {
+    registry_init();
+    pthread_mutex_lock(&registry_mutex);
+
+    for (int i = 0; i < REGISTRY_MAX; i++) {
+        if (registry[i].active && registry[i].ctx == ctx) {
+            registry[i].active = 0;
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&registry_mutex);
+}
+
+BlockCtx* block_find(const char* name) {
+    registry_init();
+    pthread_mutex_lock(&registry_mutex);
+
+    BlockCtx* found = NULL;
+    for (int i = 0; i < REGISTRY_MAX; i++) {
+        if (registry[i].active && strcmp(registry[i].name, name) == 0) {
+            found = registry[i].ctx;
+            break;
+        }
+    }
+
+    pthread_mutex_unlock(&registry_mutex);
+    return found;
+}
+
+size_t block_snapshot(BlockInfo* out, size_t max_count) {
+    registry_init();
+    pthread_mutex_lock(&registry_mutex);
+
+    size_t written = 0;
+    for (int i = 0; i < REGISTRY_MAX && written < max_count; i++) {
+        if (registry[i].active) {
+            strncpy(out[written].name, registry[i].name, META_C_BLOCK_NAME_MAX - 1);
+            out[written].name[META_C_BLOCK_NAME_MAX - 1] = '\0';
+            out[written].capacity        = registry[i].ctx->capacity;
+            out[written].used            = registry[i].ctx->used;
+            out[written].peak_used       = registry[i].ctx->peak_used;
+            out[written].allocation_count = registry[i].ctx->allocation_count;
+            written++;
+        }
+    }
+
+    pthread_mutex_unlock(&registry_mutex);
+    return written;
+}
+
+// ─── Shared Memory Export ────────────────────────────────────
+
+static void shm_path(char* buf, size_t bufsize) {
+    snprintf(buf, bufsize, "/tmp/meta-c-mem-%d.bin", (int)getpid());
+}
+
+int block_shm_export(void) {
+    registry_init();
+
+    char path[256];
+    shm_path(path, sizeof(path));
+
+    pthread_mutex_lock(&registry_mutex);
+
+    int count = 0;
+    for (int i = 0; i < REGISTRY_MAX; i++)
+        if (registry[i].active) count++;
+
+    size_t file_size = sizeof(MetaCShmHeader) + (size_t)count * sizeof(BlockInfo);
+
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+    if (fd < 0) { pthread_mutex_unlock(&registry_mutex); return -1; }
+
+    ftruncate(fd, (off_t)file_size);
+
+    MetaCShmHeader header;
+    header.magic   = META_C_SHM_MAGIC;
+    header.version = 1;
+    header.pid     = (int32_t)getpid();
+    header.block_count = (uint32_t)count;
+
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    header.timestamp_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec;
+
+    write(fd, &header, sizeof(header));
+
+    int written = 0;
+    for (int i = 0; i < REGISTRY_MAX && written < count; i++) {
+        if (registry[i].active) {
+            BlockInfo info;
+            strncpy(info.name, registry[i].name, META_C_BLOCK_NAME_MAX - 1);
+            info.name[META_C_BLOCK_NAME_MAX - 1] = '\0';
+            info.capacity        = registry[i].ctx->capacity;
+            info.used            = registry[i].ctx->used;
+            info.peak_used       = registry[i].ctx->peak_used;
+            info.allocation_count = registry[i].ctx->allocation_count;
+            write(fd, &info, sizeof(info));
+            written++;
+        }
+    }
+
+    close(fd);
+    pthread_mutex_unlock(&registry_mutex);
+    return 0;
+}
+
+#endif // META_C_TRACK_BLOCKS
+
+static void error(const char* msg) {
+    fprintf(stderr, "Meta-C runtime error: %s\n", msg);
+    exit(1);
+}
+
+BlockCtx* block_create(size_t megabytes) {
+    return block_create_bytes(megabytes * 1024 * 1024);
+}
+
+BlockCtx* block_create_bytes(size_t bytes) {
+    BlockCtx* ctx = (BlockCtx*)malloc(sizeof(BlockCtx));
+    if (!ctx) error("out of memory");
+
+    ctx->data = (uint8_t*)malloc(bytes);
+    if (!ctx->data) {
+        free(ctx);
+        error("out of memory");
+    }
+
+    ctx->capacity = bytes;
+    ctx->used = 0;
+    ctx->peak_used = 0;
+    ctx->allocation_count = 0;
+
+    return ctx;
+}
+
+void* block_alloc(BlockCtx* ctx, size_t size) {
+    return block_alloc_aligned(ctx, size, DEFAULT_ALIGNMENT);
+}
+
+void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment) {
+    // Spin-wait if frozen (hot reload in progress)
+    while (atomic_load_explicit(&block_frozen_flag, memory_order_acquire)) {
+        // spin — will be very brief (nanoseconds)
+        __asm__ volatile("pause");
+    }
+
+    // Align current position
+    size_t current = ctx->used;
+    size_t aligned = (current + alignment - 1) & ~(alignment - 1);
+
+    // Check overflow
+    if (aligned + size > ctx->capacity) {
+        error("block overflow: out of memory in block");
+    }
+
+    ctx->used = aligned + size;
+    ctx->allocation_count++;
+
+    if (ctx->used > ctx->peak_used) {
+        ctx->peak_used = ctx->used;
+    }
+
+    return ctx->data + aligned;
+}
+
+void block_reset(BlockCtx* ctx) {
+    ctx->used = 0;
+    // Note: allocation_count is NOT reset here,
+    // so we can track total allocations across resets
+}
+
+void block_destroy(BlockCtx* ctx) {
+    if (ctx) {
+        free(ctx->data);
+        free(ctx);
+    }
+}
+
+BlockStats block_stats(BlockCtx* ctx) {
+    BlockStats stats;
+    stats.total_size = ctx->capacity;
+    stats.used_size = ctx->used;
+    stats.free_size = ctx->capacity - ctx->used;
+    stats.peak_used = ctx->peak_used;
+    stats.allocation_count = ctx->allocation_count;
+
+    // Fragmentation: 0% for bump allocator (no holes)
+    stats.fragmentation_percent = 0.0f;
+
+    return stats;
+}
+
+size_t block_alignment(void) {
+    return DEFAULT_ALIGNMENT;
+}
+
+void block_freeze(void) {
+    atomic_store_explicit(&block_frozen_flag, 1, memory_order_release);
+}
+
+void block_thaw(void) {
+    atomic_store_explicit(&block_frozen_flag, 0, memory_order_release);
+}
+)";
+const size_t _runtime_block_memory_c_len = sizeof(_runtime_block_memory_c) - 1;
+
+const char _runtime_io_h[] = R"(
+#ifndef META_C_IO_H
+#define META_C_IO_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef struct {
+    char*   data;
+    int64_t len;
+} MetaCString;
+
+void io_print_int(int64_t val);
+void io_print_float(double val);
+void io_print_string(const char* data, int64_t len);
+void io_print_char(char val);
+void io_print_bool(uint8_t val);
+void io_print_newline(void);
+void io_printf(const char* fmt, ...);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // META_C_IO_H
+)";
+const size_t _runtime_io_h_len = sizeof(_runtime_io_h) - 1;
+
+const char _runtime_io_c[] = R"(
+#include "io.h"
+#include <stdio.h>
+#include <stdarg.h>
+
+void io_print_int(int64_t v) {
+    printf("%lld\n", (long long)v);
+}
+
+void io_print_float(double v) {
+    printf("%f\n", v);
+}
+
+void io_print_string(const char* data, int64_t len) {
+    printf("%.*s\n", (int)len, data);
+}
+
+void io_print_bool(uint8_t v) {
+    printf("%s\n", v ? "true" : "false");
+}
+
+void io_print_char(char v) {
+    printf("%c\n", v);
+}
+
+void io_print_newline(void) {
+    printf("\n");
+}
+
+void io_printf(const char* fmt, ...) {
+    va_list args;
+    va_start(args, fmt);
+    vprintf(fmt, args);
+    va_end(args);
+}
+)";
+const size_t _runtime_io_c_len = sizeof(_runtime_io_c) - 1;
+
+const char _runtime_hot_reload_h[] = R"(
+#ifndef META_C_HOT_RELOAD_H
+#define META_C_HOT_RELOAD_H
+
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+typedef enum {
+    HR_WAITING,
+    HR_LOADING,
+    HR_OK,
+    HR_ERROR,
+} HotReloadState;
+
+typedef struct HotReloadEngine HotReloadEngine;
+
+// Function pointer type for reload callbacks
+typedef void (*hr_callback_t)(const char* so_path);
+
+// Create a hot reload engine for a .so library
+HotReloadEngine* hr_create(const char* so_path);
+
+// Load initial symbols from the .so
+int hr_load_initial(HotReloadEngine* hr);
+
+// Register a function pointer for hot swapping
+// name: symbol name in the .so
+// func_ptr: address of a void* that will be updated on reload
+int hr_register_func(HotReloadEngine* hr, const char* name, void** func_ptr);
+
+// Start watching the .so file for modifications (inotify)
+// Creates a separate monitoring thread
+int hr_start_watching(HotReloadEngine* hr);
+
+// Force a reload immediately
+int hr_reload(HotReloadEngine* hr);
+
+// Get current state
+HotReloadState hr_state(HotReloadEngine* hr);
+
+// Set a callback that fires after every reload attempt
+void hr_set_callback(HotReloadEngine* hr, hr_callback_t cb);
+
+// Stop monitoring and cleanup
+void hr_destroy(HotReloadEngine* hr);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif // META_C_HOT_RELOAD_H
+)";
+const size_t _runtime_hot_reload_h_len = sizeof(_runtime_hot_reload_h) - 1;
+
+const char _runtime_libs_window_window_h[] = R"(
+#ifndef META_C_WINDOW_H
+#define META_C_WINDOW_H
+
+#include <stdint.h>
+#include <stddef.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* Forward declaration — full type in block_memory.h */
+typedef struct BlockCtx BlockCtx;
+
+/* ─── Window creation flags ─── */
+
+typedef enum {
+    META_WINDOW_NONE       = 0,
+    META_WINDOW_RESIZABLE  = 1 << 0,
+    META_WINDOW_FULLSCREEN = 1 << 1,
+    META_WINDOW_HIDDEN     = 1 << 2,
+    META_WINDOW_BORDERLESS = 1 << 3,
+    META_WINDOW_VSYNC      = 1 << 4,
+} MetaWindowFlags;
+
+/* ─── Event types ─── */
+
+typedef enum {
+    META_EVENT_NONE        = 0,
+    META_EVENT_CLOSE       = 1,
+    META_EVENT_RESIZE      = 2,
+    META_EVENT_KEY_DOWN    = 3,
+    META_EVENT_KEY_UP      = 4,
+    META_EVENT_MOUSE_MOVE  = 5,
+    META_EVENT_MOUSE_BTN   = 6,
+    META_EVENT_MOUSE_WHEEL = 7,
+} MetaEventType;
+
+typedef struct {
+    MetaEventType type;
+    int64_t       timestamp_ms;
+    union {
+        struct { int width, height; }          resize;
+        struct { int keycode, mods; }          key;
+        struct { double x, y; }                mouse_move;
+        struct { int button, action, mods; }   mouse_btn;
+        struct { double delta; }               mouse_wheel;
+    } data;
+} MetaEvent;
+
+/* ─── Window handle ─── */
+
+typedef struct MetaWindowImpl MetaWindow;
+
+/**
+ * Creates a window with the given title, dimensions, and flags.
+ *
+ * The MetaWindow struct is allocated from the given BlockCtx.
+ * Call meta_window_destroy() to close the native window and release
+ * OS resources, then reset or destroy the block to reclaim the memory.
+ *
+ * Returns NULL on failure.
+ *
+ * Example (Meta-C):
+ *   using Window
+ *   block win = 1MB
+ *   Window w = Window.create("Hello", 800, 600, Window.RESIZABLE | Window.VSYNC) @win
+ *
+ * Example (C):
+ *   BlockCtx* block = block_create_bytes(65536);
+ *   MetaWindow* w = meta_window_create(block, "Hello", 800, 600, META_WINDOW_VSYNC);
+ */
+MetaWindow* meta_window_create(
+    BlockCtx* block,
+    const char* title,
+    int width, int height,
+    uint32_t flags
+);
+
+/**
+ * Destroys the native window and releases OS resources (X11/Win32).
+ * Does NOT free the MetaWindow struct — that memory belongs to the
+ * BlockCtx passed at creation. Call block_reset() or block_destroy()
+ * to reclaim the memory.
+ */
+void meta_window_destroy(MetaWindow* w);
+
+/**
+ * Polls all pending events. Returns the number of events enqueued.
+ * Call meta_window_next_event() to retrieve them one by one.
+ */
+int meta_window_poll_events(MetaWindow* w);
+
+/**
+ * Retrieves the next pending event. Returns 0 if no more events.
+ * Must be called in a loop after meta_window_poll_events().
+ */
+int meta_window_next_event(MetaWindow* w, MetaEvent* out);
+
+/**
+ * Swaps the front and back buffers. Call after rendering each frame.
+ */
+void meta_window_swap_buffers(MetaWindow* w);
+
+/**
+ * Returns non-zero if the close button has been pressed.
+ */
+int meta_window_should_close(MetaWindow* w);
+
+/**
+ * Sets the window title at runtime.
+ */
+void meta_window_set_title(MetaWindow* w, const char* title);
+
+/**
+ * Returns the current window dimensions.
+ */
+void meta_window_get_size(MetaWindow* w, int* out_width, int* out_height);
+
+/**
+ * Toggles fullscreen mode.
+ */
+void meta_window_set_fullscreen(MetaWindow* w, int fullscreen);
+
+/**
+ * Returns the native window handle (Window on X11, HWND on Win32).
+ * Useful for advanced interop. Use sparingly.
+ */
+void* meta_window_native_handle(MetaWindow* w);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* META_C_WINDOW_H */
+)";
+const size_t _runtime_libs_window_window_h_len = sizeof(_runtime_libs_window_window_h) - 1;
+
+const char _runtime_libs_window_window_internal_h[] = R"(
+#ifndef META_C_WINDOW_INTERNAL_H
+#define META_C_WINDOW_INTERNAL_H
+
+#include "window.h"
+#include "../../block_memory.h"
+
+/* ─── Event queue ring buffer ─── */
+#define META_WINDOW_EVENT_CAPACITY 256
+
+typedef struct {
+    MetaEvent  events[META_WINDOW_EVENT_CAPACITY];
+    int        head;
+    int        tail;
+    int        count;
+} EventQueue;
+
+static inline void event_queue_init(EventQueue* q) {
+    q->head  = 0;
+    q->tail  = 0;
+    q->count = 0;
+}
+
+static inline int event_queue_push(EventQueue* q, const MetaEvent* e) {
+    if (q->count >= META_WINDOW_EVENT_CAPACITY) return 0;
+    q->events[q->tail] = *e;
+    q->tail = (q->tail + 1) % META_WINDOW_EVENT_CAPACITY;
+    q->count++;
+    return 1;
+}
+
+static inline int event_queue_pop(EventQueue* q, MetaEvent* out) {
+    if (q->count == 0) return 0;
+    *out = q->events[q->head];
+    q->head = (q->head + 1) % META_WINDOW_EVENT_CAPACITY;
+    q->count--;
+    return 1;
+}
+
+/* ─── Platform-specific state ─── */
+
+struct MetaWindowImpl {
+    /* Shared */
+    EventQueue   event_queue;
+    char         title[256];
+    int          width;
+    int          height;
+    uint32_t     flags;
+    int          should_close;
+
+    /* Block allocator context for this window's data */
+    BlockCtx*    block;
+
+#if defined(__linux__)
+    /* X11 state */
+    void*        display;   /* Display* */
+    unsigned long window;   /* Window */
+    unsigned long gc;       /* GC */
+#elif defined(_WIN32)
+    /* Win32 state */
+    void*        hinstance; /* HINSTANCE */
+    void*        hwnd;      /* HWND */
+    void*        hdc;       /* HDC */
+#endif
+};
+
+#endif /* META_C_WINDOW_INTERNAL_H */
+)";
+const size_t _runtime_libs_window_window_internal_h_len = sizeof(_runtime_libs_window_window_internal_h) - 1;
+
+const char _runtime_libs_window_window_hr_h[] = R"(
+#ifndef META_C_WINDOW_HR_H
+#define META_C_WINDOW_HR_H
+
+#include "window.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* ─── Hot-reloadable function pointer table ─── */
+
+typedef struct {
+    void* create;
+    void* destroy;
+    void* poll_events;
+    void* next_event;
+    void* swap_buffers;
+    void* should_close;
+    void* set_title;
+    void* get_size;
+    void* set_fullscreen;
+    void* native_handle;
+} MetaWindowFuncTable;
+
+/* Global table — populated by meta_window_hr_init().
+ * On hot reload the entries are atomically swapped. */
+extern MetaWindowFuncTable meta_window_table;
+
+/* ─── Type-safe inline wrappers ─── */
+
+static inline MetaWindow* meta_win_create(
+    BlockCtx* block, const char* title, int width, int height, uint32_t flags
+) {
+    MetaWindow* (*fn)(BlockCtx*, const char*, int, int, uint32_t) =
+        (MetaWindow* (*)(BlockCtx*, const char*, int, int, uint32_t))meta_window_table.create;
+    return fn(block, title, width, height, flags);
+}
+
+static inline void meta_win_destroy(MetaWindow* w) {
+    void (*fn)(MetaWindow*) = (void (*)(MetaWindow*))meta_window_table.destroy;
+    fn(w);
+}
+
+static inline int meta_win_poll_events(MetaWindow* w) {
+    int (*fn)(MetaWindow*) = (int (*)(MetaWindow*))meta_window_table.poll_events;
+    return fn(w);
+}
+
+static inline int meta_win_next_event(MetaWindow* w, MetaEvent* out) {
+    int (*fn)(MetaWindow*, MetaEvent*) =
+        (int (*)(MetaWindow*, MetaEvent*))meta_window_table.next_event;
+    return fn(w, out);
+}
+
+static inline void meta_win_swap_buffers(MetaWindow* w) {
+    void (*fn)(MetaWindow*) = (void (*)(MetaWindow*))meta_window_table.swap_buffers;
+    fn(w);
+}
+
+static inline int meta_win_should_close(MetaWindow* w) {
+    int (*fn)(MetaWindow*) = (int (*)(MetaWindow*))meta_window_table.should_close;
+    return fn(w);
+}
+
+static inline void meta_win_set_title(MetaWindow* w, const char* title) {
+    void (*fn)(MetaWindow*, const char*) =
+        (void (*)(MetaWindow*, const char*))meta_window_table.set_title;
+    fn(w, title);
+}
+
+static inline void meta_win_get_size(MetaWindow* w, int* out_w, int* out_h) {
+    void (*fn)(MetaWindow*, int*, int*) =
+        (void (*)(MetaWindow*, int*, int*))meta_window_table.get_size;
+    fn(w, out_w, out_h);
+}
+
+static inline void meta_win_set_fullscreen(MetaWindow* w, int fullscreen) {
+    void (*fn)(MetaWindow*, int) =
+        (void (*)(MetaWindow*, int))meta_window_table.set_fullscreen;
+    fn(w, fullscreen);
+}
+
+static inline void* meta_win_native_handle(MetaWindow* w) {
+    void* (*fn)(MetaWindow*) = (void* (*)(MetaWindow*))meta_window_table.native_handle;
+    return fn(w);
+}
+
+/* ─── Forward declaration of HotReloadEngine ─── */
+
+struct HotReloadEngine;
+
+/* ─── Initialization ─── */
+
+/* Register all window symbols with an existing HotReloadEngine.
+ * Call hr_load_initial() afterwards, or just use this which does it.
+ * Returns 0 on success, -1 on failure. */
+int meta_window_hr_init(struct HotReloadEngine* hr);
+
+/* Convenience: creates a HotReloadEngine, registers all symbols,
+ * loads initial, and starts watching the .so at so_path.
+ * Returns the engine on success, NULL on failure.
+ * The caller owns the engine and must call hr_destroy() on shutdown. */
+struct HotReloadEngine* meta_window_hr_start(const char* so_path);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* META_C_WINDOW_HR_H */
+)";
+const size_t _runtime_libs_window_window_hr_h_len = sizeof(_runtime_libs_window_window_hr_h) - 1;
+
+const char _runtime_hot_reload_c[] = R"(
+#define _GNU_SOURCE
+#define _POSIX_C_SOURCE 200112L
+#include "hot_reload.h"
+#include "block_memory.h"
+#include <time.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <dlfcn.h>
+#include <pthread.h>
+#include <unistd.h>
+#include <sys/inotify.h>
+#include <errno.h>
+#include <stdatomic.h>
+
+#define MAX_SYMBOLS 256
+#define EVENT_BUF_LEN 4096
+
+typedef struct {
+    char  name[128];
+    void** func_ptr;
+} SymbolEntry;
+
+struct HotReloadEngine {
+    char          so_path[1024];
+    char          so_basename[256];
+    char          so_path_tmp[1024];  // path + ".new" for atomic swap
+    void*         handle_current;
+    void*         handle_new;
+    SymbolEntry   symbols[MAX_SYMBOLS];
+    int           symbol_count;
+    atomic_int    state;
+    pthread_t     watch_thread;
+    int           inotify_fd;
+    int           watch_fd;
+    volatile int  running;
+    hr_callback_t callback;
+    pthread_mutex_t mutex;
+};
+
+static void error(const char* msg) {
+    fprintf(stderr, "Meta-C hot reload error: %s\n", msg);
+    exit(1);
+}
+
+HotReloadEngine* hr_create(const char* so_path) {
+    HotReloadEngine* hr = (HotReloadEngine*)calloc(1, sizeof(HotReloadEngine));
+    if (!hr) error("out of memory");
+
+    strncpy(hr->so_path, so_path, sizeof(hr->so_path) - 1);
+
+    // Extract basename
+    const char* slash = strrchr(so_path, '/');
+    strncpy(hr->so_basename, slash ? slash + 1 : so_path, sizeof(hr->so_basename) - 1);
+
+    snprintf(hr->so_path_tmp, sizeof(hr->so_path_tmp), "%s.new", so_path);
+
+    hr->state = HR_WAITING;
+    hr->running = 0;
+    hr->callback = NULL;
+    hr->inotify_fd = -1;
+    hr->watch_fd = -1;
+    pthread_mutex_init(&hr->mutex, NULL);
+
+    return hr;
+}
+
+int hr_load_initial(HotReloadEngine* hr) {
+    pthread_mutex_lock(&hr->mutex);
+
+    hr->handle_current = dlopen(hr->so_path, RTLD_NOW | RTLD_LOCAL);
+    if (!hr->handle_current) {
+        fprintf(stderr, "hr: dlopen failed: %s\n", dlerror());
+        hr->state = HR_ERROR;
+        pthread_mutex_unlock(&hr->mutex);
+        return -1;
+    }
+
+    hr->state = HR_OK;
+
+    // Resolve registered symbols
+    for (int i = 0; i < hr->symbol_count; i++) {
+        void* sym = dlsym(hr->handle_current, hr->symbols[i].name);
+        if (sym) {
+            *(hr->symbols[i].func_ptr) = sym;
+        } else {
+            fprintf(stderr, "hr: symbol '%s' not found\n", hr->symbols[i].name);
+        }
+    }
+
+    pthread_mutex_unlock(&hr->mutex);
+    return 0;
+}
+
+int hr_register_func(HotReloadEngine* hr, const char* name, void** func_ptr) {
+    if (hr->symbol_count >= MAX_SYMBOLS) return -1;
+
+    strncpy(hr->symbols[hr->symbol_count].name, name,
+            sizeof(hr->symbols[hr->symbol_count].name) - 1);
+    hr->symbols[hr->symbol_count].func_ptr = func_ptr;
+    hr->symbol_count++;
+    return 0;
+}
+
+int hr_reload(HotReloadEngine* hr) {
+    pthread_mutex_lock(&hr->mutex);
+    hr->state = HR_LOADING;
+
+    // Freeze block allocations during swap
+    block_freeze();
+
+    // Copy the .so to a temp path so dlopen gets a fresh load
+    // (dlopen caches by path; a copy bypasses the cache)
+    char tmp_path[1088];
+    snprintf(tmp_path, sizeof(tmp_path), "%s.%d", hr->so_path, (int)time(NULL));
+
+    FILE* src = fopen(hr->so_path, "rb");
+    void* new_handle = NULL;
+    if (src) {
+        FILE* dst = fopen(tmp_path, "wb");
+        if (dst) {
+            char buf[65536];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), src)) > 0)
+                fwrite(buf, 1, n, dst);
+            fclose(dst);
+
+            new_handle = dlopen(tmp_path, RTLD_NOW | RTLD_LOCAL);
+            unlink(tmp_path);
+        }
+        fclose(src);
+    }
+
+    if (!new_handle) {
+        const char* err = dlerror();
+        fprintf(stderr, "hr: reload failed: %s\n", err ? err : "cannot open .so file");
+        // Rollback: keep old handle, function pointers untouched
+        hr->state = hr->handle_current ? HR_OK : HR_ERROR;
+        block_thaw();
+        if (hr->callback) hr->callback(hr->so_path);
+        pthread_mutex_unlock(&hr->mutex);
+        return -1;
+    }
+
+    // Swap function pointers atomically
+    for (int i = 0; i < hr->symbol_count; i++) {
+        void* sym = dlsym(new_handle, hr->symbols[i].name);
+        if (sym) {
+            __atomic_store(hr->symbols[i].func_ptr, &sym, __ATOMIC_SEQ_CST);
+        } else {
+            fprintf(stderr, "hr: symbol '%s' not found in new .so\n",
+                    hr->symbols[i].name);
+        }
+    }
+
+    // Close old handle
+    if (hr->handle_current) {
+        dlclose(hr->handle_current);
+    }
+    hr->handle_current = new_handle;
+    hr->state = HR_OK;
+
+    block_thaw();
+    if (hr->callback) hr->callback(hr->so_path);
+
+    pthread_mutex_unlock(&hr->mutex);
+    return 0;
+}
+
+// Watch thread function
+static void* watch_thread_fn(void* arg) {
+    HotReloadEngine* hr = (HotReloadEngine*)arg;
+
+    char buf[EVENT_BUF_LEN] __attribute__((aligned(8)));
+
+    while (hr->running) {
+        ssize_t len = read(hr->inotify_fd, buf, sizeof(buf));
+        if (len <= 0) continue;
+
+        size_t i = 0;
+        while (i < (size_t)len) {
+            struct inotify_event* event = (struct inotify_event*)&buf[i];
+
+            if ((event->mask & IN_CLOSE_WRITE) &&
+                event->len > 0 &&
+                strcmp(event->name, hr->so_basename) == 0) {
+                // Small delay to let file writes complete
+                struct timespec ts = {0, 50000000};
+                nanosleep(&ts, NULL);
+                hr_reload(hr);
+            }
+
+            i += sizeof(struct inotify_event) + event->len;
+        }
+    }
+
+    return NULL;
+}
+
+int hr_start_watching(HotReloadEngine* hr) {
+    hr->inotify_fd = inotify_init1(IN_NONBLOCK);
+    if (hr->inotify_fd < 0) {
+        perror("inotify_init");
+        return -1;
+    }
+
+    // Watch directory of the .so file
+    char dir_path[1024];
+    size_t path_len = strlen(hr->so_path);
+    if (path_len >= sizeof(dir_path)) path_len = sizeof(dir_path) - 1;
+    memcpy(dir_path, hr->so_path, path_len);
+    dir_path[path_len] = '\0';
+    char* last_slash = strrchr(dir_path, '/');
+    if (last_slash) *last_slash = '\0';
+    else strcpy(dir_path, ".");
+
+    hr->watch_fd = inotify_add_watch(hr->inotify_fd, dir_path, IN_CLOSE_WRITE);
+    if (hr->watch_fd < 0) {
+        perror("inotify_add_watch");
+        return -1;
+    }
+
+    hr->running = 1;
+    if (pthread_create(&hr->watch_thread, NULL, watch_thread_fn, hr) != 0) {
+        perror("pthread_create");
+        hr->running = 0;
+        return -1;
+    }
+
+    return 0;
+}
+
+HotReloadState hr_state(HotReloadEngine* hr) {
+    return (HotReloadState)atomic_load(&hr->state);
+}
+
+void hr_set_callback(HotReloadEngine* hr, hr_callback_t cb) {
+    hr->callback = cb;
+}
+
+void hr_destroy(HotReloadEngine* hr) {
+    if (hr->running) {
+        hr->running = 0;
+        pthread_join(hr->watch_thread, NULL);
+    }
+
+    if (hr->inotify_fd >= 0) close(hr->inotify_fd);
+    if (hr->handle_current) dlclose(hr->handle_current);
+    if (hr->handle_new) dlclose(hr->handle_new);
+
+    pthread_mutex_destroy(&hr->mutex);
+    free(hr);
+}
+)";
+const size_t _runtime_hot_reload_c_len = sizeof(_runtime_hot_reload_c) - 1;
+
+const char _runtime_libs_window_window_linux_c[] = R"(
+/**
+ * window_linux.c — X11 backend for Meta-C Window library
+ *
+ * Uses Xlib directly (no XCB) for lower overhead and simpler sync.
+ * The event queue is allocated from the Meta-C block allocator.
+ */
+
+#include "window_internal.h"
+
+#include <X11/Xlib.h>
+#include <X11/Xatom.h>
+#include <X11/Xutil.h>
+#include <X11/keysym.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+/* Reuse io.h's printf-style logging — or we add a simple log macro. */
+#include "../../io.h"
+
+/* ─── Key mapping helpers ─── */
+
+static int x11_keycode_to_meta(KeySym ks) {
+    switch (ks) {
+        case XK_Escape:    return 256;
+        case XK_Return:    return 257;
+        case XK_Tab:       return 258;
+        case XK_Left:      return 263;
+        case XK_Right:     return 262;
+        case XK_Up:        return 265;
+        case XK_Down:      return 264;
+        case XK_Shift_L:
+        case XK_Shift_R:   return 340;
+        case XK_Control_L:
+        case XK_Control_R: return 341;
+        case XK_Alt_L:
+        case XK_Alt_R:     return 342;
+        case XK_space:     return 32;
+        default:
+            if (ks >= XK_a && ks <= XK_z) return (int)ks - XK_a + 97;
+            if (ks >= XK_0 && ks <= XK_9) return (int)ks;
+            return 0;
+    }
+}
+
+/* ─── Creation ─── */
+
+MetaWindow* meta_window_create(
+    BlockCtx* block, const char* title, int width, int height, uint32_t flags
+) {
+    if (!block) return NULL;
+
+    MetaWindow* w = (MetaWindow*)block_alloc(block, sizeof(MetaWindow));
+    if (!w) return NULL;
+
+    event_queue_init(&w->event_queue);
+    w->width  = width;
+    w->height = height;
+    w->flags  = flags;
+    w->block  = block;
+
+    if (title) {
+        size_t len = strlen(title);
+        if (len >= sizeof(w->title)) len = sizeof(w->title) - 1;
+        memcpy(w->title, title, len);
+        w->title[len] = '\0';
+    } else {
+        memcpy(w->title, "Meta-C", 7);
+    }
+
+    /* Open X display */
+    Display* dpy = XOpenDisplay(NULL);
+    if (!dpy) {
+        io_print_string("FATAL: Cannot open X display", 28);
+        return NULL;
+    }
+
+    int screen = DefaultScreen(dpy);
+    Window root = RootWindow(dpy, screen);
+
+    /* Window attributes */
+    XSetWindowAttributes attrs;
+    attrs.event_mask =
+        ExposureMask | KeyPressMask | KeyReleaseMask |
+        ButtonPressMask | ButtonReleaseMask |
+        PointerMotionMask |
+        StructureNotifyMask | FocusChangeMask;
+
+    Window xwin = XCreateWindow(
+        dpy, root,
+        0, 0, width, height, 0,
+        CopyFromParent, InputOutput,
+        CopyFromParent,
+        CWEventMask, &attrs
+    );
+
+    /* Set title via WM hints */
+    XStoreName(dpy, xwin, w->title);
+    Atom wm_delete = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+    XSetWMProtocols(dpy, xwin, &wm_delete, 1);
+
+    /* Resizability */
+    if (!(flags & META_WINDOW_RESIZABLE)) {
+        XSizeHints hints;
+        hints.flags = PMinSize | PMaxSize;
+        hints.min_width  = width;
+        hints.max_width  = width;
+        hints.min_height = height;
+        hints.max_height = height;
+        XSetWMNormalHints(dpy, xwin, &hints);
+    }
+
+    /* Fullscreen */
+    if (flags & META_WINDOW_FULLSCREEN) {
+        Atom wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
+        Atom full = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+        XChangeProperty(dpy, xwin, wm_state, XA_ATOM, 32,
+                        PropModeReplace, (unsigned char*)&full, 1);
+    }
+
+    GC gc = XCreateGC(dpy, xwin, 0, NULL);
+
+    /* Sync before storing */
+    XMapWindow(dpy, xwin);
+    XFlush(dpy);
+
+    w->display = (void*)dpy;
+    w->window  = (unsigned long)xwin;
+    w->gc      = (unsigned long)gc;
+
+    return w;
+}
+
+/* ─── Destruction ─── */
+
+void meta_window_destroy(MetaWindow* w) {
+    if (!w) return;
+    Display* dpy = (Display*)w->display;
+    if (dpy) {
+        XFreeGC(dpy, (GC)w->gc);
+        XDestroyWindow(dpy, (Window)w->window);
+        XCloseDisplay(dpy);
+    }
+    w->display = NULL;
+}
+
+/* ─── Event polling ─── */
+
+int meta_window_poll_events(MetaWindow* w) {
+    if (!w) return 0;
+    Display* dpy = (Display*)w->display;
+    int count = 0;
+
+    /* Process all pending X11 events */
+    XEvent xe;
+    while (XPending(dpy)) {
+        XNextEvent(dpy, &xe);
+
+        MetaEvent me;
+        memset(&me, 0, sizeof(me));
+        me.timestamp_ms = 0; /* X11 timestamps are server-time; skip for now */
+
+        switch (xe.type) {
+            case ClientMessage: {
+                Atom wm_delete = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
+                if ((Atom)xe.xclient.data.l[0] == wm_delete) {
+                    me.type = META_EVENT_CLOSE;
+                    w->should_close = 1;
+                }
+                break;
+            }
+            case DestroyNotify:
+                me.type = META_EVENT_CLOSE;
+                w->should_close = 1;
+                break;
+            case ConfigureNotify: {
+                int new_w = xe.xconfigure.width;
+                int new_h = xe.xconfigure.height;
+                if (new_w != w->width || new_h != w->height) {
+                    w->width  = new_w;
+                    w->height = new_h;
+                    me.type = META_EVENT_RESIZE;
+                    me.data.resize.width  = new_w;
+                    me.data.resize.height = new_h;
+                }
+                break;
+            }
+            case KeyPress: {
+                KeySym ks = XLookupKeysym(&xe.xkey, 0);
+                me.type = META_EVENT_KEY_DOWN;
+                me.data.key.keycode = x11_keycode_to_meta(ks);
+                me.data.key.mods    = xe.xkey.state;
+                break;
+            }
+            case KeyRelease: {
+                KeySym ks = XLookupKeysym(&xe.xkey, 0);
+                me.type = META_EVENT_KEY_UP;
+                me.data.key.keycode = x11_keycode_to_meta(ks);
+                me.data.key.mods    = xe.xkey.state;
+                break;
+            }
+            case ButtonPress:
+            case ButtonRelease: {
+                if (xe.xbutton.button >= 4 && xe.xbutton.button <= 7) {
+                    /* Scroll wheel */
+                    me.type = META_EVENT_MOUSE_WHEEL;
+                    me.data.mouse_wheel.delta =
+                        (xe.xbutton.button == 4 || xe.xbutton.button == 6) ? 1.0 : -1.0;
+                } else {
+                    me.type = (xe.type == ButtonPress)
+                              ? META_EVENT_MOUSE_BTN
+                              : META_EVENT_MOUSE_BTN;
+                    me.data.mouse_btn.button = (int)xe.xbutton.button;
+                    me.data.mouse_btn.action = (xe.type == ButtonPress) ? 1 : 0;
+                    me.data.mouse_btn.mods   = xe.xbutton.state;
+                }
+                break;
+            }
+            case MotionNotify:
+                me.type = META_EVENT_MOUSE_MOVE;
+                me.data.mouse_move.x = xe.xmotion.x;
+                me.data.mouse_move.y = xe.xmotion.y;
+                break;
+            default:
+                continue; /* skip unhandled */
+        }
+
+        if (me.type != META_EVENT_NONE) {
+            event_queue_push(&w->event_queue, &me);
+            count++;
+        }
+    }
+
+    return count;
+}
+
+int meta_window_next_event(MetaWindow* w, MetaEvent* out) {
+    if (!w || !out) return 0;
+    return event_queue_pop(&w->event_queue, out);
+}
+
+/* ─── Swap buffers ─── */
+
+void meta_window_swap_buffers(MetaWindow* w) {
+    if (!w) return;
+    Display* dpy = (Display*)w->display;
+    XFlush(dpy);
+}
+
+/* ─── Queries ─── */
+
+int meta_window_should_close(MetaWindow* w) {
+    return w ? w->should_close : 1;
+}
+
+void meta_window_set_title(MetaWindow* w, const char* title) {
+    if (!w || !title) return;
+    size_t len = strlen(title);
+    if (len >= sizeof(w->title)) len = sizeof(w->title) - 1;
+    memcpy(w->title, title, len);
+    w->title[len] = '\0';
+    Display* dpy = (Display*)w->display;
+    if (dpy) XStoreName(dpy, (Window)w->window, w->title);
+}
+
+void meta_window_get_size(MetaWindow* w, int* out_w, int* out_h) {
+    if (!w) return;
+    if (out_w) *out_w = w->width;
+    if (out_h) *out_h = w->height;
+}
+
+void meta_window_set_fullscreen(MetaWindow* w, int fullscreen) {
+    if (!w) return;
+    Display* dpy = (Display*)w->display;
+    if (!dpy) return;
+    Atom wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
+    Atom full     = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
+    XEvent xe;
+    memset(&xe, 0, sizeof(xe));
+    xe.type = ClientMessage;
+    xe.xclient.window = (Window)w->window;
+    xe.xclient.message_type = wm_state;
+    xe.xclient.format = 32;
+    xe.xclient.data.l[0] = fullscreen ? 1 : 0; /* _NET_WM_STATE_ADD / _REMOVE */
+    xe.xclient.data.l[1] = (long)full;
+    XSendEvent(dpy, DefaultRootWindow(dpy), False,
+               SubstructureRedirectMask | SubstructureNotifyMask, &xe);
+}
+
+void* meta_window_native_handle(MetaWindow* w) {
+    if (!w) return NULL;
+    return (void*)(uintptr_t)w->window;
+}
+)";
+const size_t _runtime_libs_window_window_linux_c_len = sizeof(_runtime_libs_window_window_linux_c) - 1;
+
+const char _runtime_libs_window_window_hr_c[] = R"(
+/**
+ * window_hr.c — Hot reload support for Meta-C Window library
+ *
+ * Defines the global function pointer table and hooks into the
+ * HotReloadEngine so that all window API calls can be swapped
+ * atomically at runtime when the .so is recompiled.
+ */
+
+#include "window_hr.h"
+#include "../../hot_reload.h"
+
+/* ─── Global function table ─── */
+
+MetaWindowFuncTable meta_window_table = { NULL };
+
+/* ─── Registration ─── */
+
+int meta_window_hr_init(HotReloadEngine* hr) {
+    if (!hr) return -1;
+
+    hr_register_func(hr, "meta_window_create",       &meta_window_table.create);
+    hr_register_func(hr, "meta_window_destroy",       &meta_window_table.destroy);
+    hr_register_func(hr, "meta_window_poll_events",   &meta_window_table.poll_events);
+    hr_register_func(hr, "meta_window_next_event",    &meta_window_table.next_event);
+    hr_register_func(hr, "meta_window_swap_buffers",  &meta_window_table.swap_buffers);
+    hr_register_func(hr, "meta_window_should_close",  &meta_window_table.should_close);
+    hr_register_func(hr, "meta_window_set_title",     &meta_window_table.set_title);
+    hr_register_func(hr, "meta_window_get_size",      &meta_window_table.get_size);
+    hr_register_func(hr, "meta_window_set_fullscreen",&meta_window_table.set_fullscreen);
+    hr_register_func(hr, "meta_window_native_handle", &meta_window_table.native_handle);
+
+    return hr_load_initial(hr);
+}
+
+/* ─── Convenience: create, init, start watching ─── */
+
+HotReloadEngine* meta_window_hr_start(const char* so_path) {
+    HotReloadEngine* hr = hr_create(so_path);
+    if (!hr) return NULL;
+
+    if (meta_window_hr_init(hr) != 0) {
+        hr_destroy(hr);
+        return NULL;
+    }
+
+    if (hr_start_watching(hr) != 0) {
+        hr_destroy(hr);
+        return NULL;
+    }
+
+    return hr;
+}
+)";
+const size_t _runtime_libs_window_window_hr_c_len = sizeof(_runtime_libs_window_window_hr_c) - 1;
+
+const EmbeddedFile _runtime_sources[] = {
+    {"block_memory.h", _runtime_block_memory_h, _runtime_block_memory_h_len},
+    {"block_memory.c", _runtime_block_memory_c, _runtime_block_memory_c_len},
+    {"io.h", _runtime_io_h, _runtime_io_h_len},
+    {"io.c", _runtime_io_c, _runtime_io_c_len},
+    {"hot_reload.h", _runtime_hot_reload_h, _runtime_hot_reload_h_len},
+    {"libs/window/window.h", _runtime_libs_window_window_h, _runtime_libs_window_window_h_len},
+    {"libs/window/window_internal.h", _runtime_libs_window_window_internal_h, _runtime_libs_window_window_internal_h_len},
+    {"libs/window/window_hr.h", _runtime_libs_window_window_hr_h, _runtime_libs_window_window_hr_h_len},
+    {"hot_reload.c", _runtime_hot_reload_c, _runtime_hot_reload_c_len},
+    {"libs/window/window_linux.c", _runtime_libs_window_window_linux_c, _runtime_libs_window_window_linux_c_len},
+    {"libs/window/window_hr.c", _runtime_libs_window_window_hr_c, _runtime_libs_window_window_hr_c_len},
+};
+
+const char* _runtime_flags[] = {
+    "-ldl",
+    "-lpthread",
+    "-lX11",
+};
+
+const RuntimeInfo runtime_info = {
+    "linux",
+    "gcc",
+    11,
+    _runtime_sources,
+    3,
+    _runtime_flags,
+};
+
+} }

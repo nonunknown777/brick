@@ -1,0 +1,28 @@
+# Progresso - Parser
+# Progress - Parser
+
+- [x] AST nodes definitions (ast.h)
+- [x] Parser básico: structs, funções, blocos
+- [x] Basic parser: structs, functions, blocks
+- [x] Expressões (binária, unária, chamadas, membros, índices)
+- [x] Expressions (binary, unary, calls, members, indices)
+- [x] Suporte a @ (AllocInline)
+- [x] Support for @ (AllocInline)
+- [x] Atribuição composta (+=, -=, *=, /=)
+- [x] Compound assignment (+=, -=, *=, /=)
+- [x] Declaração de variável (type name = expr)
+- [x] Variable declaration (type name = expr)
+- [x] Controle de fluxo (if, while, for, return)
+- [x] Flow control (if, while, for, return)
+- [x] Auto inserção de ; entre linhas (Go-style)
+- [x] Auto semicolon insertion between lines (Go-style)
+- [x] Package resolver (package, using, visibilidade)
+- [x] Package resolver (package, using, visibility)
+- [x] Tratamento de erros
+- [x] Error handling
+- [x] Testes (3/3 passando)
+- [x] Tests (3/3 passing)
+- [x] Integração com Lexer
+- [x] Integration with Lexer
+- [ ] Integração com Codegen (pendente task 03)
+- [ ] Integration with Codegen (pending task 03)

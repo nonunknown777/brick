@@ -1,0 +1,24 @@
+# Build output
+build/
+*.o
+*.a
+*.so
+
+# SCons cache
+.scons_cache/
+.sconsign.dblite
+
+# Compiled binaries (root-level)
+hello
+meus-testes/main
+
+# Generated C from .mc compilation
+hello.c
+meus-testes/main.c
+
+# VS Code (personal IDE settings)
+.vscode/
+
+# OS junk
+.DS_Store
+Thumbs.db

@@ -1,0 +1,13 @@
+package MAIN;
+
+using IO;
+
+block global = 8MB
+block strs = 1MB
+
+fn main() {
+    String str = "Hello world" @strs
+    print(str)
+    global.reset()
+    strs.reset()
+}

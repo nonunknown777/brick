@@ -1,0 +1,46 @@
+# Build: Compiler libraries + meta-c CLI
+Import('env', 'platform_libs', 'has_visualizer', 'target', 'has_x11')
+
+import sys, os
+
+# ─── Generate embedded runtime ──────────────────────────────
+out_dir = Dir('#src').abspath
+gen_h   = os.path.join(out_dir, 'embedded_runtime.h')
+gen_cpp = os.path.join(out_dir, 'embedded_runtime.cpp')
+
+embed_cmd = (
+    f'{sys.executable} {File("#scripts/embed_runtime.py").abspath}'
+    f' --target {target}'
+    f' --runtime-dir {Dir("#runtime").abspath}'
+    f' --out-h {gen_h}'
+    f' --out-cpp {gen_cpp}'
+)
+if target == 'linux' and has_x11:
+    embed_cmd += ' --has-x11'
+
+env.Command([gen_h, gen_cpp], ['#scripts/embed_runtime.py'], embed_cmd)
+
+# ─── Libraries ──────────────────────────────────────────────
+lib_lexer   = env.Library('#build/meta_lexer',   ['lexer/lexer.cpp'])
+lib_parser  = env.Library('#build/meta_parser',  ['parser/parser.cpp',
+                                                   'parser/package.cpp'])
+lib_codegen = env.Library('#build/meta_codegen', ['codegen/codegen.cpp',
+                                                   'codegen/type_checker.cpp'])
+lib_shared  = env.Library('#build/meta_shared',  ['shared/lsp.cpp',
+                                                   gen_cpp])
+
+# ─── CLI Program ────────────────────────────────────────────
+meta_c_libs = [
+    'meta_lexer', 'meta_parser', 'meta_codegen', 'meta_shared',
+    'meta_runtime',
+] + platform_libs
+
+if has_visualizer:
+    meta_c_libs.remove('meta_runtime')
+    meta_c_libs.append('meta_visualizer')
+    meta_c_libs.append('meta_runtime')
+    meta_c_libs.append('ncurses')
+
+meta_c = env.Program('#build/meta-c', ['main.cpp'], LIBS=meta_c_libs)
+
+Return('meta_c')
