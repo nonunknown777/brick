@@ -13,8 +13,8 @@ Next step: Pending — see NEXT.md
 Última ação: Correções de compatibilidade GDB 17 + descoberta dinâmica
 Last action: GDB 17 compatibility fixes + dynamic discovery
 
-Pendências: Nenhuma
-Pending: None
+Pendências: NOVA FEATURE — Tipos Explícitos de Largura Fixa (ver NEXT.md)
+Pending: NEW FEATURE — Explicit Fixed-Width Types (see NEXT.md)
 
 ## Features verificadas (GDB 17 batch)
 ## Features verified (GDB 17 batch)

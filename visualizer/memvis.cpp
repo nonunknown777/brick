@@ -8,7 +8,6 @@
 #include <fcntl.h>
 
 // ─── helpers ─────────────────────────────────────────────────
-// ─── helpers ──────────────────────────────────────────────────
 
 static void fmt_size(char* buf, size_t n, size_t bytes) {
     if (bytes >= 1024ULL * 1024 * 1024)
@@ -22,19 +21,20 @@ static void fmt_size(char* buf, size_t n, size_t bytes) {
 }
 
 static void draw_bar(WINDOW* w, int y, int x, int width, int pct) {
+    if (width <= 0) return;
     int filled = (pct * width + 50) / 100;
     if (filled > width) filled = width;
     if (filled < 0)     filled = 0;
 
-    char buf[256];
+    char buf[512];
     int pos = 0;
     for (int i = 0; i < width; i++) {
         int rem = (int)sizeof(buf) - pos - 4;
         if (rem < 0) break;
         if (i < filled) {
-            buf[pos++] = (char)0xE2; buf[pos++] = (char)0x96; buf[pos++] = (char)0x88; // █
+            buf[pos++] = (char)0xE2; buf[pos++] = (char)0x96; buf[pos++] = (char)0x88;
         } else {
-            buf[pos++] = (char)0xE2; buf[pos++] = (char)0x96; buf[pos++] = (char)0x91; // ░
+            buf[pos++] = (char)0xE2; buf[pos++] = (char)0x96; buf[pos++] = (char)0x91;
         }
     }
     buf[pos] = '\0';
@@ -42,7 +42,6 @@ static void draw_bar(WINDOW* w, int y, int x, int width, int pct) {
 }
 
 // ─── shared memory reader ────────────────────────────────────
-// ─── leitor de memoria compartilhada ─────────────────────────
 
 int memvis_read_shm(int pid, BlockInfo* blocks, int max_blocks) {
     char path[256];
@@ -66,30 +65,83 @@ int memvis_read_shm(int pid, BlockInfo* blocks, int max_blocks) {
     return (n > 0) ? count : 0;
 }
 
-// ─── shared TUI render logic ─────────────────────────────────
-// ─── logica de renderizacao TUI compartilhada ────────────────
+// ─── TUI layout constants ────────────────────────────────────
 
-enum { COL_NAME = 0, COL_SIZE = 14, COL_BAR = 24, BAR_W = 15,
-       COL_PCT = COL_BAR + BAR_W + 2, COL_USED = COL_PCT + 6 };
+enum {
+    COL_NAME  = 0,
+    COL_SIZE  = 14,
+    COL_BAR   = 24,
+    BAR_W     = 15,
+    COL_PCT   = COL_BAR + BAR_W + 2,
+    COL_USED  = COL_PCT + 6,
+    COL_ALLOC = COL_USED + 10,
+    LAYOUT_W  = COL_ALLOC + 10
+};
+
+// ─── render functions ────────────────────────────────────────
 
 static void render_title(int max_x, MemVisConfig cfg, const char* suffix) {
     attron(A_BOLD);
     mvprintw(0, 0, "  META-C Memory Visualizer%s", suffix ? suffix : "");
     attroff(A_BOLD);
-    mvprintw(0, max_x - 22, "refresh: %dms", cfg.refresh_ms);
+    if (max_x >= 22)
+        mvprintw(0, max_x - 22, "refresh: %dms", cfg.refresh_ms);
 }
 
 static void render_header(void) {
     attron(A_UNDERLINE);
-    mvprintw(2, COL_NAME, "%-12s %8s  %s  %5s %8s",
-             "Block", "Size", "Usage", "%", "Used");
+    mvprintw(2, COL_NAME, "%-12s %8s  %s  %5s %8s  %s",
+             "Block", "Size", "Usage", "%", "Used", "Allocs");
     attroff(A_UNDERLINE);
 }
 
+static void render_summary(BlockInfo* blocks, int count) {
+    size_t total_cap = 0, total_used = 0, total_peak = 0;
+    size_t total_allocs = 0;
+    for (int i = 0; i < count; i++) {
+        total_cap   += blocks[i].capacity;
+        total_used  += blocks[i].used;
+        total_peak  += blocks[i].peak_used;
+        total_allocs += blocks[i].allocation_count;
+    }
+    size_t total_free = total_cap - total_used;
+
+    char cap[16], used[16], free[16], peak[16];
+    fmt_size(cap, sizeof(cap), total_cap);
+    fmt_size(used, sizeof(used), total_used);
+    fmt_size(free, sizeof(free), total_free);
+    fmt_size(peak, sizeof(peak), total_peak);
+
+    attron(A_BOLD);
+    int y = 3;
+    mvprintw(y, COL_NAME, "%-12s %8s ", "TOTAL", cap);
+    attroff(A_BOLD);
+
+    int pct = total_cap > 0 ? (int)(total_used * 100 / total_cap) : 0;
+    draw_bar(stdscr, y, COL_BAR, BAR_W, pct);
+
+    mvprintw(y, COL_PCT, "%3d%% ", pct);
+    mvprintw(y, COL_USED, "%8s", used);
+    mvprintw(y, COL_ALLOC, "%8zu", total_allocs);
+
+    // Show summary at right side
+    if (free[0]) {
+        mvprintw(y, COL_ALLOC + 10, "free: %s  peak: %s", free, peak);
+    }
+}
+
 static void render_blocks(BlockInfo* blocks, int count,
-                          int selection, int max_y) {
-    for (int i = 0; i < count && i < max_y - 6; i++) {
-        int y = 3 + i;
+                          int selection, int max_y, bool detail_mode) {
+    int start_row = 4;
+    int max_rows  = max_y - 8;
+    if (max_rows < 0) max_rows = 0;
+
+    // If detail is expanded, we need fewer rows for blocks
+    if (count > 0 && detail_mode) max_rows -= 4;
+    if (max_rows < 1) max_rows = 1;
+
+    for (int i = 0; i < count && i < max_rows; i++) {
+        int y = start_row + i;
         float pct = blocks[i].capacity > 0
             ? (float)blocks[i].used / blocks[i].capacity * 100.0f : 0.0f;
 
@@ -99,6 +151,8 @@ static void render_blocks(BlockInfo* blocks, int count,
             attron(COLOR_PAIR(1));
         else if (pct > 60.0f && has_colors())
             attron(COLOR_PAIR(3));
+        else if (has_colors())
+            attron(COLOR_PAIR(2));
 
         char sz[16], us[16];
         fmt_size(sz, sizeof(sz), blocks[i].capacity);
@@ -107,14 +161,17 @@ static void render_blocks(BlockInfo* blocks, int count,
         mvprintw(y, COL_NAME, "%-12s %8s ", blocks[i].name, sz);
         draw_bar(stdscr, y, COL_BAR, BAR_W, (int)pct);
 
-        if (has_colors()) { attroff(COLOR_PAIR(1)); attroff(COLOR_PAIR(3)); }
+        if (has_colors()) {
+            attroff(COLOR_PAIR(1)); attroff(COLOR_PAIR(3)); attroff(COLOR_PAIR(2));
+        }
 
         mvprintw(y, COL_PCT, "%3.0f%% ", pct);
         mvprintw(y, COL_USED, "%8s", us);
+        mvprintw(y, COL_ALLOC, "%8zu", blocks[i].allocation_count);
 
         if (pct > 80.0f) {
             if (has_colors()) attron(COLOR_PAIR(1) | A_BOLD);
-            mvaddch(y, COL_USED + 9, ACS_DIAMOND);
+            mvaddch(y, COL_ALLOC + 9, ACS_DIAMOND);
             if (has_colors()) attroff(COLOR_PAIR(1) | A_BOLD);
         }
 
@@ -123,13 +180,16 @@ static void render_blocks(BlockInfo* blocks, int count,
 }
 
 static void render_detail(BlockInfo* blocks, int count, int selection,
-                          int max_y, int max_x) {
-    int dy = 3 + count + 1;
-    if (dy > max_y - 5) dy = max_y - 5;
-    if (dy < 4)         dy = 4;
+                          int max_y, int max_x, bool expanded) {
+    int detail_y = 4 + count + 1;
+    int max_rows = max_y - 7;
+    if (detail_y > max_rows) detail_y = max_rows;
+    if (detail_y < 5)        detail_y = 5;
 
-    mvhline(dy, 0, ACS_HLINE, max_x);
-    dy++;
+    mvhline(detail_y, 0, ACS_HLINE, max_x);
+    detail_y++;
+
+    if (detail_y >= max_y - 1) return;
 
     if (count > 0 && selection >= 0 && selection < count) {
         const BlockInfo& s = blocks[selection];
@@ -137,7 +197,7 @@ static void render_detail(BlockInfo* blocks, int count, int selection,
             ? (float)s.used / s.capacity * 100.0f : 0.0f;
 
         if (has_colors()) attron(COLOR_PAIR(4) | A_BOLD);
-        mvprintw(dy, 0, "  [%s]", s.name);
+        mvprintw(detail_y, 0, "  [%s]", s.name);
         if (has_colors()) attroff(COLOR_PAIR(4) | A_BOLD);
 
         char sz[16], pk[16], us[16];
@@ -145,25 +205,56 @@ static void render_detail(BlockInfo* blocks, int count, int selection,
         fmt_size(pk, sizeof(pk), s.peak_used);
         fmt_size(us, sizeof(us), s.used);
 
-        mvprintw(dy + 1, 2, "capacity:    %s  ", sz);
-        mvprintw(dy + 1, 30, "used:    %s (%.0f%%)", us, pct);
-        mvprintw(dy + 2, 2, "allocations: %zu", s.allocation_count);
-        mvprintw(dy + 2, 30, "peak:    %s", pk);
-        mvprintw(dy + 3, 2, "available:   %zuB", s.capacity - s.used);
+        mvprintw(detail_y + 1, 2, "capacity:    %s  ", sz);
+        mvprintw(detail_y + 1, 30, "used:    %s (%.0f%%)", us, pct);
+        mvprintw(detail_y + 2, 2, "allocations: %zu", s.allocation_count);
+        mvprintw(detail_y + 2, 30, "peak:    %s", pk);
+        mvprintw(detail_y + 3, 2, "available:   %zuB", s.capacity - s.used);
+
+        // avg size
+        if (s.allocation_count > 0) {
+            size_t avg = s.used / s.allocation_count;
+            char avg_sz[16];
+            fmt_size(avg_sz, sizeof(avg_sz), avg);
+            mvprintw(detail_y + 3, 30, "avg size: %s", avg_sz);
+        }
+
+        if (expanded) {
+            float utilization = pct;
+            mvprintw(detail_y + 4, 2, "utilization: %.1f%%", utilization);
+            mvprintw(detail_y + 4, 30, "peak util:  %.1f%%",
+                     s.capacity > 0 ? (float)s.peak_used / s.capacity * 100.0f : 0.0f);
+        }
     } else {
-        mvprintw(dy, 2, "(no blocks)");
+        mvprintw(detail_y, 2, "(no blocks)");
     }
 }
 
-static void render_help(int max_x, int max_y, bool demo) {
+static void render_help(int max_x, int max_y, bool demo, bool detail_mode) {
     mvhline(max_y - 1, 0, ' ', max_x);
     attron(A_REVERSE);
+    const char* help =
+        detail_mode
+        ? " 'q' quit "
+        : " '↑↓' select  '→' detail  'r' reset  'q' quit ";
+
     if (demo)
         mvprintw(max_y - 1, 0, " 'r' reset  'q' quit ");
     else
-        mvprintw(max_y - 1, 0, " 'q' quit ");
-    mvprintw(max_y - 1, max_x - 18, "Meta-C v0.1");
+        mvprintw(max_y - 1, 0, "%s", help);
+    if (max_x >= 18)
+        mvprintw(max_y - 1, max_x - 18, "Meta-C v0.1");
     attroff(A_REVERSE);
+}
+
+static void render_no_blocks(int max_y, int max_x) {
+    clear();
+    attron(A_BOLD);
+    mvprintw(max_y / 2, (max_x - 20) / 2, "No blocks registered.");
+    attroff(A_BOLD);
+    mvprintw(max_y / 2 + 1, (max_x - 30) / 2,
+             "Run a Meta-C program with tracking enabled.");
+    refresh();
 }
 
 static void setup_ncurses(int timeout_ms) {
@@ -185,7 +276,6 @@ static void setup_ncurses(int timeout_ms) {
 }
 
 // ─── embedded mode (reads from runtime registry) ─────────────
-// ─── modo embutido (le do registro runtime) ──────────────────
 
 void memvis_run(MemVisConfig config) {
     setup_ncurses(config.refresh_ms);
@@ -194,7 +284,6 @@ void memvis_run(MemVisConfig config) {
     int block_count = (int)block_snapshot(blocks, META_C_MAX_BLOCKS);
 
     // fallback: create demo blocks if nothing registered
-    // fallback: cria blocos de demonstracao se nada registrado
     BlockCtx* demos[META_C_MAX_BLOCKS];
     int ndemos = 0;
     bool demo = (block_count == 0);
@@ -216,6 +305,7 @@ void memvis_run(MemVisConfig config) {
 
     bool running = true;
     int sel = 0;
+    bool detail_mode = false;
     char title_sfx[64] = {0};
     if (demo) snprintf(title_sfx, sizeof(title_sfx), "  [demo]");
 
@@ -227,15 +317,33 @@ void memvis_run(MemVisConfig config) {
 
         int max_y, max_x;
         getmaxyx(stdscr, max_y, max_x);
+
+        // terminal too small
+        if (max_y < 8 || max_x < LAYOUT_W) {
+            clear();
+            mvprintw(0, 0, "Terminal too small (%dx%d). Need at least %dx%d.",
+                     max_x, max_y, LAYOUT_W, 8);
+            refresh();
+            int ch = getch();
+            if (ch == 'q' || ch == 'Q') running = false;
+            continue;
+        }
+
         clear();
 
         render_title(max_x, config, title_sfx);
         mvhline(1, 0, ACS_HLINE, max_x);
-        render_header();
-        render_blocks(blocks, block_count, sel, max_y);
-        render_detail(blocks, block_count, sel, max_y, max_x);
-        render_help(max_x, max_y, demo);
 
+        if (block_count > 0) {
+            render_header();
+            render_summary(blocks, block_count);
+            render_blocks(blocks, block_count, sel, max_y, detail_mode);
+            render_detail(blocks, block_count, sel, max_y, max_x, detail_mode);
+        } else {
+            render_no_blocks(max_y, max_x);
+        }
+
+        render_help(max_x, max_y, demo, detail_mode);
         refresh();
 
         int ch = getch();
@@ -243,8 +351,12 @@ void memvis_run(MemVisConfig config) {
             case 'q': case 'Q': running = false; break;
             case KEY_UP:    if (sel > 0) sel--; break;
             case KEY_DOWN:  if (sel < block_count - 1) sel++; break;
+            case KEY_RIGHT:
+            case '\n': case '\r':
+                if (block_count > 0) detail_mode = !detail_mode;
+                break;
             case 'r': case 'R':
-                if (demo) {
+                if (demo && block_count > 0 && sel >= 0 && sel < block_count) {
                     BlockCtx* c = block_find(blocks[sel].name);
                     if (c) block_reset(c);
                 }
@@ -263,7 +375,6 @@ void memvis_run(MemVisConfig config) {
 }
 
 // ─── attach mode (reads /tmp/meta-c-mem-<pid>.bin) ──────────
-// ─── modo attach (le /tmp/meta-c-mem-<pid>.bin) ──────────────
 
 void memvis_attach(int pid, MemVisConfig config) {
     setup_ncurses(config.refresh_ms);
@@ -273,6 +384,7 @@ void memvis_attach(int pid, MemVisConfig config) {
     int sel = 0;
     int block_count = 0;
     bool connected = false;
+    bool detail_mode = false;
     char title_sfx[64];
     snprintf(title_sfx, sizeof(title_sfx), "  [attached to PID %d]", pid);
 
@@ -285,6 +397,17 @@ void memvis_attach(int pid, MemVisConfig config) {
 
         int max_y, max_x;
         getmaxyx(stdscr, max_y, max_x);
+
+        if (max_y < 8 || max_x < LAYOUT_W) {
+            clear();
+            mvprintw(0, 0, "Terminal too small (%dx%d). Need at least %dx%d.",
+                     max_x, max_y, LAYOUT_W, 8);
+            refresh();
+            int ch = getch();
+            if (ch == 'q' || ch == 'Q') running = false;
+            continue;
+        }
+
         clear();
 
         render_title(max_x, config, title_sfx);
@@ -303,9 +426,10 @@ void memvis_attach(int pid, MemVisConfig config) {
         }
 
         render_header();
-        render_blocks(blocks, block_count, sel, max_y);
-        render_detail(blocks, block_count, sel, max_y, max_x);
-        render_help(max_x, max_y, false);
+        render_summary(blocks, block_count);
+        render_blocks(blocks, block_count, sel, max_y, detail_mode);
+        render_detail(blocks, block_count, sel, max_y, max_x, detail_mode);
+        render_help(max_x, max_y, false, detail_mode);
 
         refresh();
 
@@ -314,6 +438,10 @@ void memvis_attach(int pid, MemVisConfig config) {
             case 'q': case 'Q': running = false; break;
             case KEY_UP:    if (sel > 0) sel--; break;
             case KEY_DOWN:  if (sel < block_count - 1) sel++; break;
+            case KEY_RIGHT:
+            case '\n': case '\r':
+                if (block_count > 0) detail_mode = !detail_mode;
+                break;
         }
     }
 

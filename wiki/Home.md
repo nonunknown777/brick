@@ -4,19 +4,19 @@
 
 ## Philosophy
 
-- **Performance first**: Bump allocator, no exceptions, no RTTI, no garbage collector. You control memory.
+- **Performance first**: Bump allocator, fixed-width types, no exceptions, no RTTI, no garbage collector.
 - **Explicit memory**: Everything lives in user-managed blocks. No stack for user data, no individual `free()`, no memory leaks.
 - **Hot reload built-in**: Swap code at runtime via `dlopen` + `inotify`. No external tools needed.
-- **Debuggable**: Generated C code has `#line` directives pointing back to your `.mc` source. GDB shows your original Meta-C code.
-- **Readable C output**: The generated C code is clean and readable — you can inspect it, learn from it, or continue development in C if needed.
+- **Debuggable**: Generated C code has `#line` directives pointing back to your `.mc` source.
+- **Fixed-width types**: i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize with compile-time overflow checking.
 
 ## Quick Links
 
 | Page | Description |
 |------|-------------|
 | [Getting Started](Getting-Started) | Install, build, compile, run, debug your first program |
-| [Language Reference](Language-Reference) | Complete syntax, types, blocks, structs, functions, control flow, operators, packages, error handling |
-| [Memory Blocks](Memory-Blocks) | Deep dive into block memory: declaration, allocation, scope, reset, best practices, performance |
+| [Language Reference](Language-Reference) | Complete syntax, types, blocks, structs, functions, control flow, operators, packages |
+| [Memory Blocks](Memory-Blocks) | Deep dive into block memory: declaration, allocation, scope, reset, best practices |
 | [Hot Reload](Hot-Reload) | Architecture, usage, and internals of the hot reload system |
 | [Performance](Performance) | Bump allocator benchmarks, compiler optimizations, comparison vs malloc |
 | [Architecture](Architecture) | Compiler pipeline (Lexer → Parser → Codegen), runtime, visualizer, debugger |
@@ -27,39 +27,43 @@
 ## A Taste of Meta-C
 
 ```meta-c
-package HELLO
+package DEMO
 
 using IO
 
-block global = 64MB
-block temp   = 8MB
+interface Drawable {
+    fn draw()
+}
 
-struct Greeter {
-    String message
+struct Circle {
+    u32 id
+    String name
+    f32 radius
 
-    fn Greeter(String msg) {
-        message = msg
+    fn Circle(u32 i, String n, f32 r) {
+        id = i
+        name = n
+        radius = r
     }
 
-    fn greet() {
-        print(message)
+    fn draw() {
+        print("Circle #{0} radius={1}", id, radius)
     }
 }
 
 fn main() {
-    print("Hello from Meta-C!")
-    print(42)
-    print(3.14)
-    print(true)
-
-    Greeter g = Greeter("Hello World!") @temp
-    g.greet()
-
-    print("done with {0} blocks", 2)
-
-    temp.reset()
-    global.reset()
+    Circle c = Circle(1u32, "Small", 5.0f32) @global
+    c.draw()
 }
+```
+
+## Quick Start
+
+```bash
+git clone https://github.com/nonunknown777/meta-c.git
+cd meta-c
+scons
+meta-c run examples/hello.mc
 ```
 
 ## Project Structure
@@ -73,9 +77,9 @@ meta-c/
 ├── vscode-ext/       → VS Code extension (highlight, LSP, debug webview)
 ├── tests/            → Unit and integration tests
 ├── examples/         → Example .mc code
-├── docs/             → Documentation
+├── docs/             → GitHub Pages site
 ├── benchmarks/       → Performance benchmarks
-├── tasks/            → 10 opencode agents for AI-assisted development
+├── tasks/            → 11 development tasks (AI-assisted)
 ├── SConstruct        → SCons build entry point
 └── build/            → Build artifacts
 ```
@@ -87,6 +91,6 @@ meta-c/
 | Compiler | C++20 | Lexer, Parser, Codegen — produces C code |
 | Runtime | C (C11) | Block memory allocator, hot reload engine, I/O |
 | Visualizer | C++ (ncurses) | Real-time TUI for memory block inspection |
-| Debugger | Python (GDB) | Pretty-printers + custom commands for block debugging |
+| Debugger | Python (GDB) | Pretty-printers + custom commands |
 | VS Code | TypeScript/JSON | Extension with syntax highlighting, LSP, debug webview |
 | Build | Python (SCons) | Build system with cross-compilation support |

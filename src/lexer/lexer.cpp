@@ -31,6 +31,19 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"char",    TokenType::CHAR},
     {"String",  TokenType::STRING},
     {"void",    TokenType::VOID},
+    {"u8",      TokenType::U8},
+    {"u16",     TokenType::U16},
+    {"u32",     TokenType::U32},
+    {"u64",     TokenType::U64},
+    {"i8",      TokenType::I8},
+    {"i16",     TokenType::I16},
+    {"i32",     TokenType::I32},
+    {"i64",     TokenType::I64},
+    {"f32",     TokenType::F32},
+    {"f64",     TokenType::F64},
+    {"usize",   TokenType::USIZE},
+    {"isize",   TokenType::ISIZE},
+    {"byte",    TokenType::BYTE},
 };
 
 class Lexer {
@@ -165,7 +178,11 @@ private:
 
         // Number literal
         // Literal numerico
-        if (std::isdigit(c)) return number_literal(c, loc);
+        if (std::isdigit(c)) {
+            Token t = number_literal(c, loc);
+            t.literal_type = parse_literal_suffix();
+            return t;
+        }
 
         // Identifier or keyword
         // Identificador ou palavra-chave
@@ -240,6 +257,37 @@ private:
             return {it->second, value, loc};
         }
         return {TokenType::IDENTIFIER, value, loc};
+    }
+
+    bool match_suffix(const std::string& suffix) {
+        if (pos + suffix.size() > source.size()) return false;
+        for (size_t i = 0; i < suffix.size(); i++) {
+            if (source[pos + i] != suffix[i]) return false;
+        }
+        size_t next = pos + suffix.size();
+        if (next < source.size() && (std::isalnum(source[next]) || source[next] == '_')) {
+            return false;
+        }
+        return true;
+    }
+
+    std::string parse_literal_suffix() {
+        if (pos >= source.size()) return "";
+        char c = peek();
+        struct { const char* suffix; const char* type; } candidates[] = {
+            {"u64", "u64"}, {"u32", "u32"}, {"u16", "u16"}, {"u8", "u8"},
+            {"usz", "usize"},
+            {"i64", "i64"}, {"i32", "i32"}, {"i16", "i16"}, {"i8", "i8"},
+            {"isz", "isize"},
+            {"f64", "f64"}, {"f32", "f32"},
+        };
+        for (auto& cand : candidates) {
+            if (cand.suffix[0] == c && match_suffix(cand.suffix)) {
+                for (size_t i = 0; cand.suffix[i]; i++) advance();
+                return cand.type;
+            }
+        }
+        return "";
     }
 };
 

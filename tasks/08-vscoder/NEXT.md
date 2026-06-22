@@ -1,19 +1,31 @@
 # Próximo Passo - VSCoder
 # Next Step - VSCoder
 
-## Imediato
-## Immediate
+## ✅ Concluído — Tipos Explícitos de Largura Fixa
+## ✅ Completed — Explicit Fixed-Width Types
 
-Debug webview memory view com dados reais do GDB (vs dados demo atuais).
-Debug webview memory view with real GDB data (vs current demo data).
+### Syntax Highlighting ✅
 
-## Pendências
-## Pending
+Adicionados ao grammar `syntaxes/meta-c.tmLanguage.json`:
+`u8|u16|u32|u64|i8|i16|i32|i64|f32|f64|usize|isize|byte`
 
-- Parser principal (task 02) precisa atualizar para if sem parênteses e @ — os exemplos já compilam, mas o parser C++ precisa ser sincronizado
-- Adicionar testes para o LSP server (testar scanner, completions, hover, signature help)
+### Language Service ✅
+
+Atualizado `languageService.ts`:
+- KEYWORDS + KEYWORD_DOCS + BUILTIN_TYPES com os novos tipos
+- Regex de `isAfterType` atualizada
+
+### Server Completions ✅
+
+Atualizado `server.ts`:
+- `typeKeywordSet` com novos tipos
+- `keywordCompletions` com entradas para cada tipo
+- Context-aware após `private`/`public`
+
+## Pendências anteriores
+## Previous pending
+
+- Debug webview memory view com dados reais do GDB (vs dados demo atuais)
+- Parser principal (task 02) precisa atualizar para if sem parênteses e @
+- Adicionar testes para o LSP server
 - Publicar extensão no Marketplace VS Code
-
-- Main parser (task 02) needs to update for if without parentheses and @ — examples already compile, but the C++ parser needs to be synced
-- Add tests for the LSP server (test scanner, completions, hover, signature help)
-- Publish extension to VS Code Marketplace

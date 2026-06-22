@@ -17,5 +17,9 @@
 - [x] Unit tests (29 tests)
 - [x] Bug `print(str)` com String block-allocada (fix em codegen)
 - [x] Bug `print(str)` with block-allocated String (fix in codegen)
+- [x] Tipos explícitos de largura fixa (u8..u64, i8..i64, f32/f64, usize, isize, byte)
+- [x] Explicit fixed-width types (u8..u64, i8..i64, f32/f64, usize, isize, byte)
+- [x] Suffixos de literal (42u8, 3.14f32, 42usz)
+- [x] Literal suffixes (42u8, 3.14f32, 42usz)
 - [ ] Integração com Parser
 - [ ] Integration with Parser

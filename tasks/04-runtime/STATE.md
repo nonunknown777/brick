@@ -1,33 +1,83 @@
 # Estado Atual - Runtime
 # Current State - Runtime
 
-Sessão: 2026-06-18 + 2026-06-20 (atualizada pela task 10)
-Session: 2026-06-18 + 2026-06-20 (updated by task 10)
+Sessão: 2026-06-22
+Session: 2026-06-22
 
 Progresso: 100%
 Progress: 100%
 
-Última ação: Auto-export no block_alloc_aligned (throttle 1/16) e block_reset
-Last action: Auto-export in block_alloc_aligned (throttle 1/16) and block_reset
+Última ação: Correção de warnings -Wall -Werror, mmap para grandes alocações, mais testes, fix print(char)
+Last action: Fixed -Wall -Werror warnings, mmap for large allocations, more tests, fix print(char)
 
-## Realizado
-## Completed
+## Realizado (nesta sessão)
+## Completed (this session)
 
-- runtime/io.h: API pública com MetaCString typedef + io_print_*
-- runtime/io.c: implementação via printf (io_print_int, float, string, bool, char, newline, printf)
-- extern "C" para compatibilidade C++
-- Usa int64_t/double/MetaCString nos tipos
-- `block_shm_export()` chamado automaticamente a cada 16 allocs em `block_alloc_aligned()`
-- `block_shm_export()` chamado em `block_reset()` para manter attach mode atualizado
-- 56/56 testes passando
+### 1. Correção: `-Wall -Werror` com `META_C_TRACK_BLOCKS` desligado
+### 1. Fix: `-Wall -Werror` without `META_C_TRACK_BLOCKS`
 
-- runtime/io.h: public API with MetaCString typedef + io_print_*
-- runtime/io.c: implementation via printf (io_print_int, float, string, bool, char, newline, printf)
-- extern "C" for C++ compatibility
-- Uses int64_t/double/MetaCString for types
-- `block_shm_export()` called automatically every 16 allocs in `block_alloc_aligned()`
-- `block_shm_export()` called in `block_reset()` to keep attach mode updated
-- 56/56 tests passing
+`block_shm_export()` no-op macro usava `(-1)` que gerava `-Werror=unused-value`
+quando chamado como statement. Mudado para `((void)0)`.
+
+`block_shm_export()` no-op macro used `(-1)` which triggered `-Werror=unused-value`
+when called as a statement. Changed to `((void)0)`.
+
+Auto-export em `block_alloc_aligned` e `block_reset` agora é condicional via
+`#ifdef META_C_TRACK_BLOCKS`, eliminando chamadas desnecessárias quando o
+registro está desligado.
+
+Auto-export in `block_alloc_aligned` and `block_reset` is now conditional via
+`#ifdef META_C_TRACK_BLOCKS`, eliminating unnecessary calls when the registry
+is disabled.
+
+### 2. Performance: mmap para grandes alocações (>= 64KB)
+### 2. Performance: mmap for large allocations (>= 64KB)
+
+`block_create_bytes()` agora usa `mmap()` com `MAP_POPULATE` para alocações
+>= 64KB, permitindo huge pages e melhor desempenho. Alocações menores que
+64KB continuam usando malloc. `block_destroy()` usa `munmap()` para blocos
+mmap'd.
+
+`block_create_bytes()` now uses `mmap()` with `MAP_POPULATE` for allocations
+>= 64KB, enabling huge pages and better performance. Allocations smaller than
+64KB continue using malloc. `block_destroy()` uses `munmap()` for mmap'd blocks.
+
+### 3. Testes: +7 novos testes de runtime (14 total)
+### 3. Tests: +7 new runtime tests (14 total)
+
+- `test_create_bytes` — criação com tamanho exato
+- `test_zero_size_alloc` — alocação de tamanho zero
+- `test_large_alignment` — alinhamento explícito 16/32/64 bytes
+- `test_peak_used` — verifica rastreamento de pico
+- `test_allocation_count` — verifica contagem de alocações (não reseta)
+- `test_stress` — 10000 alocações pequenas em loop
+- `test_freeze_thaw_blocked` — freeze/thaw API não crasha
+
+- `test_create_bytes` — creation with exact size
+- `test_zero_size_alloc` — zero size allocation
+- `test_large_alignment` — explicit 16/32/64 byte alignment
+- `test_peak_used` — verify peak usage tracking
+- `test_allocation_count` — verify allocation count (no reset)
+- `test_stress` — 10000 small allocations in a loop
+- `test_freeze_thaw_blocked` — freeze/thaw API doesn't crash
+
+### 4. Correção: `print('a')` gerava `io_print_u8` em vez de `io_print_char`
+### 4. Fix: `print('a')` generated `io_print_u8` instead of `io_print_char`
+
+`gen_print_single()` em codegen.cpp verificava `tn == "char"` depois de
+`normalize_type_name()` que mapeia `char` → `u8`. Agora verifica o tipo
+original `t == "char"` antes da normalização.
+
+`gen_print_single()` in codegen.cpp checked `tn == "char"` after
+`normalize_type_name()` which maps `char` → `u8`. Now checks the original
+type `t == "char"` before normalization.
+
+### 5. PROGRESS.md atualizado
+### 5. PROGRESS.md updated
+
+Todas as tarefas agora marcadas como concluídas.
+
+All tasks now marked as completed.
 
 ## Pendências
 ## Pending

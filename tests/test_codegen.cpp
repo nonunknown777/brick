@@ -87,7 +87,7 @@ fn main() {
 
     std::string c = cr.c_code;
     check(c.find("typedef struct Player") != std::string::npos, "struct definition");
-    check(c.find("int64_t hp") != std::string::npos, "field type mapping");
+    check(c.find("int32_t hp") != std::string::npos, "field type mapping");
     check(c.find("Player_Player(") != std::string::npos, "constructor call");
     check(c.find("Player_get_hp(") != std::string::npos, "method call");
     check(c.find("block_alloc(global, sizeof(Player))") != std::string::npos, "block alloc");
@@ -133,7 +133,7 @@ fn main() {
 
     std::string c = cr.c_code;
     check(c.find("Entity base;") != std::string::npos, "extends base field");
-    check(c.find("int64_t hp") != std::string::npos, "field in derived");
+    check(c.find("int32_t hp") != std::string::npos, "field in derived");
     std::cout << "  Generated C:\n" << c << "\n";
 }
 
@@ -488,8 +488,8 @@ fn main() {
 
     std::string c = cr.c_code;
     check(c.find("io_print_string") != std::string::npos, "io_print_string");
-    check(c.find("io_print_int") != std::string::npos, "io_print_int");
-    check(c.find("io_print_float") != std::string::npos, "io_print_float");
+    check(c.find("io_print_i32") != std::string::npos, "io_print_i32");
+    check(c.find("io_print_f32") != std::string::npos, "io_print_f32");
     check(c.find("io_print_bool") != std::string::npos, "io_print_bool");
     check(c.find("io_print_char") != std::string::npos, "io_print_char");
     check(c.find("io_print_newline") != std::string::npos, "io_print_newline");
@@ -520,6 +520,124 @@ fn main() {
     }
 }
 
+void test_codegen_fixed_width_types() {
+    std::cout << "=== test_codegen_fixed_width_types ===\n";
+    std::string source = R"(
+package TEST
+
+block global = 1MB
+
+fn test_types() {
+    i8 a = 127
+    i16 b = 32767
+    i32 c = 2147483647
+    i64 d = 9223372036854775807
+    u8 e = 255
+    u16 f = 65535
+    u32 g = 4294967295
+    f32 h = 3.14f32
+    f64 i = 3.14
+    usize j = 0
+    isize k = 0
+    byte l = 0
+    short m = 0
+    long n = 0
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "fixed_width")) return;
+    CodegenResult cr;
+    if (!codegen_from_ast(pr, cr, "fixed_width")) return;
+
+    std::string c = cr.c_code;
+    check(c.find("int8_t") != std::string::npos, "i8 -> int8_t");
+    check(c.find("int16_t") != std::string::npos, "i16 -> int16_t");
+    check(c.find("int32_t") != std::string::npos, "i32 -> int32_t");
+    check(c.find("int64_t") != std::string::npos, "i64 -> int64_t");
+    check(c.find("uint8_t") != std::string::npos, "u8 -> uint8_t");
+    check(c.find("uint16_t") != std::string::npos, "u16 -> uint16_t");
+    check(c.find("uint32_t") != std::string::npos, "u32 -> uint32_t");
+    check(c.find("float") != std::string::npos, "f32 -> float");
+    check(c.find("double") != std::string::npos, "f64 -> double");
+    check(c.find("size_t") != std::string::npos, "usize -> size_t");
+    check(c.find("ptrdiff_t") != std::string::npos, "isize -> ptrdiff_t");
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
+void test_codegen_literal_suffix() {
+    std::cout << "=== test_codegen_literal_suffix ===\n";
+    std::string source = R"(
+package TEST
+
+block global = 1MB
+
+fn test_suffix() {
+    u8 a = 42u8
+    i16 b = 1000i16
+    f32 c = 2.5f32
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "literal_suffix")) return;
+    CodegenResult cr;
+    if (!codegen_from_ast(pr, cr, "literal_suffix")) return;
+
+    std::string c = cr.c_code;
+    check(c.find("(uint8_t)42") != std::string::npos, "u8 suffix cast");
+    check(c.find("(int16_t)1000") != std::string::npos, "i16 suffix cast");
+    check(c.find("(float)2.5") != std::string::npos, "f32 suffix cast");
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
+void test_codegen_literal_overflow() {
+    std::cout << "=== test_codegen_literal_overflow ===\n";
+    std::string source = R"(
+package TEST
+
+fn test_overflow() {
+    u8 a = 300
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "literal_overflow")) return;
+    auto packages = resolve_packages(pr.ast, "test.mc");
+    std::vector<std::unique_ptr<ProgramNode>> asts;
+    asts.push_back(std::move(pr.ast));
+    auto cr = generate_c(asts, packages);
+    check(!cr.success, "should fail on overflow");
+    if (!cr.errors.empty()) {
+        std::cout << "  Expected error: " << cr.errors[0] << "\n";
+    }
+}
+
+void test_codegen_type_promotion() {
+    std::cout << "=== test_codegen_type_promotion ===\n";
+    std::string source = R"(
+package TEST
+
+block global = 1MB
+
+fn test_promotion() -> i64 {
+    i8 a = 10
+    u16 b = 20
+    i32 c = a + b   // i8 + u16 -> i32
+    return c
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "type_promotion")) return;
+    CodegenResult cr;
+    if (!codegen_from_ast(pr, cr, "type_promotion")) return;
+
+    std::string c = cr.c_code;
+    check(c.find("int32_t") != std::string::npos, "i8+u16 -> i32");
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
 int main() {
     test_codegen_simple();
     test_codegen_extends();
@@ -533,6 +651,10 @@ int main() {
     test_codegen_print();
     test_codegen_print_without_using();
     test_codegen_compile_c();
+    test_codegen_fixed_width_types();
+    test_codegen_literal_suffix();
+    test_codegen_literal_overflow();
+    test_codegen_type_promotion();
 
     std::cout << "\n=== Results ===\n";
     std::cout << "Passed: " << tests_passed << "\n";

@@ -1,35 +1,32 @@
 # Próximo Passo - Tester/Optimizer
 # Next Step - Tester/Optimizer
 
-## CLI Visualizer + Release — COMPLETA ✅
-## CLI Visualizer + Release — COMPLETE ✅
+## Sessão 6 — COMPLETA ✅
 
-Tudo implementado e testado:
-Everything implemented and tested:
+- [x] Testes unitários: 151/151 passando
+- [x] Testes de integração: 5/5 passando
+- [x] Benchmarks: compile 5ms, alloc 2ms/1M (19.5× malloc)
+- [x] shared-context.md atualizado com tipos de largura fixa
+- [x] Verificação de estado de todas as tasks
 
-- [x] `meta-c --visualize` — TUI ncurses embedded
-- [x] `meta-c --attach <pid>` — attach a processo rodando
-- [x] `build-release.sh` documenta ncurses como dependência
-- [x] 118/118 testes passando
-- [x] `/tmp/meta-c-mem-<pid>.bin` gerado e lido pelo visualizer
+## Próximas ações sugeridas (prioridade)
 
-- [x] `meta-c --visualize` — embedded ncurses TUI
-- [x] `meta-c --attach <pid>` — attach to running process
-- [x] `build-release.sh` documents ncurses as dependency
-- [x] 118/118 tests passing
-- [x] `/tmp/meta-c-mem-<pid>.bin` generated and read by visualizer
+| Prio | Task | Ação |
+|------|------|------|
+| 1 | **08-vscoder** | Debug webview: trocar demo data por GDB real (3 abordagens cascata) + publicar no Marketplace |
+| 2 | **09-debugger** | Pretty-printers para novos tipos C (uint8_t, int32_t, float, double, size_t, ptrdiff_t) |
+| 3 | **02-parser** | Validação de conflito de nomes (`IO`/`print` vs `using IO;`) |
+| 4 | **11-libs** | Próximas bibliotecas: input (teclado/mouse/gamepad), audio, file, net, math |
+| 5 | **Documentação** | `docs/*.md` para leigos (visão geral da linguagem, tutoriais) |
+| 6 | **Otimização** | Profiling do compilador (hot spots no parsing/codegen), SIMD em runtime se aplicável |
 
-## Sugestões futuras (prioridade)
-## Future suggestions (priority)
+## Priorities (English)
 
-1. **08-vscoder Debug Webview**: trocar dados demo por GDB real (3 abordagens cascata)
-2. **02-parser validação**: conflito de nomes `IO`/`print` com `using IO;`
-3. **01-lexer**: investigar os 10% faltantes (escapes? hex? comentários?)
-4. **Otimização**: profiling do compilador, SIMD no runtime, tuning bump alloc
-5. **Documentação**: comentários inline no código, docs *.md pra leigos
-
-1. **08-vscoder Debug Webview**: replace demo data with real GDB (3 cascade approaches)
-2. **02-parser validation**: name conflict `IO`/`print` with `using IO;`
-3. **01-lexer**: investigate remaining 10% (escapes? hex? comments?)
-4. **Optimization**: compiler profiling, SIMD in runtime, bump alloc tuning
-5. **Documentation**: inline comments in code, docs *.md for beginners
+| Prio | Task | Action |
+|------|------|--------|
+| 1 | **08-vscoder** | Debug webview: replace demo data with real GDB (3 cascade approaches) + publish to Marketplace |
+| 2 | **09-debugger** | Pretty-printers for new C types (uint8_t, int32_t, float, double, size_t, ptrdiff_t) |
+| 3 | **02-parser** | Name conflict validation (`IO`/`print` vs `using IO;`) |
+| 4 | **11-libs** | Next libraries: input (keyboard/mouse/gamepad), audio, file, net, math |
+| 5 | **Documentation** | `docs/*.md` for beginners (language overview, tutorials) |
+| 6 | **Optimization** | Compiler profiling (hot spots in parsing/codegen), SIMD in runtime if applicable |

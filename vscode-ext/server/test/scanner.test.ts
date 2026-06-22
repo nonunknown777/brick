@@ -1,0 +1,284 @@
+import { scanDocument, ScanResult } from '../src/languageService';
+
+let passed = 0;
+let failed = 0;
+
+function assert(condition: boolean, msg: string) {
+    if (condition) {
+        passed++;
+    } else {
+        failed++;
+        console.error(`  FAIL: ${msg}`);
+    }
+}
+
+function assertEq<T>(a: T, b: T, msg: string) {
+    if (a === b) {
+        passed++;
+    } else {
+        failed++;
+        console.error(`  FAIL: ${msg} — expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+    }
+}
+
+function assertTokenType(result: ScanResult, index: number, expectedType: string, expectedLexeme: string, context: string) {
+    if (index >= result.tokens.length) {
+        failed++;
+        console.error(`  FAIL: ${context} — token #${index} missing (only ${result.tokens.length} tokens)`);
+        return;
+    }
+    const t = result.tokens[index];
+    if (t.type === expectedType && t.lexeme === expectedLexeme) {
+        passed++;
+    } else {
+        failed++;
+        console.error(`  FAIL: ${context} — token #${index}: expected {${expectedType}, "${expectedLexeme}"}, got {${t.type}, "${t.lexeme}"}`);
+    }
+}
+
+function runSuite(name: string, fn: () => void) {
+    console.log(`\n=== ${name} ===`);
+    fn();
+}
+
+// ──────────────────────────────────────────
+// Test 1: Token types (no conflated types)
+// ──────────────────────────────────────────
+runSuite('Token type conflation', () => {
+    const r = scanDocument('42 3.14 "hello" \'a\'');
+    assert(r.tokens.length >= 4, 'has at least 4 tokens');
+    // Find each token by scanning
+    const intTok = r.tokens.find(t => t.lexeme === '42');
+    const floatTok = r.tokens.find(t => t.lexeme === '3.14');
+    const strTok = r.tokens.find(t => t.lexeme === '"hello"');
+    const charTok = r.tokens.find(t => t.lexeme === "'a'");
+
+    assert(intTok?.type === 'INT_LITERAL', `42 should be INT_LITERAL, got ${intTok?.type}`);
+    assert(floatTok?.type === 'FLOAT_LITERAL', `3.14 should be FLOAT_LITERAL, got ${floatTok?.type}`);
+    assert(strTok?.type === 'STRING_LITERAL', `"hello" should be STRING_LITERAL, got ${strTok?.type}`);
+    assert(charTok?.type === 'CHAR_LITERAL', `'a' should be CHAR_LITERAL, got ${charTok?.type}`);
+});
+
+// ──────────────────────────────────────────
+// Test 2: Fixed-width types as keywords
+// ──────────────────────────────────────────
+runSuite('Fixed-width type keywords', () => {
+    const r = scanDocument('u8 u16 u32 u64 i8 i16 i32 i64 f32 f64 usize isize byte');
+    const expected = ['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte'];
+    for (const kw of expected) {
+        const tok = r.tokens.find(t => t.lexeme === kw);
+        assert(tok !== undefined, `token for '${kw}' exists`);
+        assert(tok!.type !== 'IDENTIFIER', `'${kw}' should not be IDENTIFIER, got ${tok!.type}`);
+        // Keyword tokens have uppercase type matching the lexeme
+        assert(tok!.type === kw.toUpperCase(), `'${kw}' type is ${tok!.type} (expected ${kw.toUpperCase()})`);
+    }
+});
+
+// ──────────────────────────────────────────
+// Test 3: Standard keywords
+// ──────────────────────────────────────────
+runSuite('Standard keywords', () => {
+    const r = scanDocument('package using private public struct extends interface fn return block reset if else while for error int float bool char String void null true false');
+    const expected = ['package','using','private','public','struct','extends','interface','fn','return',
+        'block','reset','if','else','while','for','error',
+        'int','float','bool','char','String','void','null','true','false'];
+    for (const kw of expected) {
+        const tok = r.tokens.find(t => t.lexeme === kw);
+        assert(tok !== undefined, `token for '${kw}' exists`);
+        assert(tok!.type !== 'IDENTIFIER', `'${kw}' should be keyword, not IDENTIFIER`);
+    }
+});
+
+// ──────────────────────────────────────────
+// Test 4: Missing operators
+// ──────────────────────────────────────────
+runSuite('New operators', () => {
+    const r = scanDocument('<< >> *= /= & | ^ ~');
+    assertTokenType(r, 0, 'LSHIFT', '<<', '<<');
+    assertTokenType(r, 1, 'RSHIFT', '>>', '>>');
+    assertTokenType(r, 2, 'STAR_ASSIGN', '*=', '*=');
+    assertTokenType(r, 3, 'SLASH_ASSIGN', '/=', '/=');
+    assertTokenType(r, 4, 'BIT_AND', '&', '&');
+    assertTokenType(r, 5, 'BIT_OR', '|', '|');
+    assertTokenType(r, 6, 'BIT_XOR', '^', '^');
+    assertTokenType(r, 7, 'BIT_NOT', '~', '~');
+});
+
+// ──────────────────────────────────────────
+// Test 5: Unterminated strings and chars
+// ──────────────────────────────────────────
+runSuite('Unterminated string/char errors', () => {
+    const r1 = scanDocument('"unterminated\n42');
+    assert(r1.errors.length > 0, 'unterminated string should produce error');
+    assert(r1.errors[0].message.includes('unterminated'), `error message mentions unterminated: ${r1.errors[0].message}`);
+
+    // Properly terminated should not error
+    const r4 = scanDocument(`"ok" 'x'`);
+    assert(r4.errors.length === 0, `properly terminated has no errors (got ${r4.errors.length})`);
+});
+
+// ──────────────────────────────────────────
+// Test 6: Variable detection
+// ──────────────────────────────────────────
+runSuite('Variable detection', () => {
+    const r = scanDocument(`
+fn test() {
+    int x = 42
+    u8 y = 1
+    float z
+    Player p = Player()
+    int[10] arr
+    u8[256] buf
+}
+`);
+    const vars = r.symbols.filter(s => s.kind === 'variable');
+    const varNames = vars.map(v => `${v.name}:${v.type_name}`);
+
+    assert(vars.some(v => v.name === 'x' && v.type_name === 'int'), `int x found in ${JSON.stringify(varNames)}`);
+    assert(vars.some(v => v.name === 'y' && v.type_name === 'u8'), `u8 y found`);
+    assert(vars.some(v => v.name === 'z' && v.type_name === 'float'), `float z found (no init)`);
+    assert(vars.some(v => v.name === 'p' && v.type_name === 'Player'), `Player p found`);
+    assert(vars.some(v => v.name === 'arr' && v.type_name === 'int[]'), `int[10] arr found (type=int[]) in ${JSON.stringify(varNames)}`);
+    assert(vars.some(v => v.name === 'buf' && v.type_name === 'u8[]'), `u8[256] buf found`);
+});
+
+// ──────────────────────────────────────────
+// Test 7: Block declarations and scopes
+// ──────────────────────────────────────────
+runSuite('Block handling', () => {
+    const r = scanDocument(`
+block global = 256MB
+block game = 64MB
+block temp {
+    int x = 1
+}
+block scope:
+    int y = 2
+`);
+    const blockNames = r.blocks.map(b => b.name);
+    assert(blockNames.includes('global'), 'global block found');
+    assert(blockNames.includes('game'), 'game block found');
+    assert(blockNames.includes('temp'), 'temp block (scope {}) found');
+    assert(blockNames.includes('scope'), 'scope block (colon) found');
+    assert(r.blocks.length >= 4, `at least 4 blocks found (got ${r.blocks.length})`);
+});
+
+// ──────────────────────────────────────────
+// Test 8: Struct parsing with fields and methods
+// ──────────────────────────────────────────
+runSuite('Struct parsing', () => {
+    const r = scanDocument(`
+struct Player {
+    int hp
+    String name
+    fn take_damage(int dmg) {
+        hp -= dmg
+    }
+    fn Player(int h, String n) {
+        hp = h
+        name = n
+    }
+}
+`);
+    assert(r.structs.has('Player'), 'Player struct found');
+    const player = r.structs.get('Player')!;
+    assert(player.fields.length >= 2, `Player has at least 2 fields (got ${player.fields.length})`);
+    assert(player.fields.some(f => f.name === 'hp' && f.type === 'int'), 'hp field: int');
+    assert(player.fields.some(f => f.name === 'name' && f.type === 'String'), 'name field: String');
+    assert(player.methods.length >= 2, `Player has at least 2 methods (got ${player.methods.length})`);
+    assert(player.methods.some(m => m.name === 'take_damage'), 'take_damage method found');
+    assert(player.methods.some(m => m.name === 'Player'), 'constructor Player found');
+});
+
+// ──────────────────────────────────────────
+// Test 9: Interface parsing
+// ──────────────────────────────────────────
+runSuite('Interface parsing', () => {
+    const r = scanDocument(`
+interface Damageable {
+    fn take_damage(int dmg)
+    fn heal(int amount)
+}
+`);
+    const iface = r.symbols.find(s => s.kind === 'interface' && s.name === 'Damageable');
+    assert(iface !== undefined, 'Damageable interface symbol found');
+});
+
+// ──────────────────────────────────────────
+// Test 10: Package and using
+// ──────────────────────────────────────────
+runSuite('Package and using', () => {
+    const r = scanDocument('package SPRITES\nusing IO\nprivate int x');
+    assertEq(r.packageName, 'SPRITES', 'package name is SPRITES');
+    assert(r.usings.includes('IO'), 'using IO found');
+});
+
+// ──────────────────────────────────────────
+// Test 11: Function detection (top-level)
+// ──────────────────────────────────────────
+runSuite('Function detection', () => {
+    const r = scanDocument(`
+fn add(int a, int b) -> int {
+    return a + b
+}
+fn main() {
+    print("hello")
+}
+`);
+    const fnAdd = r.symbols.find(s => s.kind === 'function' && s.name === 'add');
+    const fnMain = r.symbols.find(s => s.kind === 'function' && s.name === 'main');
+    assert(fnAdd !== undefined, 'add function found');
+    assert(fnAdd!.type_name === 'int', `add return type is int (got ${fnAdd!.type_name})`);
+    assert(fnMain !== undefined, 'main function found');
+});
+
+// ──────────────────────────────────────────
+// Test 12: Array detection in struct fields
+// ──────────────────────────────────────────
+runSuite('Array in struct fields', () => {
+    const r = scanDocument(`
+struct Config {
+    int[10] values
+    u8[256] buffer
+}
+`);
+    const cfg = r.structs.get('Config');
+    assert(cfg !== undefined, 'Config struct found');
+    if (cfg) {
+        assert(cfg.fields.some(f => f.name === 'values'), 'values field found');
+        assert(cfg.fields.some(f => f.name === 'buffer'), 'buffer field found');
+    }
+});
+
+// ──────────────────────────────────────────
+// Test 13: Fixed-width types in struct fields
+// ──────────────────────────────────────────
+runSuite('Fixed-width types in struct fields', () => {
+    const r = scanDocument(`
+struct Packet {
+    u8 flags
+    u16 length
+    i32 checksum
+    f64 timestamp
+    byte data
+}
+`);
+    const pkt = r.structs.get('Packet');
+    assert(pkt !== undefined, 'Packet struct found');
+    if (pkt) {
+        assert(pkt.fields.some(f => f.name === 'flags' && f.type === 'u8'), 'flags: u8');
+        assert(pkt.fields.some(f => f.name === 'length' && f.type === 'u16'), 'length: u16');
+        assert(pkt.fields.some(f => f.name === 'checksum' && f.type === 'i32'), 'checksum: i32');
+        assert(pkt.fields.some(f => f.name === 'timestamp' && f.type === 'f64'), 'timestamp: f64');
+        assert(pkt.fields.some(f => f.name === 'data' && f.type === 'byte'), 'data: byte');
+    }
+});
+
+// ──────────────────────────────────────────
+// Summary
+// ──────────────────────────────────────────
+console.log(`\n═══════════════════════════════════`);
+console.log(`Results: ${passed} passed, ${failed} failed${failed > 0 ? ' ❌' : ' ✅'}`);
+console.log(`═══════════════════════════════════\n`);
+
+process.exit(failed > 0 ? 1 : 0);

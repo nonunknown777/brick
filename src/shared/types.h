@@ -15,6 +15,11 @@ enum class TokenType {
     BLOCK, RESET,
     TRUE, FALSE, NULL_, ERROR,
     INT, FLOAT, BOOL, CHAR, STRING, VOID,
+    U8, U16, U32, U64,
+    I8, I16, I32, I64,
+    F32, F64,
+    USIZE, ISIZE,
+    BYTE,
 
     // Literals
     // Literais
@@ -53,6 +58,7 @@ struct Token {
     TokenType type;
     std::string lexeme;
     SourceLocation location;
+    std::string literal_type;
 
     Token() : type(TokenType::EOF_), location{0, 0, ""} {}
     Token(TokenType t, std::string l, SourceLocation loc)

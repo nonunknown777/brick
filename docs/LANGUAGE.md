@@ -1,61 +1,54 @@
-# Referência da Linguagem Meta-C
 # Meta-C Language Reference
 
-> Tudo que você precisa saber pra escrever código em Meta-C.
-> Everything you need to know to write code in Meta-C.
+Everything you need to know to write code in Meta-C.
 
-## Estrutura de um arquivo .mc
 ## File Structure (.mc)
 
 ```
-package NOME               ← qual pacote esse arquivo pertence
-using OUTRO                ← importa outro pacote
+package NAME              ← which package this file belongs to
+using OTHER               ← import another package
 
-block global = 256MB       ← declaração OBRIGATÓRIA no main
-block game = 64MB
+block global = 256MB       ← block declaration (REQUIRED in main file)
+block game   = 64MB
 
-struct Player { }          ← suas estruturas com métodos
+struct Player { }          ← your structs with methods
 
-fn main() { }              ← ponto de entrada do programa
+fn main() { }              ← program entry point
 ```
 
 ## Packages
-## Packages
 
 ```
-package SPRITES                 ← declara pacote
-package SPRITES.EFFECTS         ← sub-pacote (hierarquia)
-using SPRITES                   ← importa tudo do pacote
-private int segredo             ← visível só dentro do pacote
+package SPRITES                    ← declare package
+package SPRITES.EFFECTS            ← sub-package (hierarchy)
+using SPRITES                      ← import everything from package
+private int secret                 ← visible only within the package
 ```
 
-Tudo é `public` por padrão. Use `private` pra esconder.
 Everything is `public` by default. Use `private` to hide.
 
-## Structs (com métodos!)
 ## Structs (with methods!)
 
 ```
 struct Player {
-    int hp                     ← campo
-    String name                ← campo
+    int hp                     ← field
+    String name                ← field
 
-    fn Player(int h, String n) {    ← CONSTRUTOR (mesmo nome da struct)
+    fn Player(int h, String n) {    ← CONSTRUCTOR (same name as struct)
         hp = h
         name = n
     }
 
-    fn take_damage(int dmg) {       ← método normal
+    fn take_damage(int dmg) {       ← normal method
         hp -= dmg
     }
 
-    fn get_hp() -> int {            ← método com retorno
+    fn get_hp() -> int {            ← method with return value
         return hp
     }
 }
 ```
 
-### Herança
 ### Inheritance
 
 ```
@@ -63,13 +56,12 @@ struct NPC extends Player {
     int ai_type
 
     fn NPC(int h, int ai) {
-        hp = h                    ← campo herdado de Player
+        hp = h                    ← inherited field from Player
         ai_type = ai
     }
 }
 ```
 
-### Interface
 ### Interface
 
 ```
@@ -77,231 +69,219 @@ interface Damageable {
     fn take_damage(int d)
 }
 
-struct Enemy : Damageable {       ← ou "extends" + "implements"
+struct Enemy : Damageable {       ← or "extends" + "implements"
     fn take_damage(int d) { }
 }
 ```
 
-## Blocos de Memória
 ## Memory Blocks
 
 ```
-block global = 256MB        ← declara bloco (KB, MB, GB)
-block temp = 8KB
+block global = 256MB        ← declare block (KB, MB, GB)
+block temp   = 8KB
 
-int x = 5                   ← vai pro bloco global (default)
+int x = 5                   ← goes to global block (default)
 
-block game {                ← escopo: tudo aqui vai pro bloco game
+block game {                ← scope: everything here goes to block game
     Player p = Player(100, "Felipe")
     Enemy e = Enemy(50)
 }
 
-float f = 2.0 @temp        ← alocação inline explícita
+float f = 2.0 @temp        ← explicit inline allocation
 int hp = p.get_hp()
 
-game.reset()               ← limpa TUDO no bloco game (super rápido)
+game.reset()               ← clears EVERYTHING in block game (super fast)
 ```
 
-Regras:
 Rules:
-
-- `global` é o bloco default (declarado obrigatoriamente no main)
-- `block nome: { }` muda o bloco default dentro do escopo
-- `@nome` aloca uma variável específica num bloco
-- `bloco.reset()` limpa o bloco inteiro (sem free individual)
-- Se o bloco encher: `error("block overflow")` — o programa aborta
-
 - `global` is the default block (must be declared in main)
 - `block name: { }` changes the default block within that scope
 - `@name` allocates a specific variable in a block
 - `block.reset()` clears the entire block (no individual free)
 - If the block fills up: `error("block overflow")` — the program aborts
 
-## Tipos
 ## Types
 
-| Meta-C | O que é | Tamanho |
-| Meta-C | What it is | Size |
-|--------|---------|:-------:|
-| `int` | Número inteiro | 64 bits |
-| `int` | Integer number | 64 bits |
-| `float` | Número decimal | 64 bits |
-| `float` | Decimal number | 64 bits |
-| `bool` | Verdadeiro/falso | 8 bits |
-| `bool` | True/false | 8 bits |
-| `char` | Um caractere | 8 bits |
-| `char` | A single character | 8 bits |
-| `String` | Texto | dinâmico |
-| `String` | Text | dynamic |
-| `int[N]` | Array fixo de N inteiros | N × 64 bits |
-| `int[N]` | Fixed array of N integers | N × 64 bits |
-| `null` | Nulo (pra referências) | — |
-| `null` | Null (for references) | — |
-| `void` | Nada (pra funções sem retorno) | — |
-| `void` | Nothing (for functions without return) | — |
+### Fixed-Width Types
 
-## Funções
+| Meta-C | C Type       | Size    | Description          |
+|--------|-------------|---------|----------------------|
+| `i8`   | `int8_t`    | 8 bits  | Signed integer       |
+| `i16`  | `int16_t`   | 16 bits | Signed integer       |
+| `i32`  | `int32_t`   | 32 bits | Signed integer       |
+| `i64`  | `int64_t`   | 64 bits | Signed integer       |
+| `u8`   | `uint8_t`   | 8 bits  | Unsigned integer     |
+| `u16`  | `uint16_t`  | 16 bits | Unsigned integer     |
+| `u32`  | `uint32_t`  | 32 bits | Unsigned integer     |
+| `u64`  | `uint64_t`  | 64 bits | Unsigned integer     |
+| `f32`  | `float`     | 32 bits | Floating point       |
+| `f64`  | `double`    | 64 bits | Double precision     |
+| `usize`| `size_t`    | pointer | Unsigned pointer-size|
+| `isize`| `ptrdiff_t` | pointer | Signed pointer-size  |
+
+### Aliases
+
+| Alias    | Maps To | Notes                      |
+|----------|---------|----------------------------|
+| `int`    | `i32`   | Default integer            |
+| `float`  | `f32`   | Default float              |
+| `char`   | `u8`    | Character                  |
+| `byte`   | `u8`    | Same as char               |
+| `short`  | `i16`   | Short integer              |
+| `long`   | `i64`   | Long integer               |
+| `double` | `f64`   | Double precision           |
+
+### Other Types
+
+| Meta-C     | C Type         | Description                  |
+|------------|----------------|------------------------------|
+| `bool`     | `uint8_t`      | true/false                   |
+| `String`   | `MetaCString`  | Built-in string (dynamic)    |
+| `T[N]`     | `T[]`          | Fixed array of N elements    |
+| `null`     | `NULL`         | Null pointer                 |
+| `void`     | `void`         | No return value (functions)  |
+
+### Literal Suffixes
+
+```
+42u8   42u16  42u32  42u64     ← unsigned integer types
+42i8   42i16  42i32  42i64     ← signed integer types
+3.14f32  3.14f64               ← float types
+42usz  42isize                 ← pointer-size types
+```
+
+- Unsuffixed literals infer their type from context (fits target -> allowed)
+- Overflow on compile-time literal -> error
+
+### Type Rules
+
+- **Widening** allowed: i8 -> i16, u8 -> u64, f32 -> f64
+- **Narrowing** prohibited: i64 -> i32 = error
+- **Signed <-> Unsigned** same rank prohibited: i32 <-> u32 = error
+- **Int + Float** -> Float (int promotes to float)
+- **Mixed expressions**: promotion to type that fits both operands
+
 ## Functions
 
 ```
-fn main() { }                          ← entry point (não volta nada)
+fn main() { }                          ← entry point (no return)
 
-fn add(int a, int b) -> int {          ← função que volta int
+fn add(int a, int b) -> int {          ← function returning int
     return a + b
 }
 
-fn log(String msg) {                   ← função sem retorno (void)
+fn log(String msg) {                   ← void function (no return)
     // ...
 }
 ```
 
-Parâmetros e retorno vão pro "bloco anônimo" interno do compilador.
-Você não precisa se preocupar com eles.
 Parameters and return values go to the compiler's internal "anonymous block".
-You don't need to worry about them.
 
-## Controle de Fluxo
 ## Flow Control
 
 ```
-if (cond) { }
+if cond { }
 else { }
 
-while (cond) { }
+while cond { }
 
-for (int i = 0; i < 10; i++) { }
+for int i = 0; i < 10; i++ { }
 
 return expr
 ```
 
-## Operadores
 ## Operators
 
-| Operador | O que faz |
-| Operator | What it does |
-|:--------:|-----------|
-| `+ - * /` | Matemática básica |
-| `+ - * /` | Basic math |
-| `== != < > <= >=` | Comparação |
-| `== != < > <= >=` | Comparison |
-| `&& \|\| !` | Lógica (e, ou, não) |
-| `&& \|\| !` | Logic (and, or, not) |
-| `= ` | Atribuição |
-| `= ` | Assignment |
-| `.` | Acessar campo/método |
-| `.` | Access field/method |
-| `()` | Chamar função |
-| `()` | Function call |
-| `[]` | Indexar array |
-| `[]` | Array index |
-| `@` | Alocar em bloco específico |
-| `@` | Allocate in specific block |
-| `->` | Tipo de retorno |
-| `->` | Return type |
-| `& \| ^ ~ << >>` | Operações de bit |
-| `& \| ^ ~ << >>` | Bitwise operations |
+| Operator       | What it does              |
+|----------------|---------------------------|
+| `+ - * /`      | Basic math                |
+| `== != < > <= >=` | Comparison             |
+| `&& \|\| !`    | Logic (and, or, not)      |
+| `= `           | Assignment                |
+| `.`            | Access field/method       |
+| `()`           | Function call             |
+| `[]`           | Array index               |
+| `@`            | Allocate in specific block|
+| `->`           | Return type               |
+| `& \| ^ ~ << >>` | Bitwise operations     |
 
-## Strings
 ## Strings
 
 ```
-String s = "hello"                     ← cria string
-String nome = "Felipe" @game           ← string num bloco
-String vazia = ""                      ← string vazia
+String s = "hello"                     ← creates string
+String nome = "Felipe" @game           ← string in a block
+String empty = ""                      ← empty string
 ```
 
-String é um tipo embutido. Vive em blocos igual qualquer outra struct.
 String is a built-in type. It lives in blocks like any other struct.
 
 ## Arrays
-## Arrays
 
 ```
-int[10] arr                            ← array fixo de 10 inteiros
-int[5] vals = int[5] @game             ← array num bloco
+int[10] arr                            ← fixed array of 10 integers
+int[5] vals = int[5] @game             ← array in a block
 ```
 
-Tamanho fixo definido na declaração.
 Fixed size defined at declaration.
 
-## Tratamento de Erros
 ## Error Handling
 
 ```
-error("deu ruim")                      ← imprime a mensagem e aborta
+error("something went wrong")          ← prints message and aborts
 ```
 
-Não tem try/catch. Se algo der errado, o programa morre com a mensagem.
-Isso mantém a performance alta e o código simples.
-There is no try/catch. If something goes wrong, the program dies with the message.
-This keeps performance high and code simple.
+No try/catch. If something goes wrong, the program prints the error and exits.
 
-## Visibilidade
 ## Visibility
 
 ```
-public int x                           ← visível pra todo mundo (padrão)
-private int y                          ← visível só dentro do próprio package
+public int x                           ← visible everywhere (default)
+private int y                          ← visible only within own package
 ```
 
-## Comentários
 ## Comments
 
 ```
-// Isso é um comentário  ← até o fim da linha
+// This is a comment  ← line comment only
 ```
 
-Só comentário de linha (`//`). Bloco de comentário (`/* */`) não existe.
-Only line comments (`//`). Block comments (`/* */`) do not exist.
+Line comments only (`//`). Block comments (`/* */`) are not supported.
 
-## Exemplo Completo
 ## Complete Example
 
 ```
-package JOGO
+package GAME
 
-using SPRITES
+using IO
 
 block global = 256MB
-block game = 64MB
+block game   = 64MB
 
-struct Player {
-    int hp
-    int ammo
-    String name
-
-    fn Player(int h, int a, String n) {
-        hp = h
-        ammo = a
-        name = n
-    }
-
-    fn shoot(Enemy e) {
-        e.hp -= 10
-    }
+interface Drawable {
+    fn draw()
 }
 
-struct Enemy {
-    int hp
-    int damage
+struct Player {
+    i32 hp
+    String name
+    u8 active
 
-    fn Enemy(int h, int d) {
+    fn Player(i32 h, String n) {
         hp = h
-        damage = d
+        name = n
+        active = 1u8
+    }
+
+    fn damage(i32 dmg) {
+        hp -= dmg
+        if hp < 0 { hp = 0 }
+        print("{0} took {1} damage, hp={2}", name, dmg, hp)
     }
 }
 
 fn main() {
-    Player p = Player(100, 30, "Felipe") @game
-    Enemy e = Enemy(50, 10) @game
-
-    p.shoot(e)
-
-    while (e.hp > 0) {
-        p.shoot(e)
-    }
-
+    Player p = Player(100, "Felipe") @game
+    p.damage(20)
     game.reset()
-    global.reset()
 }
 ```

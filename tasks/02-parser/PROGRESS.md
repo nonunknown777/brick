@@ -20,8 +20,12 @@
 - [x] Package resolver (package, using, visibility)
 - [x] Tratamento de erros
 - [x] Error handling
-- [x] Testes (3/3 passando)
-- [x] Tests (3/3 passing)
+- [x] Testes (6/6 passando)
+- [x] Tests (6/6 passing)
+- [x] Tipos explícitos de largura fixa (u8..u64, i8..i64, f32/f64, usize, isize, byte)
+- [x] Explicit fixed-width types (u8..u64, i8..i64, f32/f64, usize, isize, byte)
+- [x] Sufixos de literal (42u8, 3.14f32, 42usz, etc.)
+- [x] Literal suffixes (42u8, 3.14f32, 42usz, etc.)
 - [x] Integração com Lexer
 - [x] Integration with Lexer
 - [ ] Integração com Codegen (pendente task 03)

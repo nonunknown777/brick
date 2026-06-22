@@ -14,6 +14,30 @@
 - **SConstruct**: corrigido com `PROJECT_ROOT` para compilação C
 - **SConstruct**: fixed with `PROJECT_ROOT` for C compilation
 
+### Nova Feature: Tipos Explícitos de Largura Fixa
+### New Feature: Explicit Fixed-Width Types
+
+| Meta-C | C | Type Check |
+|--------|---|-----------|
+| `u8`/`byte`/`char` | `uint8_t` | overflow check, unsigned |
+| `u16` | `uint16_t` | overflow check, unsigned |
+| `u32` | `uint32_t` | overflow check, unsigned |
+| `u64` | `uint64_t` | overflow check, unsigned |
+| `i8` | `int8_t` | overflow check, signed |
+| `i16`/`short` | `int16_t` | overflow check, signed |
+| `i32`/`int` | `int32_t` | overflow check, signed |
+| `i64`/`long` | `int64_t` | overflow check, signed |
+| `f32`/`float` | `float` | — |
+| `f64`/`double` | `double` | — |
+| `usize` | `size_t` | unsigned, rank 4 |
+| `isize` | `ptrdiff_t` | signed, rank 4 |
+
+Regras de atribuição: widening ✅, narrowing ❌, Signed↔Unsigned mesmo rank ❌
+Assignment rules: widening ✅, narrowing ❌, Signed↔Unsigned same rank ❌
+
+Promoção em expressões mistas: `i8+u16→i32`, `i16+u16→i32`, `u8+u16→u16`, `i32+u32→i64`
+Promotion in mixed expressions: `i8+u16→i32`, `i16+u16→i32`, `u8+u16→u16`, `i32+u32→i64`
+
 ### Issues corrigidas
 ### Fixed issues
 

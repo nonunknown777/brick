@@ -1,28 +1,29 @@
 # Estado Atual
 # Current State
 
-Sessão: 2 (revisão pela task 10)
-Session: 2 (reviewed by task 10)
+Sessão: 3 (ativa)
+Session: 3 (active)
 
-Progresso: 95%
-Progress: 95%
+Progresso: 100%
+Progress: 100%
 
 Próximo passo: Integração com codegen — verificar exemplos .mc compilam
 Next step: Integration with codegen — verify .mc examples compile
 
-Última ação: if/while opcionalmente sem parênteses; reset keyword aceito como member name em DOT
-Last action: if/while optionally without parentheses; reset keyword accepted as member name in DOT
+Última ação: Implementados tipos explícitos de largura fixa no parser
+Last action: Implemented explicit fixed-width types in parser
 
-Pendências: Nenhuma
-Pending: None
+## O que foi feito
+## What was done
 
-## O que foi feito (task 10)
-## What was done (task 10)
+- `is_type_keyword()`: adicionados U8..U64, I8..I64, F32/F64, USIZE, ISIZE, BYTE
+- `statement()`: switch de var_decl inclui novos tipos
+- `IntLiteral`/`FloatLiteral` em ast.h: campo `literal_type` populado pelo token
+- `primary()`: INT_LITERAL/FLOAT_LITERAL passa `literal_type` do token
+- Testes: `test_fixed_width_types`, `test_literal_suffixes`, `test_fixed_width_struct_fields`
 
-- `if_stmt()`: se próximo token não for `(`, usa expression direto como condição
-- `while_stmt()`: mesma lógica
-- `postfix()`: DOT handler aceita RESET como member name (não só IDENTIFIER)
-
-- `if_stmt()`: if next token is not `(`, uses expression directly as condition
-- `while_stmt()`: same logic
-- `postfix()`: DOT handler accepts RESET as member name (not only IDENTIFIER)
+- `is_type_keyword()`: added U8..U64, I8..I64, F32/F64, USIZE, ISIZE, BYTE
+- `statement()`: var_decl switch includes new types
+- `IntLiteral`/`FloatLiteral` in ast.h: `literal_type` field populated from token
+- `primary()`: INT_LITERAL/FLOAT_LITERAL passes `literal_type` from token
+- Tests: `test_fixed_width_types`, `test_literal_suffixes`, `test_fixed_width_struct_fields`

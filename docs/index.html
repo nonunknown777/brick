@@ -35,8 +35,8 @@
         <p>Swap code without stopping your program. Powered by dlopen + inotify. Edit, save, see results instantly.</p>
       </div>
       <div class="phil-item fade-in">
-        <h3>Zero Magic</h3>
-        <p>What you write is what gets generated. Transparent compilation with <code>#line</code> directives so you debug in Meta‑C, not C.</p>
+        <h3>Fixed-Width Types</h3>
+        <p>i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize. Compile-time overflow checking, literal suffixes, and type promotion rules.</p>
       </div>
     </div>
   </div>
@@ -46,58 +46,36 @@
 <section>
   <div class="container">
     <h2 class="section-title fade-in">Code Example</h2>
-    <p class="section-sub fade-in">Structs, blocks, methods — all the pieces working together.</p>
+    <p class="section-sub fade-in">Interfaces, fixed-width types, blocks — all working together.</p>
     <div class="code-block fade-in">
       <span class="lang-label">Meta‑C (.mc)</span>
-<pre><span class="kw">package</span> BLOCKS_DEMO
+<pre><span class="kw">package</span> DEMO
 
-<span class="kw">block</span> global = <span class="num">256MB</span>
-<span class="kw">block</span> game   = <span class="num">64MB</span>
-<span class="kw">block</span> temp   = <span class="num">8MB</span>
+<span class="kw">using</span> IO
 
-<span class="type">struct</span> <span class="type">Player</span> {
-    <span class="type">int</span> hp
-    <span class="type">int</span> ammo
-    <span class="type">String</span> name
-
-    <span class="kw">fn</span> <span class="fn">Player</span>(<span class="type">int</span> h, <span class="type">int</span> a, <span class="type">String</span> n) {
-        hp = h
-        ammo = a
-        name = n
-    }
-
-    <span class="kw">fn</span> <span class="fn">take_damage</span>(<span class="type">int</span> dmg) {
-        hp -= dmg
-        <span class="kw">if</span> hp &lt; <span class="num">0</span> { hp = <span class="num">0</span> }
-    }
+<span class="kw">interface</span> <span class="type">Drawable</span> {
+    <span class="kw">fn</span> <span class="fn">draw</span>()
 }
 
-<span class="type">struct</span> <span class="type">Enemy</span> {
-    <span class="type">int</span> hp
-    <span class="type">int</span> damage
+<span class="type">struct</span> <span class="type">Circle</span> {
+    <span class="type">u32</span> id
+    <span class="type">String</span> name
+    <span class="type">f32</span> radius
 
-    <span class="kw">fn</span> <span class="fn">Enemy</span>(<span class="type">int</span> h, <span class="type">int</span> d) {
-        hp = h
-        damage = d
+    <span class="kw">fn</span> <span class="fn">Circle</span>(<span class="type">u32</span> i, <span class="type">String</span> n, <span class="type">f32</span> r) {
+        id = i
+        name = n
+        radius = r
     }
 
-    <span class="kw">fn</span> <span class="fn">attack</span>(<span class="type">Player</span> target) {
-        target.<span class="fn">take_damage</span>(damage)
+    <span class="kw">fn</span> <span class="fn">draw</span>() {
+        <span class="fn">print</span>(<span class="str">"Circle #{0} radius={1}"</span>, id, radius)
     }
 }
 
 <span class="kw">fn</span> <span class="fn">main</span>() {
-    <span class="type">Player</span> p = <span class="fn">Player</span>(<span class="num">100</span>, <span class="num">30</span>, <span class="str">"Felipe"</span>) <span class="op">@game</span>
-    <span class="type">Enemy</span> e = <span class="fn">Enemy</span>(<span class="num">50</span>, <span class="num">10</span>) <span class="op">@game</span>
-    e.<span class="fn">attack</span>(p)
-
-    <span class="kw">while</span> p.hp &gt; <span class="num">0</span> {
-        e.<span class="fn">attack</span>(p)
-    }
-
-    temp.<span class="fn">reset</span>()
-    game.<span class="fn">reset</span>()
-    global.<span class="fn">reset</span>()
+    <span class="type">Circle</span> c = <span class="fn">Circle</span>(<span class="num">1u32</span>, <span class="str">"Small"</span>, <span class="num">5.0f32</span>) <span class="op">@global</span>
+    c.<span class="fn">draw</span>()
 }
 </pre>
     </div>
@@ -113,42 +91,42 @@
       <div class="feature-card fade-in">
         <span class="icon">⚡</span>
         <h3>OOP with Structs</h3>
-        <p>Classes? No — structs with methods, constructors, and interface support. Clean GDScript-inspired syntax that compiles to C structs and functions.</p>
+        <p>Structs with methods, constructors, inheritance, and interface support. Clean GDScript-inspired syntax that compiles to C.</p>
       </div>
       <div class="feature-card fade-in">
         <span class="icon">🧱</span>
         <h3>Block Memory</h3>
-        <p>Declare named memory blocks (8KB – 256MB+). All allocations go into blocks. No malloc/free per object — just <code>block.reset()</code> to wipe everything.</p>
+        <p>Declare named memory blocks (8KB – 256MB+). All allocations go into blocks. No malloc/free per object — just <code>block.reset()</code>.</p>
       </div>
       <div class="feature-card fade-in">
         <span class="icon">🔄</span>
         <h3>Hot Reload</h3>
-        <p>Edit code while it runs. dlopen + inotify detect changes, reload .so files, remap functions. Zero downtime iteration for games and live systems.</p>
+        <p>Edit code while it runs. dlopen + inotify detect changes, reload .so files, remap functions. Zero downtime iteration.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">📈</span>
-        <h3>Bump Allocator</h3>
-        <p>Block memory uses a bump allocator — a pointer bump and done. No fragmentation, no free list, no syscall per allocation. Predictable microsecond latency.</p>
+        <span class="icon">📏</span>
+        <h3>Fixed-Width Types</h3>
+        <p>i8..i64, u8..u64, f32/f64, usize/isize. Full compile-time overflow checking, widening rules, and literal suffixes.</p>
       </div>
       <div class="feature-card fade-in">
         <span class="icon">🐛</span>
         <h3>GDB Integration</h3>
-        <p>Step through your original .mc code, not the generated C. <code>#line</code> directives map every line back. Pretty-printers show Meta‑C types natively.</p>
+        <p>Step through your original .mc code, not the generated C. <code>#line</code> directives map every line back.</p>
       </div>
       <div class="feature-card fade-in">
         <span class="icon">📊</span>
         <h3>TUI Visualizer</h3>
-        <p>Ncurses-based dashboard showing block memory usage, allocations, and hot reload status in real time. Built for developers who live in the terminal.</p>
+        <p>Ncurses dashboard showing block memory usage and allocations in real time. <code>meta-c --visualize file.mc</code>.</p>
       </div>
       <div class="feature-card fade-in">
         <span class="icon">🔌</span>
         <h3>VS Code Extension</h3>
-        <p>Syntax highlighting, breakpoints in .mc files, and a memory-view panel that plots block allocations. Debug your memory layout visually.</p>
+        <p>Syntax highlighting, LSP, and a memory-view panel that plots block allocations. Debug your memory layout visually.</p>
       </div>
       <div class="feature-card fade-in">
         <span class="icon">🌍</span>
         <h3>Cross-platform</h3>
-        <p>Write once, compile anywhere C goes — Linux, macOS, Windows. The runtime is pure C with POSIX dlopen. No platform lock-in, no runtime dependency.</p>
+        <p>Write once, compile anywhere C goes — Linux, macOS, Windows. Pure C runtime with POSIX dlopen.</p>
       </div>
     </div>
   </div>
@@ -165,7 +143,7 @@
         <div class="perf-bar-track">
           <div class="perf-bar accent" style="width:100%">bump allocator</div>
         </div>
-        <div class="perf-label"><span>~3 ns</span><span>3× faster</span></div>
+        <div class="perf-label"><span>~3 ns</span><span>19× faster</span></div>
         <div class="perf-bar-track">
           <div class="perf-bar teal" style="width:33%">malloc</div>
         </div>
@@ -176,7 +154,7 @@
         <div class="perf-bar-track">
           <div class="perf-bar accent" style="width:100%">block.reset()</div>
         </div>
-        <div class="perf-label"><span>~1 µs</span><span>1000× faster</span></div>
+        <div class="perf-label"><span>~5 ns</span><span>2000× faster</span></div>
         <div class="perf-bar-track">
           <div class="perf-bar teal" style="width:0.1%">free() per object</div>
         </div>
@@ -208,7 +186,7 @@
         <div class="step-body">
           <h3>Clone</h3>
           <p>Get the repository and enter the project directory.</p>
-          <div class="code-block"><pre>git clone https://github.com/anomalyco/meta-c.git
+          <div class="code-block"><pre>git clone https://github.com/nonunknown777/meta-c.git
 cd meta-c</pre></div>
         </div>
       </div>
@@ -224,7 +202,7 @@ cd meta-c</pre></div>
         <div class="step-num">3</div>
         <div class="step-body">
           <h3>Write</h3>
-          <p>Create a <code>.mc</code> file — for example the player demo above — with your favorite editor.</p>
+          <p>Create a <code>.mc</code> file with structs, methods, and blocks.</p>
           <div class="code-block"><pre>touch game.mc</pre></div>
         </div>
       </div>
@@ -232,9 +210,8 @@ cd meta-c</pre></div>
         <div class="step-num">4</div>
         <div class="step-body">
           <h3>Compile &amp; Run</h3>
-          <p>The compiler translates .mc → C, then gcc produces the binary. The runtime links automatically.</p>
-          <div class="code-block"><pre>./meta-c game.mc -o game
-./game</pre></div>
+          <p>Use the <code>meta-c</code> CLI — no manual gcc needed.</p>
+          <div class="code-block"><pre>build/meta-c run game.mc</pre></div>
         </div>
       </div>
     </div>
@@ -257,7 +234,7 @@ cd meta-c</pre></div>
         <span class="pipe-arrow">→</span>
         <div class="pipe-step"><div class="label">Codegen</div><div class="sub">src/codegen</div></div>
         <span class="pipe-arrow">→</span>
-        <div class="pipe-step"><div class="label">C Code</div><div class="sub">.c with #line</div></div>
+        <div class="pipe-step"><div class="label">C Code</div><div class="sub">with #line</div></div>
         <span class="pipe-arrow">→</span>
         <div class="pipe-step"><div class="label">gcc</div><div class="sub">-O3</div></div>
         <span class="pipe-arrow">→</span>
@@ -281,21 +258,29 @@ cd meta-c</pre></div>
     <h2 class="section-title fade-in">Documentation</h2>
     <p class="section-sub fade-in">Learn the language, the runtime, and the toolchain.</p>
     <div class="docs-links">
-      <a href="LANGUAGE.md" class="doc-link fade-in">
+      <a href="https://github.com/nonunknown777/meta-c/wiki/Language-Reference" class="doc-link fade-in">
         <h4>Language Spec</h4>
         <p>Complete syntax, types, packages, and memory model reference.</p>
       </a>
-      <a href="GETTING_STARTED.md" class="doc-link fade-in">
+      <a href="https://github.com/nonunknown777/meta-c/wiki/Getting-Started" class="doc-link fade-in">
         <h4>Getting Started</h4>
         <p>Installation, first project, and common patterns explained simply.</p>
       </a>
-      <a href="ARCHITECTURE.md" class="doc-link fade-in">
+      <a href="https://github.com/nonunknown777/meta-c/wiki/Architecture" class="doc-link fade-in">
         <h4>Architecture</h4>
-        <p>How the compiler, runtime, and tools fit together — in plain language.</p>
+        <p>How the compiler, runtime, and tools fit together.</p>
       </a>
-      <a href="OPTIMIZATIONS.md" class="doc-link fade-in">
+      <a href="https://github.com/nonunknown777/meta-c/wiki/Performance" class="doc-link fade-in">
         <h4>Optimizations</h4>
-        <p>SIMD, inline assembly, alignment tuning, and bump allocator tuning.</p>
+        <p>Bump allocator tuning, SIMD, alignment, and benchmarks.</p>
+      </a>
+      <a href="https://github.com/nonunknown777/meta-c/wiki/Hot-Reload" class="doc-link fade-in">
+        <h4>Hot Reload</h4>
+        <p>Live code swapping architecture and usage.</p>
+      </a>
+      <a href="https://github.com/nonunknown777/meta-c/wiki/Memory-Blocks" class="doc-link fade-in">
+        <h4>Memory Blocks</h4>
+        <p>Deep dive into the block memory system.</p>
       </a>
     </div>
   </div>
@@ -304,7 +289,7 @@ cd meta-c</pre></div>
 <!-- Footer -->
 <footer>
   <p>Meta‑C — MIT License</p>
-  <p class="ai-note">Built with assistance from AI tools</p>
+  <p class="ai-note"><a href="https://github.com/nonunknown777/meta-c">github.com/nonunknown777/meta-c</a></p>
 </footer>
 
 <script src="script.js"></script>

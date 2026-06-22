@@ -31,6 +31,7 @@ typedef struct {
 } BlockStats;
 
 // ─── Registry API (optional — requires -DMETA_C_TRACK_BLOCKS) ─
+// ─── API do Registro (opcional — requer -DMETA_C_TRACK_BLOCKS) ─
 #ifdef META_C_TRACK_BLOCKS
 
 #define META_C_BLOCK_NAME_MAX 32
@@ -62,46 +63,59 @@ int      block_shm_export(void);
 
 #else
 // No-op stubs — compiler optimizes these away entirely
+// Stubs no-op — compilador otimiza esses totalmente
 #define META_C_MAX_BLOCKS 1
 #define META_C_BLOCK_NAME_MAX 1
 #define block_register(ctx, name)     ((void)(ctx), (void)(name))
 #define block_unregister(ctx)         ((void)(ctx))
 #define block_find(name)              ((void)(name), (BlockCtx*)NULL)
 #define block_snapshot(out, max)      ((void)(out), (void)(max), (size_t)0)
-#define block_shm_export()            (-1)
+#define block_shm_export()            ((void)0)
 #endif
 
 // ─── Block API ───────────────────────────────────────────────
+// ─── API de Blocos ────────────────────────────────────────────
 
 // Create a new memory block of N megabytes
+// Cria um novo bloco de memoria de N megabytes
 BlockCtx* block_create(size_t megabytes);
 
 // Create a block with custom byte size
+// Cria um bloco com tamanho personalizado em bytes
 BlockCtx* block_create_bytes(size_t bytes);
 
 // Allocate memory from a block (bump allocator)
+// Aloca memoria de um bloco (bump allocator)
 void* block_alloc(BlockCtx* ctx, size_t size);
 
 // Allocate with alignment
+// Aloca com alinhamento
 void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment);
 
 // Reset the block (O(1) — just resets bump pointer)
+// Reseta o bloco (O(1) — apenas reseta o ponteiro bump)
 void block_reset(BlockCtx* ctx);
 
 // Destroy the block and free its memory
+// Destroi o bloco e libera sua memoria
 void block_destroy(BlockCtx* ctx);
 
 // Get block statistics
+// Obtem estatisticas do bloco
 BlockStats block_stats(BlockCtx* ctx);
 
 // Get the default alignment
+// Obtem o alinhamento padrao
 size_t block_alignment(void);
 
 // Freeze all block allocations (spin-wait until thawed)
+// Congela todas as alocacoes de bloco (espera ocupada ate descongelar)
 // Used by hot reload to ensure no allocations during code swap
+// Usado pelo hot reload para garantir nenhuma alocacao durante troca de codigo
 void block_freeze(void);
 
 // Thaw block allocations after hot reload swap
+// Descongela alocacoes de bloco apos troca de hot reload
 void block_thaw(void);
 
 #ifdef __cplusplus
@@ -109,10 +123,11 @@ void block_thaw(void);
 #endif
 
 #endif // META_C_BLOCK_MEMORY_H
+     // META_C_BLOCK_MEMORY_H
 )";
 const size_t _runtime_block_memory_h_len = sizeof(_runtime_block_memory_h) - 1;
 
-const char _runtime_block_memory_c[] = R"(
+const char _runtime_block_memory_c[] = R"X(
 #define _GNU_SOURCE
 #include "block_memory.h"
 #include <stdio.h>
@@ -120,12 +135,26 @@ const char _runtime_block_memory_c[] = R"(
 #include <string.h>
 #include <stdint.h>
 #include <stdatomic.h>
+#include <sys/mman.h>
 
 #define DEFAULT_ALIGNMENT 8
+
+// Compute optimal alignment for a given allocation size
+// Computa alinhamento otimo para um dado tamanho de alocacao
+// size=1→1, 2→2, 3→2, 4→4, 5→4, 6→4, 7→4, 8→8, 9→8, ...
+// Eliminates padding waste for small types (u8, u16, u32, f32)
+// Elimina desperdicio de padding para tipos pequenos (u8, u16, u32, f32)
+static inline size_t optimal_alignment(size_t size) {
+    return size >= 8 ? (size_t)8
+         : size >= 4 ? (size_t)4
+         : size >= 2 ? (size_t)2
+         :            (size_t)1;
+}
 
 static atomic_int block_frozen_flag = 0;
 
 // ─── Global Block Registry ───────────────────────────────────
+// ─── Registro Global de Blocos ────────────────────────────────
 #ifdef META_C_TRACK_BLOCKS
 
 #include <pthread.h>
@@ -224,6 +253,7 @@ size_t block_snapshot(BlockInfo* out, size_t max_count) {
 }
 
 // ─── Shared Memory Export ────────────────────────────────────
+// ─── Exportacao de Memoria Compartilhada ──────────────────────
 
 static void shm_path(char* buf, size_t bufsize) {
     snprintf(buf, bufsize, "/tmp/meta-c-mem-%d.bin", (int)getpid());
@@ -281,6 +311,7 @@ int block_shm_export(void) {
 }
 
 #endif // META_C_TRACK_BLOCKS
+     // META_C_TRACK_BLOCKS
 
 static void error(const char* msg) {
     fprintf(stderr, "Meta-C runtime error: %s\n", msg);
@@ -295,10 +326,24 @@ BlockCtx* block_create_bytes(size_t bytes) {
     BlockCtx* ctx = (BlockCtx*)malloc(sizeof(BlockCtx));
     if (!ctx) error("out of memory");
 
-    ctx->data = (uint8_t*)malloc(bytes);
-    if (!ctx->data) {
-        free(ctx);
-        error("out of memory");
+    // Use mmap for large allocations (>= 64KB) — better for huge pages,
+    // shared memory export, and cleaner deallocation
+    // Usa mmap para alocacoes grandes (>= 64KB) — melhor para huge pages,
+    // exportacao de memoria compartilhada e desalocacao mais limpa
+    if (bytes >= 65536) {
+        ctx->data = (uint8_t*)mmap(NULL, bytes, PROT_READ | PROT_WRITE,
+                                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
+                                   -1, 0);
+        if (ctx->data == MAP_FAILED) {
+            free(ctx);
+            error("out of memory (mmap failed)");
+        }
+    } else {
+        ctx->data = (uint8_t*)malloc(bytes);
+        if (!ctx->data) {
+            free(ctx);
+            error("out of memory");
+        }
     }
 
     ctx->capacity = bytes;
@@ -310,21 +355,27 @@ BlockCtx* block_create_bytes(size_t bytes) {
 }
 
 void* block_alloc(BlockCtx* ctx, size_t size) {
-    return block_alloc_aligned(ctx, size, DEFAULT_ALIGNMENT);
+    // Use optimal alignment based on size to eliminate padding waste
+    // Usa alinhamento otimo baseado no tamanho pra eliminar desperdicio de padding
+    return block_alloc_aligned(ctx, size, optimal_alignment(size));
 }
 
 void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment) {
     // Spin-wait if frozen (hot reload in progress)
+    // Espera ocupada se congelado (hot reload em andamento)
     while (atomic_load_explicit(&block_frozen_flag, memory_order_acquire)) {
         // spin — will be very brief (nanoseconds)
+        // giro — sera muito breve (nanossegundos)
         __asm__ volatile("pause");
     }
 
     // Align current position
+    // Alinha posicao atual
     size_t current = ctx->used;
     size_t aligned = (current + alignment - 1) & ~(alignment - 1);
 
     // Check overflow
+    // Verifica estouro
     if (aligned + size > ctx->capacity) {
         error("block overflow: out of memory in block");
     }
@@ -336,18 +387,36 @@ void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment) {
         ctx->peak_used = ctx->used;
     }
 
+    // Auto-export shm every 16 allocations (for visualizer attach mode)
+    // Auto-exporta shm a cada 16 alocacoes (para modo attach do visualizer)
+#ifdef META_C_TRACK_BLOCKS
+    static unsigned int _alloc_counter = 0;
+    if ((++_alloc_counter & 0xF) == 0) {
+        block_shm_export();
+    }
+#endif
+
     return ctx->data + aligned;
 }
 
 void block_reset(BlockCtx* ctx) {
     ctx->used = 0;
     // Note: allocation_count is NOT reset here,
+    // Nota: allocation_count NAO e resetado aqui,
     // so we can track total allocations across resets
+    // para que possamos rastrear alocacoes totais entre resets
+#ifdef META_C_TRACK_BLOCKS
+    block_shm_export();
+#endif
 }
 
 void block_destroy(BlockCtx* ctx) {
     if (ctx) {
-        free(ctx->data);
+        if (ctx->capacity >= 65536) {
+            munmap(ctx->data, ctx->capacity);
+        } else {
+            free(ctx->data);
+        }
         free(ctx);
     }
 }
@@ -361,6 +430,7 @@ BlockStats block_stats(BlockCtx* ctx) {
     stats.allocation_count = ctx->allocation_count;
 
     // Fragmentation: 0% for bump allocator (no holes)
+    // Fragmentacao: 0% para bump allocator (sem buracos)
     stats.fragmentation_percent = 0.0f;
 
     return stats;
@@ -377,7 +447,7 @@ void block_freeze(void) {
 void block_thaw(void) {
     atomic_store_explicit(&block_frozen_flag, 0, memory_order_release);
 }
-)";
+)X";
 const size_t _runtime_block_memory_c_len = sizeof(_runtime_block_memory_c) - 1;
 
 const char _runtime_io_h[] = R"(
@@ -392,13 +462,25 @@ extern "C" {
 #endif
 
 typedef struct {
-    char*   data;
-    int64_t len;
+    char*  data;
+    size_t len;
 } MetaCString;
 
+void io_print_u8(uint8_t val);
+void io_print_u16(uint16_t val);
+void io_print_u32(uint32_t val);
+void io_print_u64(uint64_t val);
+void io_print_i8(int8_t val);
+void io_print_i16(int16_t val);
+void io_print_i32(int32_t val);
+void io_print_i64(int64_t val);
+void io_print_f32(float val);
+void io_print_f64(double val);
+void io_print_usize(size_t val);
+void io_print_isize(ptrdiff_t val);
 void io_print_int(int64_t val);
 void io_print_float(double val);
-void io_print_string(const char* data, int64_t len);
+void io_print_string(const char* data, size_t len);
 void io_print_char(char val);
 void io_print_bool(uint8_t val);
 void io_print_newline(void);
@@ -409,6 +491,7 @@ void io_printf(const char* fmt, ...);
 #endif
 
 #endif // META_C_IO_H
+     // META_C_IO_H
 )";
 const size_t _runtime_io_h_len = sizeof(_runtime_io_h) - 1;
 
@@ -416,16 +499,35 @@ const char _runtime_io_c[] = R"(
 #include "io.h"
 #include <stdio.h>
 #include <stdarg.h>
+#include <inttypes.h>
 
-void io_print_int(int64_t v) {
-    printf("%lld\n", (long long)v);
-}
+// ─── Type-specific integer prints ─────────────────────────────
+// ─── Prints de inteiro especificos por tipo ────────────────────
 
-void io_print_float(double v) {
-    printf("%f\n", v);
-}
+void io_print_u8(uint8_t v)     { printf("%" PRIu8 "\n", v); }
+void io_print_u16(uint16_t v)   { printf("%" PRIu16 "\n", v); }
+void io_print_u32(uint32_t v)   { printf("%" PRIu32 "\n", v); }
+void io_print_u64(uint64_t v)   { printf("%" PRIu64 "\n", v); }
+void io_print_i8(int8_t v)      { printf("%" PRId8 "\n", v); }
+void io_print_i16(int16_t v)    { printf("%" PRId16 "\n", v); }
+void io_print_i32(int32_t v)    { printf("%" PRId32 "\n", v); }
+void io_print_i64(int64_t v)    { printf("%" PRId64 "\n", v); }
+void io_print_usize(size_t v)   { printf("%zu\n", v); }
+void io_print_isize(ptrdiff_t v){ printf("%td\n", v); }
 
-void io_print_string(const char* data, int64_t len) {
+// ─── Type-specific float prints ───────────────────────────────
+// ─── Prints de ponto flutuante especificos por tipo ────────────
+
+void io_print_f32(float v)      { printf("%f\n", (double)v); }
+void io_print_f64(double v)     { printf("%f\n", v); }
+
+// ─── Generic prints (kept for backward compat) ────────────────
+// ─── Prints genericos (mantidos pra compatibilidade) ───────────
+
+void io_print_int(int64_t v)    { io_print_i64(v); }
+void io_print_float(double v)   { io_print_f64(v); }
+
+void io_print_string(const char* data, size_t len) {
     printf("%.*s\n", (int)len, data);
 }
 
@@ -470,33 +572,45 @@ typedef enum {
 typedef struct HotReloadEngine HotReloadEngine;
 
 // Function pointer type for reload callbacks
+// Tipo do ponteiro de funcao para callbacks de reload
 typedef void (*hr_callback_t)(const char* so_path);
 
 // Create a hot reload engine for a .so library
+// Cria um motor de hot reload para uma biblioteca .so
 HotReloadEngine* hr_create(const char* so_path);
 
 // Load initial symbols from the .so
+// Carrega simbolos iniciais do .so
 int hr_load_initial(HotReloadEngine* hr);
 
 // Register a function pointer for hot swapping
+// Registra um ponteiro de funcao para troca a quente
 // name: symbol name in the .so
+// name: nome do simbolo no .so
 // func_ptr: address of a void* that will be updated on reload
+// func_ptr: endereco de um void* que sera atualizado no reload
 int hr_register_func(HotReloadEngine* hr, const char* name, void** func_ptr);
 
 // Start watching the .so file for modifications (inotify)
+// Inicia monitoramento do arquivo .so por modificacoes (inotify)
 // Creates a separate monitoring thread
+// Cria uma thread de monitoramento separada
 int hr_start_watching(HotReloadEngine* hr);
 
 // Force a reload immediately
+// Forca um reload imediatamente
 int hr_reload(HotReloadEngine* hr);
 
 // Get current state
+// Obtem estado atual
 HotReloadState hr_state(HotReloadEngine* hr);
 
 // Set a callback that fires after every reload attempt
+// Define um callback que executa apos cada tentativa de reload
 void hr_set_callback(HotReloadEngine* hr, hr_callback_t cb);
 
 // Stop monitoring and cleanup
+// Para monitoramento e limpa
 void hr_destroy(HotReloadEngine* hr);
 
 #ifdef __cplusplus
@@ -504,6 +618,7 @@ void hr_destroy(HotReloadEngine* hr);
 #endif
 
 #endif // META_C_HOT_RELOAD_H
+     // META_C_HOT_RELOAD_H
 )";
 const size_t _runtime_hot_reload_h_len = sizeof(_runtime_hot_reload_h) - 1;
 
@@ -856,6 +971,7 @@ struct HotReloadEngine {
     char          so_path[1024];
     char          so_basename[256];
     char          so_path_tmp[1024];  // path + ".new" for atomic swap
+                                       // path + ".new" para troca atomica
     void*         handle_current;
     void*         handle_new;
     SymbolEntry   symbols[MAX_SYMBOLS];
@@ -881,6 +997,7 @@ HotReloadEngine* hr_create(const char* so_path) {
     strncpy(hr->so_path, so_path, sizeof(hr->so_path) - 1);
 
     // Extract basename
+    // Extrai o nome base
     const char* slash = strrchr(so_path, '/');
     strncpy(hr->so_basename, slash ? slash + 1 : so_path, sizeof(hr->so_basename) - 1);
 
@@ -910,6 +1027,7 @@ int hr_load_initial(HotReloadEngine* hr) {
     hr->state = HR_OK;
 
     // Resolve registered symbols
+    // Resolve simbolos registrados
     for (int i = 0; i < hr->symbol_count; i++) {
         void* sym = dlsym(hr->handle_current, hr->symbols[i].name);
         if (sym) {
@@ -938,10 +1056,13 @@ int hr_reload(HotReloadEngine* hr) {
     hr->state = HR_LOADING;
 
     // Freeze block allocations during swap
+    // Congela alocacoes de bloco durante a troca
     block_freeze();
 
     // Copy the .so to a temp path so dlopen gets a fresh load
+    // Copia o .so para um caminho temporario para dlopen obter carga fresca
     // (dlopen caches by path; a copy bypasses the cache)
+    // (dlopen armazena em cache por caminho; uma copia contorna o cache)
     char tmp_path[1088];
     snprintf(tmp_path, sizeof(tmp_path), "%s.%d", hr->so_path, (int)time(NULL));
 
@@ -966,6 +1087,7 @@ int hr_reload(HotReloadEngine* hr) {
         const char* err = dlerror();
         fprintf(stderr, "hr: reload failed: %s\n", err ? err : "cannot open .so file");
         // Rollback: keep old handle, function pointers untouched
+        // Rollback: mantem handle antigo, ponteiros de funcao intocados
         hr->state = hr->handle_current ? HR_OK : HR_ERROR;
         block_thaw();
         if (hr->callback) hr->callback(hr->so_path);
@@ -974,6 +1096,7 @@ int hr_reload(HotReloadEngine* hr) {
     }
 
     // Swap function pointers atomically
+    // Troca ponteiros de funcao atomicamente
     for (int i = 0; i < hr->symbol_count; i++) {
         void* sym = dlsym(new_handle, hr->symbols[i].name);
         if (sym) {
@@ -985,6 +1108,7 @@ int hr_reload(HotReloadEngine* hr) {
     }
 
     // Close old handle
+    // Fecha handle antigo
     if (hr->handle_current) {
         dlclose(hr->handle_current);
     }
@@ -999,6 +1123,7 @@ int hr_reload(HotReloadEngine* hr) {
 }
 
 // Watch thread function
+// Funcao da thread de monitoramento
 static void* watch_thread_fn(void* arg) {
     HotReloadEngine* hr = (HotReloadEngine*)arg;
 
@@ -1016,6 +1141,7 @@ static void* watch_thread_fn(void* arg) {
                 event->len > 0 &&
                 strcmp(event->name, hr->so_basename) == 0) {
                 // Small delay to let file writes complete
+                // Pequeno atraso para permitir que escritas no arquivo terminem
                 struct timespec ts = {0, 50000000};
                 nanosleep(&ts, NULL);
                 hr_reload(hr);
@@ -1036,6 +1162,7 @@ int hr_start_watching(HotReloadEngine* hr) {
     }
 
     // Watch directory of the .so file
+    // Monitora diretorio do arquivo .so
     char dir_path[1024];
     size_t path_len = strlen(hr->so_path);
     if (path_len >= sizeof(dir_path)) path_len = sizeof(dir_path) - 1;

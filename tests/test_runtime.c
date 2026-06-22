@@ -86,25 +86,26 @@ void test_overflow() {
 }
 
 void test_alignment() {
-    size_t align = block_alignment();
-    assert(align == 8 || align == 16);
+    size_t max_align = block_alignment();
+    assert(max_align == 8 || max_align == 16);
 
     BlockCtx* block = block_create_bytes(256);
 
-    // Allocate 1 byte, check the returned address is aligned
-    // Aloca 1 byte, verifica se o endereco retornado esta alinhado
-    void* p1 = block_alloc(block, 1);
-    assert(((uintptr_t)p1 & (align - 1)) == 0);
+    // block_alloc uses optimal alignment based on size
+    // block_alloc usa alinhamento otimo baseado no tamanho
+    void* p1 = block_alloc(block, 1);  // optimal: align 1
+    assert(((uintptr_t)p1 & 0x0) == 0); // always true (align 1)
 
-    // Allocate 3 more bytes, address should still be aligned
-    // Aloca mais 3 bytes, endereco deve continuar alinhado
-    void* p2 = block_alloc(block, 3);
-    assert(((uintptr_t)p2 & (align - 1)) == 0);
+    void* p2 = block_alloc(block, 3);  // optimal: align 2
+    assert(((uintptr_t)p2 & 0x1) == 0); // 2-byte aligned
 
-    // Allocate 0 bytes should return valid aligned pointer
-    // Alocar 0 bytes deve retornar ponteiro alinhado valido
-    void* p3 = block_alloc(block, 0);
-    assert(((uintptr_t)p3 & (align - 1)) == 0);
+    void* p3 = block_alloc(block, 0);  // optimal: align 1
+    assert(p3 != NULL);
+
+    // block_alloc_aligned still respects explicit alignment
+    // block_alloc_aligned ainda respeita alinhamento explicito
+    void* p4 = block_alloc_aligned(block, 1, 8);
+    assert(((uintptr_t)p4 & 0x7) == 0);
 
     block_destroy(block);
     printf("[PASS] test_alignment\n");
@@ -133,14 +134,143 @@ void test_multiple_blocks() {
     printf("[PASS] test_multiple_blocks\n");
 }
 
+void test_create_bytes() {
+    BlockCtx* block = block_create_bytes(4096);
+    assert(block != NULL);
+    assert(block->capacity == 4096);
+    assert(block->used == 0);
+
+    block_destroy(block);
+    printf("[PASS] test_create_bytes\n");
+}
+
+void test_zero_size_alloc() {
+    BlockCtx* block = block_create_bytes(256);
+
+    void* p1 = block_alloc(block, 0);
+    assert(p1 != NULL);
+
+    void* p2 = block_alloc(block, 0);
+    assert(p2 != NULL);
+
+    block_destroy(block);
+    printf("[PASS] test_zero_size_alloc\n");
+}
+
+void test_large_alignment() {
+    BlockCtx* block = block_create_bytes(1024);
+
+    // 16-byte aligned
+    void* p1 = block_alloc_aligned(block, 32, 16);
+    assert(((uintptr_t)p1 & 0xF) == 0);
+
+    // 32-byte aligned
+    void* p2 = block_alloc_aligned(block, 64, 32);
+    assert(((uintptr_t)p2 & 0x1F) == 0);
+
+    // 64-byte aligned (cache line)
+    void* p3 = block_alloc_aligned(block, 128, 64);
+    assert(((uintptr_t)p3 & 0x3F) == 0);
+
+    block_destroy(block);
+    printf("[PASS] test_large_alignment\n");
+}
+
+void test_peak_used() {
+    BlockCtx* block = block_create_bytes(4096);
+
+    assert(block->peak_used == 0);
+
+    block_alloc(block, 100);
+    size_t after_first = block->used;
+    assert(block->peak_used == after_first);
+
+    block_alloc(block, 200);
+    size_t after_second = block->used;
+    assert(block->peak_used == after_second);
+
+    // Reset and alloc less — peak should NOT decrease
+    block_reset(block);
+    block_alloc(block, 50);
+    assert(block->peak_used == after_second);
+
+    // Alloc more — peak should increase
+    block_alloc(block, 500);
+    assert(block->peak_used > after_second);
+
+    block_destroy(block);
+    printf("[PASS] test_peak_used\n");
+}
+
+void test_allocation_count() {
+    BlockCtx* block = block_create_bytes(1024);
+
+    assert(block->allocation_count == 0);
+
+    block_alloc(block, 16);
+    assert(block->allocation_count == 1);
+
+    block_alloc(block, 32);
+    assert(block->allocation_count == 2);
+
+    // Reset does NOT reset allocation_count
+    block_reset(block);
+    assert(block->allocation_count == 2);
+
+    block_alloc(block, 64);
+    assert(block->allocation_count == 3);
+
+    block_destroy(block);
+    printf("[PASS] test_allocation_count\n");
+}
+
+void test_stress() {
+    BlockCtx* block = block_create(1); // 1MB
+
+    // Allocate many small blocks
+    for (int i = 0; i < 10000; i++) {
+        int* p = (int*)block_alloc(block, sizeof(int));
+        *p = i;
+    }
+
+    BlockStats stats = block_stats(block);
+    assert(stats.allocation_count == 10000);
+    assert(stats.total_size == 1024 * 1024);
+    assert(stats.used_size <= stats.total_size);
+
+    block_destroy(block);
+    printf("[PASS] test_stress\n");
+}
+
+void test_freeze_thaw_blocked() {
+    BlockCtx* block = block_create_bytes(1024);
+
+    block_freeze();
+    block_thaw();
+
+    // After thaw, alloc should work
+    void* p = block_alloc(block, 64);
+    assert(p != NULL);
+
+    block_destroy(block);
+    printf("[PASS] test_freeze_thaw_blocked\n");
+}
+
 int main() {
     test_create_block();
+    test_create_bytes();
     test_alloc();
     test_reset();
     test_overflow();
     test_stats();
     test_alignment();
+    test_large_alignment();
+    test_zero_size_alloc();
+    test_peak_used();
+    test_allocation_count();
+    test_stress();
     test_multiple_blocks();
+    test_freeze_thaw_blocked();
 
     printf("\nAll runtime tests passed!\n");
     return 0;

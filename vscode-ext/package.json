@@ -81,11 +81,14 @@
             {
                 "scopes": {
                     "keyword": [
-                        "keyword.control.mc"
+                        "keyword.control.package.mc",
+                        "keyword.control.struct.mc",
+                        "keyword.control.function.mc",
+                        "keyword.control.flow.mc",
+                        "keyword.control.memory.mc"
                     ],
                     "type": [
-                        "storage.type.mc",
-                        "entity.name.type.struct.mc"
+                        "storage.type.mc"
                     ],
                     "class": [
                         "entity.name.type.struct.mc"
@@ -106,22 +109,33 @@
                         "variable.other.mc"
                     ],
                     "string": [
-                        "string.quoted.mc"
+                        "string.quoted.double.mc",
+                        "string.quoted.single.mc"
                     ],
                     "number": [
-                        "constant.numeric.mc"
+                        "constant.numeric.integer.mc",
+                        "constant.numeric.float.mc"
                     ],
                     "comment": [
-                        "comment.mc"
+                        "comment.line.double-slash.mc"
                     ],
                     "operator": [
-                        "keyword.operator.mc"
+                        "keyword.operator.arithmetic.mc",
+                        "keyword.operator.comparison.mc",
+                        "keyword.operator.logical.mc",
+                        "keyword.operator.assignment.mc",
+                        "keyword.operator.arrow.mc",
+                        "keyword.operator.member.mc",
+                        "keyword.operator.inc.mc"
                     ],
                     "parameter": [
                         "variable.parameter.mc"
                     ],
                     "struct": [
                         "entity.name.type.struct.mc"
+                    ],
+                    "constant": [
+                        "constant.language.mc"
                     ]
                 }
             }

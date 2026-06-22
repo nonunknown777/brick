@@ -45,6 +45,10 @@ const KEYWORDS = new Set([
     'block', 'reset',
     'if', 'else', 'while', 'for', 'error',
     'int', 'float', 'bool', 'char', 'String', 'void',
+    'u8', 'u16', 'u32', 'u64',
+    'i8', 'i16', 'i32', 'i64',
+    'f32', 'f64',
+    'usize', 'isize', 'byte',
     'null', 'true', 'false',
 ]);
 
@@ -71,12 +75,27 @@ const KEYWORD_DOCS: Record<string, string> = {
     char: '8-bit character type.',
     String: 'Dynamic string type (heap-allocated in a block).',
     void: 'No return type.',
+    u8: 'Unsigned 8-bit integer type.',
+    u16: 'Unsigned 16-bit integer type.',
+    u32: 'Unsigned 32-bit integer type.',
+    u64: 'Unsigned 64-bit integer type.',
+    i8: 'Signed 8-bit integer type.',
+    i16: 'Signed 16-bit integer type.',
+    i32: 'Signed 32-bit integer type.',
+    i64: 'Signed 64-bit integer type.',
+    f32: '32-bit floating point type.',
+    f64: '64-bit floating point type (same as `float`).',
+    usize: 'Unsigned pointer-sized integer type.',
+    isize: 'Signed pointer-sized integer type.',
+    byte: '8-bit byte type (alias for `u8`).',
     null: 'Null pointer literal, assignable to any type.',
     true: 'Boolean true literal.',
     false: 'Boolean false literal.',
 };
 
-const BUILTIN_TYPES = new Set(['int', 'float', 'bool', 'char', 'String', 'void']);
+const FIXED_WIDTH_TYPES = new Set(['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte']);
+
+const BUILTIN_TYPES = new Set(['int', 'float', 'bool', 'char', 'String', 'void', ...FIXED_WIDTH_TYPES]);
 
 export function scanDocument(text: string): ScanResult {
     const tokens: MCToken[] = [];
@@ -123,9 +142,13 @@ export function scanDocument(text: string): ScanResult {
                     if (line[col] === '\\') col++;
                     col++;
                 }
-                if (col < len && line[col] === '"') col++;
+                const hasClosing = col < len && line[col] === '"';
+                if (hasClosing) col++;
                 const lexeme = line.slice(start, col);
-                tokens.push({ type: 'STRING', lexeme, line: lineIdx + 1, col: start + 1 });
+                tokens.push({ type: 'STRING_LITERAL', lexeme, line: lineIdx + 1, col: start + 1 });
+                if (!hasClosing) {
+                    errors.push({ message: 'unterminated string literal', line: lineIdx + 1, col: start + 1 });
+                }
                 continue;
             }
 
@@ -135,9 +158,13 @@ export function scanDocument(text: string): ScanResult {
                 col++;
                 if (col < len && line[col] === '\\') col++;
                 col++;
-                if (col < len && line[col] === '\'') col++;
+                const hasClosing = col < len && line[col] === '\'';
+                if (hasClosing) col++;
                 const lexeme = line.slice(start, col);
-                tokens.push({ type: 'CHAR', lexeme, line: lineIdx + 1, col: start + 1 });
+                tokens.push({ type: 'CHAR_LITERAL', lexeme, line: lineIdx + 1, col: start + 1 });
+                if (!hasClosing) {
+                    errors.push({ message: 'unterminated char literal', line: lineIdx + 1, col: start + 1 });
+                }
                 continue;
             }
 
@@ -152,7 +179,7 @@ export function scanDocument(text: string): ScanResult {
                     while (col < len && (line[col] >= '0' && line[col] <= '9')) col++;
                 }
                 const lexeme = line.slice(start, col);
-                tokens.push({ type: isFloat ? 'FLOAT' : 'INT', lexeme, line: lineIdx + 1, col: start + 1 });
+                tokens.push({ type: isFloat ? 'FLOAT_LITERAL' : 'INT_LITERAL', lexeme, line: lineIdx + 1, col: start + 1 });
                 continue;
             }
 
@@ -204,6 +231,18 @@ export function scanDocument(text: string): ScanResult {
             if (ch === '-' && col + 1 < len && line[col + 1] === '-') {
                 tokens.push({ type: 'MINUSMINUS', lexeme: '--', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
             }
+            if (ch === '<' && col + 1 < len && line[col + 1] === '<') {
+                tokens.push({ type: 'LSHIFT', lexeme: '<<', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '>' && col + 1 < len && line[col + 1] === '>') {
+                tokens.push({ type: 'RSHIFT', lexeme: '>>', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '*' && col + 1 < len && line[col + 1] === '=') {
+                tokens.push({ type: 'STAR_ASSIGN', lexeme: '*=', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
+            if (ch === '/' && col + 1 < len && line[col + 1] === '=') {
+                tokens.push({ type: 'SLASH_ASSIGN', lexeme: '/=', line: lineIdx + 1, col: col + 1 }); col += 2; continue;
+            }
 
             // Single char tokens
             if (ch === '{') { tokens.push({ type: 'LBRACE', lexeme: '{', line: lineIdx + 1, col: col + 1 }); col++; continue; }
@@ -219,12 +258,16 @@ export function scanDocument(text: string): ScanResult {
             if (ch === '=') { tokens.push({ type: 'ASSIGN', lexeme: '=', line: lineIdx + 1, col: col + 1 }); col++; continue; }
             if (ch === '+') { tokens.push({ type: 'PLUS', lexeme: '+', line: lineIdx + 1, col: col + 1 }); col++; continue; }
             if (ch === '-') { tokens.push({ type: 'MINUS', lexeme: '-', line: lineIdx + 1, col: col + 1 }); col++; continue; }
-            if (ch === '*') { tokens.push({ type: 'MUL', lexeme: '*', line: lineIdx + 1, col: col + 1 }); col++; continue; }
-            if (ch === '/') { tokens.push({ type: 'DIV', lexeme: '/', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '*') { tokens.push({ type: 'STAR', lexeme: '*', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '/') { tokens.push({ type: 'SLASH', lexeme: '/', line: lineIdx + 1, col: col + 1 }); col++; continue; }
             if (ch === '<') { tokens.push({ type: 'LT', lexeme: '<', line: lineIdx + 1, col: col + 1 }); col++; continue; }
             if (ch === '>') { tokens.push({ type: 'GT', lexeme: '>', line: lineIdx + 1, col: col + 1 }); col++; continue; }
             if (ch === '!') { tokens.push({ type: 'NOT', lexeme: '!', line: lineIdx + 1, col: col + 1 }); col++; continue; }
             if (ch === ':') { tokens.push({ type: 'COLON', lexeme: ':', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '&') { tokens.push({ type: 'BIT_AND', lexeme: '&', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '|') { tokens.push({ type: 'BIT_OR', lexeme: '|', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '^') { tokens.push({ type: 'BIT_XOR', lexeme: '^', line: lineIdx + 1, col: col + 1 }); col++; continue; }
+            if (ch === '~') { tokens.push({ type: 'BIT_NOT', lexeme: '~', line: lineIdx + 1, col: col + 1 }); col++; continue; }
 
             // Unknown char — skip
             col++;
@@ -268,7 +311,7 @@ export function scanDocument(text: string): ScanResult {
             // skip = SIZE UNIT if present
             if (i < tok.length && tok[i].type === 'ASSIGN') {
                 i++;
-                if (i < tok.length && (tok[i].type === 'INT' || tok[i].type === 'FLOAT')) {
+                if (i < tok.length && (tok[i].type === 'INT_LITERAL' || tok[i].type === 'FLOAT_LITERAL')) {
                     i++;
                     if (i < tok.length && tok[i].type === 'IDENTIFIER') i++;
                 }
@@ -279,6 +322,18 @@ export function scanDocument(text: string): ScanResult {
         // Block scope: block NAME { ... }
         if (t.type === 'BLOCK' && i + 3 < tok.length && tok[i + 1].type === 'IDENTIFIER' && tok[i + 2].type === 'LBRACE') {
             blocks.push({ name: tok[i + 1].lexeme, line: t.line });
+            symbols.push({ name: tok[i + 1].lexeme, kind: 'block', type_name: 'block', line: t.line, col: t.col });
+            i += 3;
+            continue;
+        }
+
+        // Block scope: block NAME :  (colon syntax to change default block)
+        if (t.type === 'BLOCK' && i + 2 < tok.length && tok[i + 1].type === 'IDENTIFIER' && tok[i + 2].type === 'COLON') {
+            const blockName = tok[i + 1].lexeme;
+            if (!blocks.find(b => b.name === blockName)) {
+                blocks.push({ name: blockName, line: t.line });
+                symbols.push({ name: blockName, kind: 'block', type_name: 'block', line: t.line, col: t.col });
+            }
             i += 3;
             continue;
         }
@@ -395,10 +450,33 @@ export function scanDocument(text: string): ScanResult {
                             k++;
                         }
                     } else {
-                        // Field: TYPE NAME (possibly with @ or =)
-                        // Types can be keyword tokens (INT, FLOAT, STRING, etc.) or IDENTIFIER tokens (user-defined structs)
-                        const typeTokenTypes = new Set(['INT', 'FLOAT', 'BOOL', 'CHAR', 'STRING', 'VOID', 'IDENTIFIER']);
-                        if (typeTokenTypes.has(tok[k].type) && k + 1 < tok.length && tok[k + 1].type === 'IDENTIFIER' && tok[k + 1].lexeme !== '(') {
+                        // Field: TYPE NAME or TYPE[N] NAME (possibly with @ or =)
+                        // Types can be keyword tokens (INT, U8, FLOAT, etc.) or IDENTIFIER tokens (user-defined structs)
+                        // Dynamically build the set of type keyword tokens from BUILTIN_TYPES
+                        const typeTokenTypes = new Set([
+                            'IDENTIFIER',
+                            ...Array.from(BUILTIN_TYPES).map(t => t.toUpperCase())
+                        ]);
+                        // Check for array type: TYPE [ NUMBER ] NAME
+                        if (typeTokenTypes.has(tok[k].type) &&
+                            k + 3 < tok.length &&
+                            tok[k + 1].type === 'LBRACKET' &&
+                            (tok[k + 2].type === 'INT_LITERAL' || tok[k + 2].type === 'IDENTIFIER') &&
+                            tok[k + 3].type === 'RBRACKET' &&
+                            k + 4 < tok.length &&
+                            tok[k + 4].type === 'IDENTIFIER' &&
+                            tok[k + 4].lexeme !== '(') {
+                            const fieldType = tok[k].lexeme;
+                            const fieldName = tok[k + 4].lexeme;
+                            const fieldLine = tok[k + 4].line;
+                            symbols.push({ name: fieldName, kind: 'field', type_name: `${fieldType}[]`, line: fieldLine, col: tok[k + 4].col, parent: structName });
+                            structObj.fields.push({ name: fieldName, type: `${fieldType}[]`, line: fieldLine });
+                            k += 5;
+                            if (k < tok.length && tok[k].type === 'AT') { k++; if (k < tok.length && tok[k].type === 'IDENTIFIER') k++; }
+                            if (k < tok.length && tok[k].type === 'ASSIGN') { k++; while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN') k++; }
+                        }
+                        // Check for scalar type: TYPE NAME
+                        else if (typeTokenTypes.has(tok[k].type) && k + 1 < tok.length && tok[k + 1].type === 'IDENTIFIER' && tok[k + 1].lexeme !== '(') {
                             const fieldType = tok[k].lexeme;
                             k++;
                             const fieldName = tok[k].lexeme;
@@ -511,13 +589,28 @@ export function scanDocument(text: string): ScanResult {
         i++;
     }
 
-    // Find variables in function bodies (simple pattern: TYPE NAME = ...)
-    for (let idx = 0; idx < tokens.length - 2; idx++) {
+    // Find variables in function bodies
+    // Patterns: TYPE NAME, TYPE NAME = ..., TYPE[N] NAME, TYPE NAME @block
+    for (let idx = 0; idx < tokens.length; idx++) {
         const t = tokens[idx];
-        if (t.type === 'IDENTIFIER' && BUILTIN_TYPES.has(t.lexeme) &&
-            tokens[idx + 1].type === 'IDENTIFIER' && tokens[idx + 1].lexeme !== '(') {
+
+        // Helper to check if a token is a type keyword (built-in or fixed-width)
+        const isTypeKeyword = (tok: MCToken): boolean => {
+            return BUILTIN_TYPES.has(tok.lexeme) && KEYWORDS.has(tok.lexeme);
+        };
+
+        // Helper to check if a token is a user-defined type (PascalCase identifier)
+        const isUserType = (tok: MCToken): boolean => {
+            return tok.type === 'IDENTIFIER' && /^[A-Z]/.test(tok.lexeme) && !KEYWORDS.has(tok.lexeme);
+        };
+
+        const isVarNameToken = (tok: MCToken): boolean => {
+            return tok.type === 'IDENTIFIER' && tok.lexeme !== '(';
+        };
+
+        // Pattern 1: TYPE NAME  (keyword type, e.g. int x, u8 y, float z)
+        if (isTypeKeyword(t) && idx + 1 < tokens.length && isVarNameToken(tokens[idx + 1])) {
             const varName = tokens[idx + 1].lexeme;
-            // Check it's not already a symbol
             if (!symbols.find(s => s.name === varName && (s.kind === 'field' || s.kind === 'param' || s.kind === 'variable'))) {
                 symbols.push({
                     name: varName,
@@ -527,12 +620,11 @@ export function scanDocument(text: string): ScanResult {
                     col: t.col,
                 });
             }
+            continue;
         }
-        // User-defined type variable: PascalCase NAME = ... (e.g. "Player p = ...")
-        if (t.type === 'IDENTIFIER' && /^[A-Z]/.test(t.lexeme) && t.lexeme.length > 0 &&
-            !KEYWORDS.has(t.lexeme) &&
-            tokens[idx + 1].type === 'IDENTIFIER' && tokens[idx + 1].lexeme !== '(' &&
-            !BUILTIN_TYPES.has(tokens[idx + 1].lexeme)) {
+
+        // Pattern 2: USER_TYPE NAME  (PascalCase user-defined type, e.g. Player p)
+        if (isUserType(t) && idx + 1 < tokens.length && isVarNameToken(tokens[idx + 1])) {
             const varName = tokens[idx + 1].lexeme;
             if (!symbols.find(s => s.name === varName && (s.kind === 'field' || s.kind === 'param' || s.kind === 'variable'))) {
                 symbols.push({
@@ -543,6 +635,45 @@ export function scanDocument(text: string): ScanResult {
                     col: t.col,
                 });
             }
+            continue;
+        }
+
+        // Pattern 3: TYPE [ NUMBER ] NAME  (array type, e.g. int[10] arr, u8[256] buf)
+        if (isTypeKeyword(t) && idx + 3 < tokens.length &&
+            tokens[idx + 1].type === 'LBRACKET' &&
+            (tokens[idx + 2].type === 'INT_LITERAL' || tokens[idx + 2].type === 'IDENTIFIER') &&
+            tokens[idx + 3].type === 'RBRACKET' &&
+            idx + 4 < tokens.length && isVarNameToken(tokens[idx + 4])) {
+            const varName = tokens[idx + 4].lexeme;
+            if (!symbols.find(s => s.name === varName && (s.kind === 'field' || s.kind === 'param' || s.kind === 'variable'))) {
+                symbols.push({
+                    name: varName,
+                    kind: 'variable',
+                    type_name: `${t.lexeme}[]`,
+                    line: t.line,
+                    col: t.col,
+                });
+            }
+            continue;
+        }
+
+        // Pattern 4: USER_TYPE [ NUMBER ] NAME  (e.g. Player[10] team)
+        if (isUserType(t) && idx + 3 < tokens.length &&
+            tokens[idx + 1].type === 'LBRACKET' &&
+            (tokens[idx + 2].type === 'INT_LITERAL' || tokens[idx + 2].type === 'IDENTIFIER') &&
+            tokens[idx + 3].type === 'RBRACKET' &&
+            idx + 4 < tokens.length && isVarNameToken(tokens[idx + 4])) {
+            const varName = tokens[idx + 4].lexeme;
+            if (!symbols.find(s => s.name === varName && (s.kind === 'field' || s.kind === 'param' || s.kind === 'variable'))) {
+                symbols.push({
+                    name: varName,
+                    kind: 'variable',
+                    type_name: `${t.lexeme}[]`,
+                    line: t.line,
+                    col: t.col,
+                });
+            }
+            continue;
         }
     }
 
@@ -597,7 +728,7 @@ export function getCompletionContext(text: string, line: number, col: number, tr
     const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for)\s+([a-zA-Z0-9_]*)$/);
 
     // Check if we're after a type
-    const typeMatch = prefix.match(/\b(int|float|bool|char|String|void)\s+([a-zA-Z0-9_]*)$/);
+    const typeMatch = prefix.match(/\b(u(?:8|16|32|64)|i(?:8|16|32|64)|f(?:32|64)|usize|isize|byte|int|float|bool|char|String|void)\s+([a-zA-Z0-9_]*)$/);
 
     return {
         prefix,

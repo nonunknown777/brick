@@ -1,78 +1,39 @@
 # Estado Atual
 # Current State
 
-Sessão: 1 + 2026-06-20 (integração completa pela task 10)
-Session: 1 + 2026-06-20 (complete integration by task 10)
+Sessão: 2026-06-22 (aprimoramento TUI)
+Session: 2026-06-22 (TUI enhancement)
 
 Progresso: 100%
 Progress: 100%
 
-Última ação: Integração codegen+runtime concluída — block_register() e block_shm_export() em produção
-Last action: Codegen+runtime integration complete — block_register() and block_shm_export() in production
+Última ação: Aprimoramentos na TUI — sumário de métricas, tecla → para detalhes expandidos, tamanho médio, contagem de alocações na lista, cores, tratamento de terminal pequeno
+Last action: TUI enhancements — metrics summary, → key for expanded details, avg size, allocation count in list, colors, small terminal handling
 
-## O que foi implementado
-## What was implemented
+## Melhorias no Visualizer
 
-### Runtime (`runtime/block_memory.h/c`)
+### Novas funcionalidades
 
-- **Registro global de blocos** (opcional, `#ifdef META_C_TRACK_BLOCKS`):
-  `block_register()`, `block_unregister()`, `block_find()`, `block_snapshot()`
-- **Export via shared memory**: `block_shm_export()` → `/tmp/meta-c-mem-<pid>.bin`
-- Estruturas: `BlockInfo`, `MetaCShmHeader`
-- **Zero custo quando desligado**: macros no-op eliminam todo o código
-- Flag ativada automaticamente pelo SConstruct quando `visualizer=yes`
-- **Auto-export**: `block_shm_export()` chamado a cada 16 allocs (`block_alloc_aligned`) e em `block_reset`
+- **Linha de sumário**: mostra total (capacity, used, free, peak, allocation count) agregado de todos os blocos
+- **Tecla → (Right/Enter)**: expande/colapsa o painel de detalhes do bloco selecionado com info adicional (utilization, peak utilization)
+- **Tamanho médio (avg size)**: calculado e exibido no painel de detalhes (`used / allocation_count`)
+- **Contagem de alocações**: exibida por bloco na lista principal (coluna "Allocs")
+- **Barra de ajuda atualizada**: `'↑↓' select  '→' detail  'r' reset  'q' quit` (conforme spec)
+- **Cor verde**: blocos normais (<60%) agora em verde
+- **Terminal pequeno**: detecção e mensagem de erro se < 80 colunas ou < 8 linhas
 
-- **Global block registry** (optional, `#ifdef META_C_TRACK_BLOCKS`):
-  `block_register()`, `block_unregister()`, `block_find()`, `block_snapshot()`
-- **Export via shared memory**: `block_shm_export()` → `/tmp/meta-c-mem-<pid>.bin`
-- Structures: `BlockInfo`, `MetaCShmHeader`
-- **Zero cost when disabled**: no-op macros eliminate all code
-- Flag automatically activated by SConstruct when `visualizer=yes`
-- **Auto-export**: `block_shm_export()` called every 16 allocs (`block_alloc_aligned`) and on `block_reset`
+### New features
 
-### Codegen (`src/codegen/codegen.cpp`)
+- **Summary row**: aggregate totals (capacity, used, free, peak, allocation count) across all blocks
+- **→ key (Right/Enter)**: expand/collapse the detail panel for the selected block with extra info (utilization, peak utilization)
+- **Average size (avg size)**: calculated and displayed in the detail panel (`used / allocation_count`)
+- **Allocation count**: displayed per block in the main list (column "Allocs")
+- **Updated help bar**: `'↑↓' select  '→' detail  'r' reset  'q' quit` (per spec)
+- **Green color**: normal blocks (<60%) now in green
+- **Small terminal**: detection and error message if < 80 columns or < 8 lines
 
-- `block_register(block, "block")` emitido após cada `block_create_bytes()` em `__meta_c_init()`
-- `block_shm_export()` emitido ao final de `__meta_c_init()`
+### Pendências
+### Pending
 
-- `block_register(block, "block")` emitted after each `block_create_bytes()` in `__meta_c_init()`
-- `block_shm_export()` emitted at the end of `__meta_c_init()`
-
-### Build (`src/main.cpp`)
-
-- `-DMETA_C_TRACK_BLOCKS` passado ao gcc em `meta-c build` e `meta-c run`
-
-- `-DMETA_C_TRACK_BLOCKS` passed to gcc in `meta-c build` and `meta-c run`
-
-### Visualizer (`visualizer/memvis.h/cpp`)
-
-- **Embedded mode**: lê blocos do registro runtime via `block_snapshot()`
-- **Demo fallback**: cria 4 blocos de demonstração se nenhum bloco real estiver registrado
-- **Attach mode**: `memvis_attach(pid, config)` lê de `/tmp/meta-c-mem-<pid>.bin`
-- **TUI completa**:
-  - Barras unicode (█ ░)
-  - Cores: vermelho (>80%), amarelo (>60%), ciano (detalhes)
-  - Navegação ↑↓, reset 'r', quit 'q'
-  - Painel de detalhes (capacity, used%, allocations, peak, available)
-  - Aviso ◆ para blocos perto do limite
-  - Modo attach com reconexão automática
-- Loop principal simplificado (sem duplicação de block_snapshot)
-
-- **Embedded mode**: reads blocks from runtime registry via `block_snapshot()`
-- **Demo fallback**: creates 4 demo blocks if no real blocks are registered
-- **Attach mode**: `memvis_attach(pid, config)` reads from `/tmp/meta-c-mem-<pid>.bin`
-- **Full TUI**:
-  - Unicode bars (█ ░)
-  - Colors: red (>80%), yellow (>60%), cyan (details)
-  - Navigation ↑↓, reset 'r', quit 'q'
-  - Detail panel (capacity, used%, allocations, peak, available)
-  - Warning ◆ for blocks near limit
-  - Attach mode with auto-reconnection
-- Simplified main loop (no block_snapshot duplication)
-
-## Pendências
-## Pending
-
-- Nenhuma (integração completa)
-- None (complete integration)
+- Nenhuma (TUI completa)
+- None (TUI complete)

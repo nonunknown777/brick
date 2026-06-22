@@ -95,6 +95,19 @@ private:
             case TokenType::CHAR:
             case TokenType::STRING:
             case TokenType::VOID:
+            case TokenType::U8:
+            case TokenType::U16:
+            case TokenType::U32:
+            case TokenType::U64:
+            case TokenType::I8:
+            case TokenType::I16:
+            case TokenType::I32:
+            case TokenType::I64:
+            case TokenType::F32:
+            case TokenType::F64:
+            case TokenType::USIZE:
+            case TokenType::ISIZE:
+            case TokenType::BYTE:
                 return true;
             default:
                 return false;
@@ -353,6 +366,19 @@ private:
             case TokenType::CHAR:
             case TokenType::STRING:
             case TokenType::VOID:
+            case TokenType::U8:
+            case TokenType::U16:
+            case TokenType::U32:
+            case TokenType::U64:
+            case TokenType::I8:
+            case TokenType::I16:
+            case TokenType::I32:
+            case TokenType::I64:
+            case TokenType::F32:
+            case TokenType::F64:
+            case TokenType::USIZE:
+            case TokenType::ISIZE:
+            case TokenType::BYTE:
                 return var_decl();
             default:
                 if (peek().type == TokenType::IDENTIFIER && pos + 1 < tokens.size()) {
@@ -624,12 +650,18 @@ private:
 
         switch (peek().type) {
             case TokenType::INT_LITERAL: {
-                int64_t val = std::stoll(advance().lexeme);
-                return std::make_unique<IntLiteral>(val, loc);
+                Token t = advance();
+                int64_t val = std::stoll(t.lexeme);
+                auto lit = std::make_unique<IntLiteral>(val, loc);
+                lit->literal_type = t.literal_type;
+                return lit;
             }
             case TokenType::FLOAT_LITERAL: {
-                double val = std::stod(advance().lexeme);
-                return std::make_unique<FloatLiteral>(val, loc);
+                Token t = advance();
+                double val = std::stod(t.lexeme);
+                auto lit = std::make_unique<FloatLiteral>(val, loc);
+                lit->literal_type = t.literal_type;
+                return lit;
             }
             case TokenType::STRING_LITERAL:
                 return std::make_unique<StringLiteral>(advance().lexeme, loc);

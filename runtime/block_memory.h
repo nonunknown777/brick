@@ -65,7 +65,7 @@ int      block_shm_export(void);
 #define block_unregister(ctx)         ((void)(ctx))
 #define block_find(name)              ((void)(name), (BlockCtx*)NULL)
 #define block_snapshot(out, max)      ((void)(out), (void)(max), (size_t)0)
-#define block_shm_export()            (-1)
+#define block_shm_export()            ((void)0)
 #endif
 
 // ─── Block API ───────────────────────────────────────────────

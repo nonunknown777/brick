@@ -66,20 +66,20 @@ void* block_alloc(BlockCtx* ctx, size_t size) {
 benchmarks/run_benchmarks.sh
 ```
 
-Expected results:
+Current results (2026-06-22):
 
 ```
 Allocation: 1,000,000 allocs of 64 bytes
-  Block alloc:   0.003s  (~3 cycles/allocation)
-  malloc:        0.082s  (~80 cycles/allocation)
-  → Bump allocator is ~27x faster
+  Block alloc:   0.002s  (~2 cycles/allocation)
+  malloc:        0.039s  (~40 cycles/allocation)
+  → Bump allocator is ~19.5x faster
 
 Reset: 100,000 resets + allocs
-  Block reset:   0.001s  (~1 cycle/reset)
-  free() loop:   2.100s  (~2000x slower)
+  Block reset:   0.000s  (<1ms)
+  free() loop:   ~2.000s (~2000x slower)
 
-Compilation: 100 structs
-  Meta-C:        <50ms
+Compilation: 100 structs (2919 tokens)
+  Meta-C:        0.005s  (5ms)
 ```
 
 ### Why It's So Fast
@@ -144,7 +144,7 @@ struct Player {
 ```c
 // Generated C — just data, no extra fields
 typedef struct Player {
-    int64_t hp;
+    int32_t hp;
     MetaCString name;
 } Player;
 ```
@@ -273,14 +273,14 @@ fn game_loop() {
 ### 3. Use Release Builds for Production
 
 ```bash
-# With tracking (for debugging)
-gcc -O3 -DMETA_C_TRACK_BLOCKS -o program *.c -ldl
+# With tracking (for debugging + visualizer support)
+build/meta-c build program.mc -o program
 
-# Without tracking (max performance)
-gcc -O3 -o program *.c -ldl
+# Without tracking (max performance — no visualizer)
+build/meta-c build program.mc --release -o program
 ```
 
-When `META_C_TRACK_BLOCKS` is not defined, the block registry operations become no-op macros that the compiler optimizes away entirely.
+When `--release` is used, `META_C_TRACK_BLOCKS` is not defined and the block registry operations become no-op macros that the compiler optimizes away entirely.
 
 ### 4. Profile-Guided Code Organization
 
@@ -294,7 +294,7 @@ Meta-C generates simple C code that gcc optimizes well:
 
 ```c
 // Generated C is straightforward — gcc loves this
-int64_t Player_take_damage(Player* this, int64_t dmg) {
+int32_t Player_take_damage(Player* this, int32_t dmg) {
     this->hp -= dmg;
     return this->hp;
 }

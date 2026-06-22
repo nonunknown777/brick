@@ -1,8 +1,79 @@
 #include "type_checker.h"
 #include <sstream>
 #include <unordered_set>
+#include <cstdint>
+#include <cfloat>
+#include <algorithm>
 
 namespace meta_c {
+
+// ─── Type helper utilities ───
+// ─── Utilitarios de tipo ───
+
+static std::string normalize_type(const std::string& t) {
+    if (t == "byte" || t == "char") return "u8";
+    if (t == "short") return "i16";
+    if (t == "int") return "i32";
+    if (t == "long") return "i64";
+    if (t == "float") return "f32";
+    if (t == "double") return "f64";
+    return t;
+}
+
+static bool is_signed_int(const std::string& t) {
+    std::string n = normalize_type(t);
+    return n == "i8" || n == "i16" || n == "i32" || n == "i64" || n == "isize";
+}
+
+static bool is_unsigned_int(const std::string& t) {
+    std::string n = normalize_type(t);
+    return n == "u8" || n == "u16" || n == "u32" || n == "u64" || n == "usize" || n == "bool";
+}
+
+static bool is_float_type(const std::string& t) {
+    std::string n = normalize_type(t);
+    return n == "f32" || n == "f64";
+}
+
+static int type_rank(const std::string& t) {
+    std::string n = normalize_type(t);
+    if (n == "u8" || n == "i8" || n == "bool") return 1;
+    if (n == "u16" || n == "i16") return 2;
+    if (n == "u32" || n == "i32") return 3;
+    if (n == "u64" || n == "i64" || n == "usize" || n == "isize") return 4;
+    if (n == "f32") return 5;
+    if (n == "f64") return 6;
+    return 0;
+}
+
+static std::string signed_type_for_rank(int r) {
+    if (r <= 1) return "i8";
+    if (r == 2) return "i16";
+    if (r == 3) return "i32";
+    return "i64";
+}
+
+static bool int_fits_in_type(int64_t value, const std::string& type) {
+    std::string n = normalize_type(type);
+    if (n == "u8")  return value >= 0 && value <= UINT8_MAX;
+    if (n == "u16") return value >= 0 && value <= UINT16_MAX;
+    if (n == "u32") return value >= 0 && value <= UINT32_MAX;
+    if (n == "u64") return value >= 0;
+    if (n == "i8")  return value >= INT8_MIN  && value <= INT8_MAX;
+    if (n == "i16") return value >= INT16_MIN && value <= INT16_MAX;
+    if (n == "i32") return value >= INT32_MIN && value <= INT32_MAX;
+    if (n == "i64") return true;
+    if (n == "usize") return value >= 0;
+    if (n == "isize") return true;
+    return true;
+}
+
+static bool float_fits_in_type(double value, const std::string& type) {
+    std::string n = normalize_type(type);
+    if (n == "f32") return value >= -FLT_MAX && value <= FLT_MAX;
+    if (n == "f64") return true;
+    return true;
+}
 
 TypeChecker::TypeChecker(const PackageTable& packages)
     : packages(packages)
@@ -43,7 +114,12 @@ SymbolInfo* TypeChecker::lookup(const std::string& name) {
 
 bool TypeChecker::is_type_known(const std::string& type_name) {
     static const std::unordered_set<std::string> builtins = {
-        "int", "float", "bool", "char", "String", "void", "block", "null"
+        "int", "float", "bool", "char", "String", "void", "block", "null",
+        "u8", "u16", "u32", "u64",
+        "i8", "i16", "i32", "i64",
+        "f32", "f64",
+        "usize", "isize",
+        "byte", "short", "long",
     };
     if (builtins.count(type_name)) return true;
     if (struct_defs.count(type_name)) return true;
@@ -70,15 +146,85 @@ bool TypeChecker::is_interface_type(const std::string& type_name) {
 
 bool TypeChecker::can_assign(const std::string& from, const std::string& to) {
     if (from == to) return true;
-    if (to == "null") return true; // null can be assigned to anything
-                                   // null pode ser atribuido a qualquer coisa
-    if (from == "null") return true; // anything can be null
-                                     // qualquer coisa pode ser null
-    // int -> float implicit
-    // int -> float implicito
-    if (from == "int" && to == "float") return true;
-    if (from == "float" && to == "int") return true;
-    return false;
+    if (from == "null" || to == "null") return true;
+
+    std::string f = normalize_type(from);
+    std::string t = normalize_type(to);
+
+    if (f == t) return true;
+
+    // One of them is not a numeric type — allow only if same
+    // Um deles nao e numerico — permite apenas se igual
+    if (!is_signed_int(f) && !is_unsigned_int(f) && !is_float_type(f)) return false;
+    if (!is_signed_int(t) && !is_unsigned_int(t) && !is_float_type(t)) return false;
+
+    int f_rank = type_rank(f);
+    int t_rank = type_rank(t);
+
+    bool f_signed = is_signed_int(f);
+    bool f_unsigned = is_unsigned_int(f);
+    bool f_float = is_float_type(f);
+    bool t_signed = is_signed_int(t);
+    bool t_unsigned = is_unsigned_int(t);
+    bool t_float = is_float_type(t);
+
+    // Float → Int narrowing: always error
+    // Float → Int estreitamento: sempre erro
+    if (f_float && (t_signed || t_unsigned)) return false;
+
+    // Int → Float widening: allow
+    // Int → Float alargamento: permite
+    if ((f_signed || f_unsigned) && t_float) return f_rank <= t_rank;
+
+    // Float → Float: widening only
+    if (f_float && t_float) return f_rank <= t_rank;
+
+    // Signed ↔ Unsigned same rank: error
+    // Signed ↔ Unsigned mesmo rank: erro
+    if (f_signed != t_signed && f_rank == t_rank) return false;
+
+    // Both int: widening only
+    // Ambos int: apenas alargamento
+    return f_rank <= t_rank;
+}
+
+std::string TypeChecker::promote_types(const std::string& a, const std::string& b) {
+    std::string t1 = normalize_type(a);
+    std::string t2 = normalize_type(b);
+
+    if (t1 == t2) return a;
+
+    bool f1 = is_float_type(t1);
+    bool f2 = is_float_type(t2);
+
+    // Exception: int + float → float (promote integer to float)
+    // Excecao: int + float → float (promove inteiro para float)
+    if (f1 && !f2) return t1;
+    if (!f1 && f2) return t2;
+
+    int r1 = type_rank(t1);
+    int r2 = type_rank(t2);
+
+    // Both float → larger
+    // Ambos float → maior
+    if (f1 && f2) return r1 >= r2 ? a : b;
+
+    bool s1 = is_signed_int(t1);
+    bool s2 = is_signed_int(t2);
+
+    // Same sign → larger rank
+    // Mesmo sinal → maior rank
+    if (s1 == s2) return r1 >= r2 ? a : b;
+
+    // Mixed signed/unsigned
+    // Misto signed/unsigned
+    std::string signed_t  = s1 ? t1 : t2;
+    std::string unsigned_t = s1 ? t2 : t1;
+    int r_s = s1 ? r1 : r2;
+    int r_u = s1 ? r2 : r1;
+
+    if (r_s >= r_u) return signed_t;
+    return signed_type_for_rank(r_u + 1);
 }
 
 void TypeChecker::add_error(const std::string& msg) {
@@ -377,25 +523,34 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
             // Verifica se e declaracao de variavel: ExprStmt(Assignment(IdentExpr, value))
             // where the target is not yet declared
             // onde o alvo ainda nao foi declarado
-            if (es->expr->type == ASTNodeType::ASSIGNMENT) {
-                auto* assign = static_cast<Assignment*>(es->expr.get());
-                if (assign->target->type == ASTNodeType::IDENT_EXPR) {
-                    auto* ident = static_cast<IdentExpr*>(assign->target.get());
-                    if (!lookup(ident->name)) {
-                        // This is a variable declaration - infer type from value
-                        // Isto e uma declaracao de variavel — infere tipo do valor
-                        std::string val_type = check_expression(assign->value.get());
-                        // Use declared_type when available (overrides inferred "null" type)
-                        // Usa declared_type quando disponivel (sobrescreve tipo "null" inferido)
-                        if (!ident->declared_type.empty()) {
-                            val_type = ident->declared_type;
+                if (es->expr->type == ASTNodeType::ASSIGNMENT) {
+                    auto* assign = static_cast<Assignment*>(es->expr.get());
+                    if (assign->target->type == ASTNodeType::IDENT_EXPR) {
+                        auto* ident = static_cast<IdentExpr*>(assign->target.get());
+                        if (!lookup(ident->name)) {
+                            // This is a variable declaration - infer type from value
+                            // Isto e uma declaracao de variavel — infere tipo do valor
+                            std::string val_type = check_expression(assign->value.get());
+                            // Check if unsuffixed literal fits in declared type
+                            // Verifica se literal sem sufixo cabe no tipo declarado
+                            if (!ident->declared_type.empty()) {
+                                if (assign->value->type == ASTNodeType::INT_LITERAL) {
+                                    auto* il = static_cast<IntLiteral*>(assign->value.get());
+                                    if (il->literal_type.empty() && !int_fits_in_type(il->value, ident->declared_type)) {
+                                        add_error(assign->location.file + ":" +
+                                                  std::to_string(assign->location.line) +
+                                                  ": value " + std::to_string(il->value) +
+                                                  " does not fit in type '" + ident->declared_type + "'");
+                                    }
+                                }
+                                val_type = ident->declared_type;
+                            }
+                            declare(ident->name, val_type, false);
+                            assign->target->resolved_type = val_type;
+                            return;
                         }
-                        declare(ident->name, val_type, false);
-                        assign->target->resolved_type = val_type;
-                        return;
                     }
                 }
-            }
             check_expression(es->expr.get());
             break;
         }
@@ -433,13 +588,36 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
     if (!expr) return "void";
 
     switch (expr->type) {
-        case ASTNodeType::INT_LITERAL:
+        case ASTNodeType::INT_LITERAL: {
+            auto* il = static_cast<IntLiteral*>(expr);
+            if (!il->literal_type.empty()) {
+                if (!int_fits_in_type(il->value, il->literal_type)) {
+                    add_error(expr->location.file + ":" +
+                              std::to_string(expr->location.line) +
+                              ": value " + std::to_string(il->value) +
+                              " does not fit in type '" + il->literal_type + "'");
+                }
+                expr->resolved_type = il->literal_type;
+                return il->literal_type;
+            }
             expr->resolved_type = "int";
             return "int";
+        }
 
-        case ASTNodeType::FLOAT_LITERAL:
+        case ASTNodeType::FLOAT_LITERAL: {
+            auto* fl = static_cast<FloatLiteral*>(expr);
+            if (!fl->literal_type.empty()) {
+                if (!float_fits_in_type(fl->value, fl->literal_type)) {
+                    add_error(expr->location.file + ":" +
+                              std::to_string(expr->location.line) +
+                              ": value does not fit in type '" + fl->literal_type + "'");
+                }
+                expr->resolved_type = fl->literal_type;
+                return fl->literal_type;
+            }
             expr->resolved_type = "float";
             return "float";
+        }
 
         case ASTNodeType::STRING_LITERAL:
             expr->resolved_type = "String";
@@ -479,12 +657,13 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             // Operadores aritmeticos
             if (bin->op == TokenType::PLUS || bin->op == TokenType::MINUS ||
                 bin->op == TokenType::STAR || bin->op == TokenType::SLASH) {
-                if (!can_assign(left_type, "int") && !can_assign(left_type, "float")) {
+                if (!can_assign(left_type, "int") && !can_assign(left_type, "float") &&
+                    !can_assign(left_type, "i32") && !can_assign(left_type, "f64")) {
                     add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
                               ": arithmetic op requires numeric types, got '" +
                               left_type + "' and '" + right_type + "'");
                 }
-                std::string result = (left_type == "float" || right_type == "float") ? "float" : "int";
+                std::string result = promote_types(left_type, right_type);
                 expr->resolved_type = result;
                 return result;
             }
@@ -556,7 +735,15 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                     }
                     for (const auto& arg : call->arguments) {
                         std::string t = check_expression(arg.get());
-                        if (t != "int" && t != "float" && t != "String" && t != "bool" && t != "char") {
+                        std::string tn = normalize_type(t);
+                        bool is_valid_print_type =
+                            tn == "i8" || tn == "i16" || tn == "i32" || tn == "i64" ||
+                            tn == "u8" || tn == "u16" || tn == "u32" || tn == "u64" ||
+                            tn == "f32" || tn == "f64" ||
+                            tn == "bool" ||
+                            tn == "String" ||
+                            tn == "isize" || tn == "usize";
+                        if (!is_valid_print_type) {
                             add_error(expr->location.file + ":" +
                                       std::to_string(expr->location.line) +
                                       ": unsupported type '" + t + "' for print()");
@@ -716,6 +903,25 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             auto* assign = static_cast<Assignment*>(expr);
             std::string target_type = check_expression(assign->target.get());
             std::string value_type = check_expression(assign->value.get());
+
+            // Check if unsuffixed literal fits in target type
+            // Verifica se literal sem sufixo cabe no tipo destino
+            if (assign->value->type == ASTNodeType::INT_LITERAL) {
+                auto* il = static_cast<IntLiteral*>(assign->value.get());
+                if (il->literal_type.empty() && target_type != value_type) {
+                    if (!int_fits_in_type(il->value, target_type)) {
+                        add_error(expr->location.file + ":" +
+                                  std::to_string(expr->location.line) +
+                                  ": value " + std::to_string(il->value) +
+                                  " does not fit in type '" + target_type + "'");
+                    }
+                    // Infer the literal's type from the target
+                    // Infere o tipo do literal a partir do destino
+                    assign->value->resolved_type = target_type;
+                    value_type = target_type;
+                }
+            }
+
             if (!can_assign(value_type, target_type)) {
                 add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
                           ": cannot assign '" + value_type + "' to '" + target_type + "'");

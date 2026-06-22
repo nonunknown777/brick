@@ -8,6 +8,7 @@
 #include <unistd.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
+#include <signal.h>
 #include "lexer/lexer.h"
 #include "parser/parser.h"
 #include "parser/package.h"
@@ -25,8 +26,8 @@ void print_usage() {
     std::cerr << "  meta-c build <input.mc> [-o output] [--release]\n";
     std::cerr << "  meta-c run   <input.mc> [--release]\n";
 #ifdef META_C_TRACK_BLOCKS
-    std::cerr << "  meta-c --visualize          TUI memory visualizer\n";
-    std::cerr << "  meta-c --attach <pid>       attach to running process\n";
+    std::cerr << "  meta-c --visualize <file>   compile, run and visualize memory blocks\n";
+    std::cerr << "  meta-c --attach <pid>       attach visualizer to running process\n";
 #endif
     std::cerr << "  meta-c --help\n";
     std::cerr << "\n";
@@ -223,19 +224,16 @@ int main(int argc, char** argv) {
 
     // ─── Visualizer flags ──────────────────────────────────────
     // ─── Flags do Visualizador ──────────────────────────────────────
+    bool visualize_mode = false;
+    int attach_pid = 0;
 #ifdef META_C_TRACK_BLOCKS
     for (int i = arg_idx; i < argc; i++) {
         std::string arg = argv[i];
         if (arg == "--visualize") {
-            MemVisConfig cfg = MEMVIS_DEFAULT_CONFIG;
-            memvis_run(cfg);
-            return 0;
+            visualize_mode = true;
         }
         if (arg == "--attach" && i + 1 < argc) {
-            int pid = std::stoi(argv[++i]);
-            MemVisConfig cfg = MEMVIS_DEFAULT_CONFIG;
-            memvis_attach(pid, cfg);
-            return 0;
+            attach_pid = std::stoi(argv[++i]);
         }
     }
 #endif
@@ -251,12 +249,74 @@ int main(int argc, char** argv) {
             lsp_mode = true;
         } else if (arg == "--release") {
             build_release = true;
+        } else if (arg == "--visualize") {
+            // handled above
+        } else if (arg == "--attach") {
+            i++; // skip PID arg
         } else if (arg == "-o" && i + 1 < argc) {
             output_file = argv[++i];
         } else {
             input_file = arg;
         }
     }
+
+    // ─── Visualize mode: compile + run + attach TUI ────────────
+    // ─── Modo visualizar: compila + executa + anexa TUI ────────
+#ifdef META_C_TRACK_BLOCKS
+    if (visualize_mode) {
+        if (input_file.empty()) {
+            std::cerr << "error: --visualize requires a .mc file\n";
+            return 1;
+        }
+
+        // Build to temp binary
+        // Compila para binario temporario
+        char tmpdir[] = "/tmp/meta-c-viz-XXXXXX";
+        if (!mkdtemp(tmpdir)) {
+            std::cerr << "error: could not create temp directory\n";
+            return 1;
+        }
+        std::string bin = std::string(tmpdir) + "/prog";
+        int ret = cmd_build(input_file, bin, false, false);
+        if (ret != 0) {
+            std::string rm = "rm -rf " + std::string(tmpdir);
+            system(rm.c_str());
+            return ret;
+        }
+
+        // Fork: child runs binary, parent attaches visualizer
+        // Fork: filho executa binario, pai anexa visualizador
+        pid_t pid = fork();
+        if (pid == 0) {
+            // Child: exec binary
+            // Filho: executa binario
+            execl(bin.c_str(), bin.c_str(), nullptr);
+            _exit(1);
+        }
+
+        // Parent: wait briefly for shm to be created, then attach
+        // Pai: espera brevemente o shm ser criado, entao anexa
+        usleep(150000); // 150ms
+
+        MemVisConfig cfg = MEMVIS_DEFAULT_CONFIG;
+        std::cerr << "[viz] attached to PID " << pid << " ...\n";
+        memvis_attach(pid, cfg);
+
+        // When visualizer exits, kill child and cleanup
+        // Quando visualizador sair, mata filho e limpa
+        kill(pid, SIGTERM);
+        waitpid(pid, nullptr, 0);
+        std::string rm = "rm -rf " + std::string(tmpdir);
+        system(rm.c_str());
+        return 0;
+    }
+
+    if (attach_pid > 0) {
+        MemVisConfig cfg = MEMVIS_DEFAULT_CONFIG;
+        memvis_attach(attach_pid, cfg);
+        return 0;
+    }
+#endif
 
     if (input_file.empty()) {
         std::cerr << "error: no input file\n";

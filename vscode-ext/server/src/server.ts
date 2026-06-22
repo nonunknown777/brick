@@ -47,7 +47,7 @@ const scanCache = new Map<string, ScanResult>();
 const tokenTypes = [
     'keyword', 'type', 'class', 'interface', 'function', 'method',
     'property', 'variable', 'string', 'number', 'comment', 'operator',
-    'parameter', 'struct', 'enum',
+    'parameter', 'struct', 'constant',
 ];
 const tokenModifiers = ['declaration', 'definition', 'readonly', 'static', 'deprecated', 'abstract'];
 
@@ -56,7 +56,7 @@ const legend: SemanticTokensLegend = {
     tokenModifiers: tokenModifiers,
 };
 
-const typeKeywordSet = new Set(['int', 'float', 'bool', 'char', 'String', 'void']);
+const typeKeywordSet = new Set(['int', 'float', 'bool', 'char', 'String', 'void', 'u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte']);
 const keywordSet = new Set([
     'package', 'using', 'private', 'public',
     'struct', 'extends', 'interface', 'fn', 'return',
@@ -88,6 +88,19 @@ const keywordCompletions: CompletionItem[] = [
     { label: 'char', kind: CompletionItemKind.Keyword, detail: 'character type' },
     { label: 'String', kind: CompletionItemKind.Keyword, detail: 'dynamic string type' },
     { label: 'void', kind: CompletionItemKind.Keyword, detail: 'void type' },
+    { label: 'u8', kind: CompletionItemKind.Keyword, detail: 'unsigned 8-bit integer' },
+    { label: 'u16', kind: CompletionItemKind.Keyword, detail: 'unsigned 16-bit integer' },
+    { label: 'u32', kind: CompletionItemKind.Keyword, detail: 'unsigned 32-bit integer' },
+    { label: 'u64', kind: CompletionItemKind.Keyword, detail: 'unsigned 64-bit integer' },
+    { label: 'i8', kind: CompletionItemKind.Keyword, detail: 'signed 8-bit integer' },
+    { label: 'i16', kind: CompletionItemKind.Keyword, detail: 'signed 16-bit integer' },
+    { label: 'i32', kind: CompletionItemKind.Keyword, detail: 'signed 32-bit integer' },
+    { label: 'i64', kind: CompletionItemKind.Keyword, detail: 'signed 64-bit integer' },
+    { label: 'f32', kind: CompletionItemKind.Keyword, detail: '32-bit float' },
+    { label: 'f64', kind: CompletionItemKind.Keyword, detail: '64-bit float' },
+    { label: 'usize', kind: CompletionItemKind.Keyword, detail: 'pointer-sized unsigned integer' },
+    { label: 'isize', kind: CompletionItemKind.Keyword, detail: 'pointer-sized signed integer' },
+    { label: 'byte', kind: CompletionItemKind.Keyword, detail: '8-bit byte' },
     { label: 'null', kind: CompletionItemKind.Constant, detail: 'null literal' },
     { label: 'true', kind: CompletionItemKind.Constant, detail: 'boolean true' },
     { label: 'false', kind: CompletionItemKind.Constant, detail: 'boolean false' },
@@ -347,7 +360,7 @@ connection.onCompletion((params: CompletionParams): CompletionItem[] => {
             return items;
         }
         if (kw === 'private' || kw === 'public') {
-            for (const t of ['fn', 'int', 'float', 'bool', 'char', 'String', 'void']) {
+            for (const t of ['fn', 'int', 'float', 'bool', 'char', 'String', 'void', 'u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte']) {
                 items.push({ label: t, kind: CompletionItemKind.Keyword, detail: `${kw} ${t}` });
             }
             return items;
@@ -722,12 +735,12 @@ connection.languages.semanticTokens.on((params: SemanticTokensParams): SemanticT
             case 'COMMENT':
                 pushToken(line, col, len, 10);
                 break;
-            case 'STRING':
-            case 'CHAR':
+            case 'STRING_LITERAL':
+            case 'CHAR_LITERAL':
                 pushToken(line, col, len, 8);
                 break;
-            case 'INT':
-            case 'FLOAT':
+            case 'INT_LITERAL':
+            case 'FLOAT_LITERAL':
                 pushToken(line, col, len, 9);
                 break;
             case 'PACKAGE':
@@ -751,7 +764,7 @@ connection.languages.semanticTokens.on((params: SemanticTokensParams): SemanticT
             case 'TRUE':
             case 'FALSE':
             case 'NULL':
-                pushToken(line, col, len, 20);
+                pushToken(line, col, len, 14);
                 break;
             case 'IDENTIFIER': {
                 if (typeNames.has(tok.lexeme)) {
@@ -764,7 +777,7 @@ connection.languages.semanticTokens.on((params: SemanticTokensParams): SemanticT
                         switch (sym.kind) {
                             case 'function':
                             case 'constructor':
-                                pushToken(line, col, len, 3, 1);
+                                pushToken(line, col, len, 4, 1);
                                 break;
                             case 'field':
                                 pushToken(line, col, len, 6);
@@ -806,8 +819,18 @@ connection.languages.semanticTokens.on((params: SemanticTokensParams): SemanticT
             case 'NOT':
             case 'PLUS':
             case 'MINUS':
-            case 'MUL':
-            case 'DIV':
+            case 'STAR':
+            case 'SLASH':
+            case 'PLUS_ASSIGN':
+            case 'MINUS_ASSIGN':
+            case 'STAR_ASSIGN':
+            case 'SLASH_ASSIGN':
+            case 'LSHIFT':
+            case 'RSHIFT':
+            case 'BIT_AND':
+            case 'BIT_OR':
+            case 'BIT_XOR':
+            case 'BIT_NOT':
                 pushToken(line, col, len, 11);
                 break;
             default:

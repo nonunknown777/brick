@@ -1,4 +1,3 @@
-
 <p align="center">
   <img src="docs/logo.png" alt="Meta-C Logo" width="200"/>
 </p>
@@ -6,22 +5,19 @@
 <h1 align="center">Meta-C</h1>
 <p align="center">
   <em>A high-performance OOP language that compiles to pure C.</em>
-  <br/>
-  <em>Uma linguagem OOP de alta performance que compila para C puro.</em>
 </p>
 
 <p align="center">
-  <a href="README.pt.md">🇧🇷 Português</a>
+  <a href="README.pt-BR.md">🇧🇷 Português</a>
 </p>
 
 <div align="center">
 
-[![Build Status](https://img.shields.io/badge/build-passing-brightgreen)]()
+[![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)]()
 [![C11](https://img.shields.io/badge/C-11-blue)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)]()
 [![Platform: Linux](https://img.shields.io/badge/Platform-Linux-orange)]()
-[![Platform: Windows](https://img.shields.io/badge/Platform-Windows%20(mingw)-lightgrey)]()
 [![SCons](https://img.shields.io/badge/Build-SCons-ff69b4)]()
 
 </div>
@@ -31,60 +27,69 @@
 ## 👋 Quick Demo
 
 ```meta-c
-package HELLO
+package DEMO
 
 using IO
 
-block global = 64MB
-block temp   = 8KB
+interface Damageable {
+    fn take_damage(i32 dmg)
+}
 
-struct Greeter {
-    String message
+struct Entity {
+    i32 hp
+    String name
 
-    fn Greeter(String msg) {
-        message = msg
+    fn Entity(i32 h, String n) {
+        hp = h
+        name = n
+    }
+}
+
+struct Player extends Entity, Damageable {
+    i32 ammo
+    f64 accuracy
+
+    fn Player(i32 h, String n, i32 a, f64 acc) {
+        hp = h
+        ammo = a
+        name = n
+        accuracy = acc
     }
 
-    fn greet() {
-        print(message)
+    fn take_damage(i32 dmg) {
+        hp -= dmg
+        print("{0} took {1} damage, hp={2}", name, dmg, hp)
     }
 }
 
 fn main() {
-    Greeter g = Greeter("Hello, World!") @temp
-    g.greet()
-    temp.reset()
-    global.reset()
+    Player p = Player(100, "Felipe", 30, 0.85f64)
+    p.take_damage(20)
 }
 ```
 
-Compile and run:
+## Compile & Run
 
 ```bash
-meta-c hello.mc -o hello.c
-gcc -O3 hello.c runtime/*.c -o hello
-./hello
+meta-c run example.mc
 ```
 
-Output:
-```
-Hello, World!
-```
+No manual `gcc` invocation needed — `meta-c build` and `meta-c run` handle everything automatically (compilation, runtime linking, optimization).
 
 ---
 
 ## ✨ Features
 
-- **OOP with Braces** — Class-like `struct` with constructors, methods, `extends`, and `interface`. Syntax inspired by GDScript, familiar to anyone coming from C++, Java, or C#.
-- **Compiles to Pure C** — The compiler generates readable C code (with `#line` directives for debugging), then leverages `gcc -O3` for the final binary. No VM, no interpreter — just native machine code.
-- **Block-Based Memory Management** — No `malloc`/`free`. No GC pauses. Declare memory blocks (`block name = 64MB`) and let the bump allocator handle everything. Allocation takes **~3 CPU cycles**. Reset an entire block is **~5 ns** — over **2000x faster** than freeing individual allocations.
-- **No Stack for User Data** — All user data lives in managed blocks. No stack overflow from game entities, no lifetime puzzles. Reset a block to reclaim everything instantly.
-- **Native Hot Reload** — Runtime `dlopen` + `inotify` monitoring. Each package compiles to a separate `.so`. Swap function pointers atomically — update game logic without restarting.
-- **TUI Memory Visualizer** — An ncurses-based dashboard showing live block state: capacity, usage, peak, allocation count. See memory in real time.
-- **GDB Integration** — Generated C code includes `#line` directives mapping back to `.mc` source. Custom GDB commands (`info blocks`, `block <name>`, `block-watch`) and Python pretty-printers for `BlockCtx`.
-- **VS Code Extension** — Syntax highlighting for `.mc` files, LSP integration, and a dedicated webview panel for graphical memory block visualization with hover details.
-- **Cross-Platform** — Linux is the primary target. Windows cross-compilation via `mingw-w64` (`scons target=windows`).
-- **Lightning-Fast Compiler** — Written in C++20 with performance in mind. The compiler itself is lightweight and fast.
+- **OOP with Braces** — Class-like `struct` with constructors, methods, `extends`, and `interface`. Syntax inspired by GDScript.
+- **Compiles to Pure C** — Readable C code with `#line` directives for debugging. No VM, no interpreter — just native machine code via `gcc -O3`.
+- **Block-Based Memory** — No `malloc`/`free`, no GC. Declare memory blocks (`block name = 64MB`) and let the bump allocator do the rest. Allocation takes ~3 CPU cycles. Reset an entire block in ~5 ns.
+- **No Stack for User Data** — Everything lives in managed blocks. No stack overflow, no lifetime puzzles. Reset a block to reclaim everything instantly.
+- **Native Hot Reload** — Swap code at runtime via `dlopen` + `inotify`. Function pointer swap is atomic — update game logic without restarting.
+- **TUI Memory Visualizer** — ncurses dashboard showing live block state: capacity, usage, peak, allocation count.
+- **GDB Integration** — `#line` directives map back to `.mc` source. Custom commands (`info blocks`, `block <name>`) and Python pretty-printers.
+- **VS Code Extension** — Syntax highlighting, LSP, and a memory webview panel.
+- **Cross-Platform** — Linux primary. Windows via `mingw-w64`.
+- **Fixed-Width Types** — `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `usize`/`isize`. Full compile-time overflow checking, widening rules, and literal suffixes (`42u8`, `3.14f64`).
 
 ---
 
@@ -100,10 +105,11 @@ Hello, World!
 ### Build the Compiler
 
 ```bash
-git clone https://github.com/your-org/meta-c.git
+git clone https://github.com/nonunknown777/meta-c.git
 cd meta-c
-scons                   # release build (-O3)
-scons profile=debug     # debug build (-g -O0 -DDEBUG)
+scons                        # release build (-O3)
+# or
+./build-release.sh           # full release + VS Code extension package
 ```
 
 The `meta-c` binary will be in `build/`.
@@ -111,29 +117,30 @@ The `meta-c` binary will be in `build/`.
 ### Run a Demo
 
 ```bash
-scons                   # builds the compiler
-./build/meta-c examples/hello.mc -o hello.c
-gcc -O3 hello.c runtime/block_memory.c runtime/io.c -o hello
+# Build and run in one step
+meta-c run examples/hello.mc
+
+# Or build to binary first
+meta-c build examples/hello.mc -o hello
 ./hello
-```
-
-Or use the convenience script:
-
-```bash
-./mc-run.sh examples/hello.mc
 ```
 
 ### Run Tests
 
 ```bash
-scons test              # builds and runs all unit tests
+scons test                   # builds and runs all unit tests
+```
+
+### Visualize Memory
+
+```bash
+meta-c --visualize examples/hello.mc   # compile, run, show TUI
+meta-c --attach <pid>                  # attach to running process
 ```
 
 ---
 
 ## ⚡ Performance
-
-Meta-C's memory model is built for throughput.
 
 ### Bump Allocator
 
@@ -141,84 +148,64 @@ Meta-C's memory model is built for throughput.
 |------------------------|-----------------------|--------------------------|
 | Allocation             | ~3 CPU cycles         | ~50–200× faster          |
 | Block reset (64 MB)    | ~5 ns                 | 2000× faster than free() |
-| Block creation         | 1 mmap call           | O(1)                     |
 | Thread safety          | Lock-free per block   | —                        |
 
-### Why Bump Allocation?
+**Real benchmark results:**
 
-Traditional memory managers spend time walking free lists, coalescing, and tracking individual allocations. A bump allocator just advances a pointer:
-
-```c
-// Allocate in ~3 cycles:
-void *ptr = block->ptr;
-block->ptr += size;
-return ptr;
-
-// Reset in ~5 ns:
-block->ptr = block->start;
+```
+Block alloc: 1,000,000 allocs of 64B in 0.002s   ← 19.5× faster
+malloc:      1,000,000 allocs of 64B in 0.039s   ← baseline
 ```
 
-This is ideal for frame-based games, simulations, and servers where you allocate heavily and then discard everything at once. No garbage collector, no reference counting, no fragmentation.
+### Compiler
 
-### Compiler Benchmarks (expected)
-
-| Input (lines)  | Tokenize  | Parse     | Codegen   | C Compile (gcc -O3) |
-|----------------|-----------|-----------|-----------|---------------------|
-| 100            | < 1 ms    | < 1 ms    | < 1 ms    | ~100 ms             |
-| 1,000          | ~2 ms     | ~4 ms     | ~3 ms     | ~200 ms             |
-| 10,000         | ~10 ms    | ~25 ms    | ~20 ms    | ~600 ms             |
+| Input         | Compile Time |
+|---------------|-------------|
+| 100 structs   | 5 ms        |
+| 1,000 lines   | ~10 ms      |
 
 ---
 
 ## 📝 Examples
 
-### Structs with Methods
+### Fixed-Width Types & Interface
 
 ```meta-c
-package SPRITES
+package TYPES_DEMO
 
-struct Player extends Entity {
-    int hp
-    String name
+using IO
 
-    fn Player(int h, String n) {
-        hp = h
-        name = n
-    }
+interface Drawable {
+    fn draw()
+}
 
-    fn take_damage(int dmg) {
-        hp -= dmg
+struct Shape {
+    u32 id
+    f64 area
+
+    fn Shape(u32 i, f64 a) {
+        id = i
+        area = a
     }
 }
 
-interface Damageable {
-    fn take_damage(int d)
+struct Circle extends Shape, Drawable {
+    f32 radius
+
+    fn Circle(u32 i, f32 r) {
+        id = i
+        radius = r
+        area = 3.14159f64 * r * r
+    }
+
+    fn draw() {
+        print("Circle #{0} radius={1} area={2}", id, radius, area)
+    }
 }
-```
-
-### Block-Based Memory
-
-```meta-c
-block global = 256MB    // default block — all allocations go here
-block game   = 64MB     // game-scoped block
-block temp   = 8KB      // scratch block
 
 fn main() {
-    // Allocates in 'global' by default
-    int x = 5
-    String s = "hello"
-
-    // Explicit block scope
-    block game {
-        Player p = Player(100, "Felipe")
-    }
-
-    // Inline allocation
-    float f = 2.0 @temp
-    int[] arr = int[10] @game
-
-    game.reset()          // reclaims ALL memory in 'game' instantly
-    global.reset()        // reclaims everything
+    Circle c = Circle(1u32, 5.0f32)
+    c.draw()
 }
 ```
 
@@ -226,14 +213,14 @@ fn main() {
 
 ```bash
 # Build with hot reload support
-gcc -g -O0 program.c runtime/hot_reload.c runtime/block_memory.c runtime/io.c \
-    -ldl -o program
+meta-c build game.mc --release -o game
 
-./program
-# Edit your .mc source file...
-# Meta-C watches for changes via inotify, recompiles, and swaps function pointers
-# at runtime — no restart needed.
+# Run — Meta-C watches source files via inotify
+# Edit your .mc source and save — the binary reloads automatically
+./game
 ```
+
+See the [Hot Reload Guide](https://github.com/nonunknown777/meta-c/wiki/Hot-Reload) for details.
 
 ---
 
@@ -249,9 +236,9 @@ gcc -g -O0 program.c runtime/hot_reload.c runtime/block_memory.c runtime/io.c \
 | `tests/`        | Unit tests (SCons-based)                                 |
 | `benchmarks/`   | Performance benchmarks and profiling scripts             |
 | `vscode-ext/`   | VS Code extension (syntax highlight, LSP, memory view)   |
-| `docs/`         | Documentation and diagrams                               |
-| `wiki/`         | Wiki content (GitHub Pages source)                       |
-| `tasks/`        | Development task breakdown (01–11) with per-task state    |
+| `docs/`         | GitHub Pages site (HTML + assets)                        |
+| `wiki/`         | GitHub Wiki source                                       |
+| `tasks/`        | Development task breakdown (01–11) with per-task state   |
 | `build/`        | Build output directory                                   |
 | `scripts/`      | Utility scripts for testing, profiling, and release      |
 
@@ -259,60 +246,32 @@ gcc -g -O0 program.c runtime/hot_reload.c runtime/block_memory.c runtime/io.c \
 
 ## 📚 Documentation
 
-- **[Wiki](wiki/)** — Full language reference, tutorials, and deep dives
-- **[GitHub Pages](https://your-org.github.io/meta-c)** — Hosted documentation
-- **[Language Spec](shared-context.md)** — Complete Meta-C specification (bilingual PT/EN)
+- **[GitHub Pages](https://nonunknown777.github.io/meta-c/)** — Hosted documentation site
+- **[Wiki](https://github.com/nonunknown777/meta-c/wiki)** — Full language reference, tutorials, deep dives
+- **[Language Spec](shared-context.md)** — Complete Meta-C specification
 - **[Design Doc](DESIGN.md)** — Architecture decisions and rationale
-
-### Getting Started
-
-1. [Language Tour](wiki/language-tour.md) — 10-minute overview of Meta-C syntax
-2. [Memory Model](wiki/memory.md) — How blocks work, best practices
-3. [Hot Reload Guide](wiki/hot-reload.md) — Setting up live code swapping
-4. [Debugging](wiki/debugging.md) — Using GDB with Meta-C
-5. [VS Code Extension](wiki/vscode.md) — Setup instructions
 
 ---
 
 ## 🤝 Contributing
 
-We welcome contributions! The project is divided into **11 tasks**, each with its own `AGENTS.md` and `STATE.md`:
+The project is divided into **11 tasks**, each with its own `AGENTS.md` and `STATE.md`:
 
-| #  | Task            | Description                                      |
-|----|-----------------|--------------------------------------------------|
-| 01 | Lexer           | Tokenizer — `.mc` → tokens                       |
-| 02 | Parser          | AST construction + package resolution            |
-| 03 | Codegen         | Type checking + C code generation with `#line`   |
-| 04 | Runtime         | Block memory allocator (C)                       |
-| 05 | Hot Reload      | `dlopen` + `inotify` swap                        |
-| 06 | Visualizer      | ncurses TUI dashboard                            |
-| 07 | Builder         | SCons build system                               |
-| 08 | VS Code Ext     | Syntax highlighting, LSP, debug webview          |
-| 09 | Debugger        | GDB pretty-printers, custom commands             |
-| 10 | **Tester/Opt**  | Tests, profiling, optimization, docs (senior)    |
-| 11 | Libraries       | Window, input, audio, file, net, math            |
+| #  | Task           | Description                                    |
+|----|----------------|------------------------------------------------|
+| 01 | Lexer          | Tokenizer — `.mc` → tokens                     |
+| 02 | Parser         | AST construction + package resolution          |
+| 03 | Codegen        | Type checking + C code generation with `#line` |
+| 04 | Runtime        | Block memory allocator (C)                     |
+| 05 | Hot Reload     | `dlopen` + `inotify` swap                      |
+| 06 | Visualizer     | ncurses TUI dashboard                          |
+| 07 | Builder        | SCons build system                             |
+| 08 | VS Code Ext    | Syntax highlighting, LSP, debug webview        |
+| 09 | Debugger       | GDB pretty-printers, custom commands           |
+| 10 | **Tester/Opt** | Tests, profiling, optimization, docs (senior)  |
+| 11 | Libraries      | Window, input, audio, file, net, math          |
 
-### How to Help
-
-1. Read [CONTRIBUTING.md](CONTRIBUTING.md)
-2. Pick a task from `tasks/N/` and read its `STATE.md` + `NEXT.md`
-3. Join the discussion — open an issue or PR
-4. Follow the conventions: C++20, `snake_case` for functions, `PascalCase` for types
-
----
-
-## 📊 Benchmarks
-
-| Metric                        | Value                |
-|-------------------------------|----------------------|
-| Bump allocation               | ~3 CPU cycles        |
-| Block reset (64 MB)           | ~5 ns                |
-| Memory fragmentation          | 0% (bump allocator)  |
-| Compiler throughput           | ~500 KLOC / sec      |
-| Generated C code size         | ~1.3× source size    |
-| Binary size (hello world)     | ~16 KB               |
-| Binary size (game with 10 PKG)| ~48 KB               |
-| Hot reload swap               | < 1 μs               |
+Join the discussion — open an issue or PR at [github.com/nonunknown777/meta-c](https://github.com/nonunknown777/meta-c).
 
 ---
 
@@ -324,6 +283,4 @@ This project is licensed under the **MIT License**. See [LICENSE](LICENSE) for d
 
 <p align="center">
   <sub>Built with ❤️ in C++20 and C — because sometimes you need to go fast.</sub>
-  <br/>
-  <sub>Feito com ❤️ em C++20 e C — porque às vezes você precisa ser rápido.</sub>
 </p>

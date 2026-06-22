@@ -92,7 +92,7 @@
             "patterns": [
                 {
                     "name": "storage.type.mc",
-                    "match": "\\b(int|float|bool|char|String|void)\\b"
+                    "match": "\\b(u(8|16|32|64)|i(8|16|32|64)|f(32|64)|usize|isize|byte|int|float|bool|char|String|void)\\b"
                 }
             ]
         },

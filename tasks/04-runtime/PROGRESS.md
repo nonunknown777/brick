@@ -1,21 +1,43 @@
 # Progresso - Runtime
 # Progress - Runtime
 
-- [ ] block_create: alocar bloco de N MB
-- [ ] block_create: allocate block of N MB
-- [ ] block_alloc: bump allocator dentro do bloco
-- [ ] block_alloc: bump allocator inside the block
-- [ ] block_reset: resetar bump pointer
-- [ ] block_reset: reset bump pointer
-- [ ] block_destroy: liberar bloco
-- [ ] block_destroy: free block
-- [ ] block_stats: estatísticas
-- [ ] block_stats: statistics
-- [ ] Detecção de overflow
-- [ ] Overflow detection
-- [ ] Alinhamento correto
-- [ ] Correct alignment
-- [ ] Testes unitários
-- [ ] Unit tests
-- [ ] Integração com Codegen e Visualizador
-- [ ] Integration with Codegen and Visualizer
+- [x] block_create: alocar bloco de N MB
+- [x] block_create: allocate block of N MB
+- [x] block_create_bytes: alocar bloco com tamanho em bytes
+- [x] block_create_bytes: allocate block with byte size
+- [x] block_alloc: bump allocator dentro do bloco
+- [x] block_alloc: bump allocator inside the block
+- [x] block_alloc_aligned: alocar com alinhamento explícito
+- [x] block_alloc_aligned: allocate with explicit alignment
+- [x] block_reset: resetar bump pointer (O(1))
+- [x] block_reset: reset bump pointer (O(1))
+- [x] block_destroy: liberar bloco
+- [x] block_destroy: free block
+- [x] block_stats: estatísticas
+- [x] block_stats: statistics
+- [x] block_alignment: alinhamento padrão
+- [x] block_alignment: default alignment
+- [x] block_freeze / block_thaw: hot reload suporte
+- [x] block_freeze / block_thaw: hot reload support
+- [x] Detecção de overflow
+- [x] Overflow detection
+- [x] Alinhamento adaptativo (size→1, 2→2, 4→4, 8+→8)
+- [x] Adaptive alignment (size→1, 2→2, 4→4, 8+→8)
+- [x] Testes unitários (14 testes)
+- [x] Unit tests (14 tests)
+- [x] Integração com Codegen e Visualizador
+- [x] Integration with Codegen and Visualizer
+- [x] Registry API (opcional, -DMETA_C_TRACK_BLOCKS)
+- [x] Registry API (optional, -DMETA_C_TRACK_BLOCKS)
+- [x] block_register / block_unregister / block_find / block_snapshot
+- [x] block_register / block_unregister / block_find / block_snapshot
+- [x] block_shm_export: exportar para /tmp/meta-c-mem-<pid>.bin
+- [x] block_shm_export: export to /tmp/meta-c-mem-<pid>.bin
+- [x] io.h / io.c: API de I/O (MetaCString, io_print_*)
+- [x] io.h / io.c: I/O API (MetaCString, io_print_*)
+- [x] Tipos explícitos de largura fixa (u8/i8..u64/i64, f32/f64, usize/isize)
+- [x] Explicit fixed-width types (u8/i8..u64/i64, f32/f64, usize/isize)
+- [x] Compilação com -Wall -Werror sem warnings
+- [x] Compilation with -Wall -Werror with no warnings
+- [x] Macros no-op com META_C_TRACK_BLOCKS desativado
+- [x] No-op macros when META_C_TRACK_BLOCKS disabled

@@ -5,8 +5,21 @@
 #include <string.h>
 #include <stdint.h>
 #include <stdatomic.h>
+#include <sys/mman.h>
 
 #define DEFAULT_ALIGNMENT 8
+
+// Compute optimal alignment for a given allocation size
+// Computa alinhamento otimo para um dado tamanho de alocacao
+// size=1→1, 2→2, 3→2, 4→4, 5→4, 6→4, 7→4, 8→8, 9→8, ...
+// Eliminates padding waste for small types (u8, u16, u32, f32)
+// Elimina desperdicio de padding para tipos pequenos (u8, u16, u32, f32)
+static inline size_t optimal_alignment(size_t size) {
+    return size >= 8 ? (size_t)8
+         : size >= 4 ? (size_t)4
+         : size >= 2 ? (size_t)2
+         :            (size_t)1;
+}
 
 static atomic_int block_frozen_flag = 0;
 
@@ -183,10 +196,24 @@ BlockCtx* block_create_bytes(size_t bytes) {
     BlockCtx* ctx = (BlockCtx*)malloc(sizeof(BlockCtx));
     if (!ctx) error("out of memory");
 
-    ctx->data = (uint8_t*)malloc(bytes);
-    if (!ctx->data) {
-        free(ctx);
-        error("out of memory");
+    // Use mmap for large allocations (>= 64KB) — better for huge pages,
+    // shared memory export, and cleaner deallocation
+    // Usa mmap para alocacoes grandes (>= 64KB) — melhor para huge pages,
+    // exportacao de memoria compartilhada e desalocacao mais limpa
+    if (bytes >= 65536) {
+        ctx->data = (uint8_t*)mmap(NULL, bytes, PROT_READ | PROT_WRITE,
+                                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
+                                   -1, 0);
+        if (ctx->data == MAP_FAILED) {
+            free(ctx);
+            error("out of memory (mmap failed)");
+        }
+    } else {
+        ctx->data = (uint8_t*)malloc(bytes);
+        if (!ctx->data) {
+            free(ctx);
+            error("out of memory");
+        }
     }
 
     ctx->capacity = bytes;
@@ -198,7 +225,9 @@ BlockCtx* block_create_bytes(size_t bytes) {
 }
 
 void* block_alloc(BlockCtx* ctx, size_t size) {
-    return block_alloc_aligned(ctx, size, DEFAULT_ALIGNMENT);
+    // Use optimal alignment based on size to eliminate padding waste
+    // Usa alinhamento otimo baseado no tamanho pra eliminar desperdicio de padding
+    return block_alloc_aligned(ctx, size, optimal_alignment(size));
 }
 
 void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment) {
@@ -230,10 +259,12 @@ void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment) {
 
     // Auto-export shm every 16 allocations (for visualizer attach mode)
     // Auto-exporta shm a cada 16 alocacoes (para modo attach do visualizer)
+#ifdef META_C_TRACK_BLOCKS
     static unsigned int _alloc_counter = 0;
     if ((++_alloc_counter & 0xF) == 0) {
         block_shm_export();
     }
+#endif
 
     return ctx->data + aligned;
 }
@@ -244,12 +275,18 @@ void block_reset(BlockCtx* ctx) {
     // Nota: allocation_count NAO e resetado aqui,
     // so we can track total allocations across resets
     // para que possamos rastrear alocacoes totais entre resets
+#ifdef META_C_TRACK_BLOCKS
     block_shm_export();
+#endif
 }
 
 void block_destroy(BlockCtx* ctx) {
     if (ctx) {
-        free(ctx->data);
+        if (ctx->capacity >= 65536) {
+            munmap(ctx->data, ctx->capacity);
+        } else {
+            free(ctx->data);
+        }
         free(ctx);
     }
 }

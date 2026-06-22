@@ -48,13 +48,22 @@ game/
 ### Compilation Steps
 
 ```bash
-# 1. Compile .mc → .c
-meta-c game.mc -o build/game.c
+# Build with hot reload support
+build/meta-c build game.mc --release -o game
+```
 
-# 2. Compile C → .so (position-independent code)
+This produces a binary with the hot reload engine built in. Meta-C handles the .so compilation, function table generation, and linking automatically.
+
+If you need fine-grained control over individual packages:
+
+```bash
+# Compile .mc → .c
+build/meta-c game.mc -o build/game.c
+
+# Compile C → .so (position-independent code)
 gcc -O3 -shared -fPIC -o build/libgame.so build/game.c runtime/block_memory.c runtime/io.c -ldl
 
-# 3. Link main program (with hot reload support)
+# Link main program (with hot reload support)
 gcc -O3 main.c runtime/hot_reload.c runtime/block_memory.c runtime/io.c -o game -ldl -rdynamic
 ```
 

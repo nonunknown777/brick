@@ -52,17 +52,58 @@ Block comments (`/* */`) are **not** supported.
 
 ## Types
 
-### Primitive Types
+### Fixed-Width Types
 
-| Type | Description | Size | Range |
-|------|-------------|:----:|-------|
-| `int` | Integer number | 64-bit | -9.2e18 to 9.2e18 |
-| `float` | Decimal number | 64-bit | Double precision (IEEE 754) |
-| `bool` | Boolean (true/false) | 8-bit | 0 or 1 |
-| `char` | Single character | 8-bit | ASCII |
-| `String` | Dynamic text | dynamic | Heap-allocated in a block |
-| `void` | Nothing (for functions) | — | — |
-| `null` | Null pointer literal | — | — |
+| Meta-C | C Type | Size | Description |
+|--------|--------|:----:|-------------|
+| `i8` | `int8_t` | 8-bit | Signed integer |
+| `i16` | `int16_t` | 16-bit | Signed integer |
+| `i32` | `int32_t` | 32-bit | Signed integer (default `int`) |
+| `i64` | `int64_t` | 64-bit | Signed integer |
+| `u8` | `uint8_t` | 8-bit | Unsigned integer (also `char`/`byte`) |
+| `u16` | `uint16_t` | 16-bit | Unsigned integer |
+| `u32` | `uint32_t` | 32-bit | Unsigned integer |
+| `u64` | `uint64_t` | 64-bit | Unsigned integer |
+| `f32` | `float` | 32-bit | Floating point (default `float`) |
+| `f64` | `double` | 64-bit | Double precision |
+| `usize` | `size_t` | pointer | Unsigned pointer-size |
+| `isize` | `ptrdiff_t` | pointer | Signed pointer-size |
+| `bool` | `uint8_t` | 8-bit | Boolean (true/false) |
+| `String` | `MetaCString` | dynamic | Dynamic text (block-allocated) |
+| `void` | `void` | — | Nothing (for functions) |
+| `null` | `NULL` | — | Null pointer literal |
+
+### Type Aliases
+
+| Alias | Maps To |
+|-------|---------|
+| `int` | `i32` |
+| `float` | `f32` |
+| `char` | `u8` |
+| `byte` | `u8` |
+| `short` | `i16` |
+| `long` | `i64` |
+| `double` | `f64` |
+
+### Literal Suffixes
+
+```
+42u8   42u16  42u32  42u64        ← unsigned integer types
+42i8   42i16  42i32  42i64        ← signed integer types
+3.14f32  3.14f64                  ← float types
+42usz  42isize                    ← pointer-size types
+```
+
+- Unsuffixed literals infer type from the target variable
+- Overflow on compile-time literal → compile error
+
+### Type Rules
+
+- **Widening** allowed: `i8` → `i16`, `u8` → `u64`, `f32` → `f64`
+- **Narrowing** prohibited: `i64` → `i32` is a compile error
+- **Signed ↔ Unsigned** same rank: prohibited (`i32` ↔ `u32` is error)
+- **Int + Float** → Float (int promotes to float)
+- **Mixed expressions**: promotion to the smallest type that fits both operands
 
 ### Array Types
 
@@ -80,10 +121,19 @@ When compiled, Meta-C types map to C types as follows:
 
 | Meta-C | C |
 |--------|---|
-| `int` | `int64_t` |
-| `float` | `double` |
+| `i8` | `int8_t` |
+| `i16` | `int16_t` |
+| `i32` / `int` | `int32_t` |
+| `i64` / `long` | `int64_t` |
+| `u8` / `char` / `byte` | `uint8_t` |
+| `u16` | `uint16_t` |
+| `u32` | `uint32_t` |
+| `u64` | `uint64_t` |
+| `f32` / `float` | `float` |
+| `f64` / `double` | `double` |
+| `usize` | `size_t` |
+| `isize` | `ptrdiff_t` |
 | `bool` | `uint8_t` |
-| `char` | `char` |
 | `String` | `MetaCString` (struct with `data` and `len`) |
 | `block` | `BlockCtx*` |
 

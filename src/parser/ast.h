@@ -192,12 +192,14 @@ struct ExprStmt : ASTNode {
 
 struct IntLiteral : ASTNode {
     int64_t value;
+    std::string literal_type;
     IntLiteral(int64_t v, SourceLocation loc)
         : ASTNode(ASTNodeType::INT_LITERAL, loc), value(v) {}
 };
 
 struct FloatLiteral : ASTNode {
     double value;
+    std::string literal_type;
     FloatLiteral(double v, SourceLocation loc)
         : ASTNode(ASTNodeType::FLOAT_LITERAL, loc), value(v) {}
 };

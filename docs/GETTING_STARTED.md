@@ -1,131 +1,106 @@
-# Começando com Meta-C
 # Getting Started with Meta-C
 
-> Guia rápido pra quem quer usar ou contribuir com a linguagem.
-> Quick guide for anyone who wants to use or contribute to the language.
+Quick guide for anyone who wants to use or contribute to the language.
 
-## O que você precisa
 ## What You Need
 
-- **Linux** (Arch recomendado, mas qualquer um serve)
-- **g++** com suporte a C++20
-- **gcc** pra compilar o código gerado
-- **SCons** (`sudo pacman -S scons` no Arch)
-- **ncurses** pro visualizador (`sudo pacman -S ncurses`)
-- **Konsole** (terminal do KDE) — ou adapta os scripts pro seu terminal
-- **Linux** (Arch recommended, but any distro works)
-- **g++** with C++20 support
-- **gcc** to compile the generated code
-- **SCons** (`sudo pacman -S scons` on Arch)
-- **ncurses** for the visualizer (`sudo pacman -S ncurses`)
-- **Konsole** (KDE terminal) — or adapt the scripts to your terminal
+- **Linux** (any distro)
+- **g++** with C++20 support (GCC >= 11 or Clang >= 14)
+- **gcc** to compile generated code
+- **SCons** (`pip install scons`)
+- **ncurses** for the visualizer (optional)
 
-## Build do compilador
-## Building the Compiler
+## Build the Compiler
 
 ```bash
-git clone <url-do-repo> meta-c
+git clone https://github.com/nonunknown777/meta-c.git
 cd meta-c
-scons                     # build release
-scons profile=debug       # build debug
+scons                     # release build
+scons profile=debug       # debug build
 ```
 
-O compilador `meta-c` vai estar em `build/meta-c`.
-The `meta-c` compiler will be at `build/meta-c`.
+The `meta-c` binary will be at `build/meta-c`.
 
-## Compilar um programa Meta-C
-## Compiling a Meta-C Program
+## Compile and Run a Meta-C Program
+
+### Quickest way
 
 ```bash
-# Compila .mc → .c
-meta-c examples/hello.mc -o build/hello.c
-
-# Compila o C gerado + runtime → programa final
-gcc -O3 build/hello.c runtime/block_memory.c runtime/hot_reload.c -o build/hello -ldl
-
-# Roda
-./build/hello
+meta-c run examples/hello.mc
 ```
 
-Com debug:
-With debug:
+This compiles `.mc` -> C -> binary and runs it in one step.
+
+### Build to binary
 
 ```bash
-meta-c examples/hello.mc -o build/hello.c
-gcc -g build/hello.c runtime/block_memory.c runtime/hot_reload.c -o build/hello -ldl
-gdb ./build/hello
+meta-c build examples/hello.mc -o hello
+./hello
 ```
 
-## Rodar testes
-## Running Tests
+The `meta-c build` command handles the full pipeline:
+1. Compiles `.mc` to C
+2. Links the runtime (block memory allocator, I/O, hot reload)
+3. Runs `gcc -O3` to produce a standalone binary
+
+### Compile to C only
 
 ```bash
-scons test                # testes unitários / unit tests
-tests/test_integration.sh # testes de integração / integration tests
+meta-c examples/hello.mc -o hello.c
 ```
 
-## Abrir o workspace
-## Opening the Workspace
+Useful if you want to inspect the generated C code.
+
+### Release mode (no tracking overhead)
 
 ```bash
-./run-all.sh              # abre um Konsole com todas as tasks
-                          # opens a Konsole with all tasks
+meta-c build examples/hello.mc --release -o hello
+./hello
 ```
 
-Ou abrir uma task específica:
-Or open a specific task:
+Omit tracking overhead for maximum performance (no visualizer support).
+
+## Run Tests
 
 ```bash
-./tasks/04-runtime/run.sh # só a task de runtime / runtime task only
+scons test                # unit tests
+tests/test_integration.sh # integration tests (.mc -> compile -> run)
 ```
 
-## Estrutura do projeto pra contribuir
-## Project Structure for Contributors
+## Visualize Memory
 
-| Pasta | O que tem | Linguagem |
-| Folder | Contents | Language |
-|-------|-----------|:---------:|
-| `src/` | Compilador (lexer, parser, codegen) | C++20 |
-| `src/` | Compiler (lexer, parser, codegen) | C++20 |
-| `runtime/` | Biblioteca de blocos + hot reload | C |
-| `runtime/` | Block library + hot reload | C |
-| `visualizer/` | TUI que mostra blocos | C++ (ncurses) |
-| `visualizer/` | TUI that shows blocks | C++ (ncurses) |
-| `debugger/` | GDB pretty-printers | Python |
-| `vscode-ext/` | Plugin VS Code | JSON/JS/TS |
-| `vscode-ext/` | VS Code extension | JSON/JS/TS |
-| `tasks/` | 10 agents do opencode | .md |
-| `tasks/` | 10 opencode agents | .md |
-| `tests/` | Testes unitários e integração | C++/C/bash |
-| `tests/` | Unit and integration tests | C++/C/bash |
-| `examples/` | Código .mc de exemplo | Meta-C |
-| `examples/` | Example .mc code | Meta-C |
-| `docs/` | Documentação | .md |
-| `docs/` | Documentation | .md |
+```bash
+meta-c --visualize examples/hello.mc   # compile, run, show live TUI
+meta-c --attach <pid>                  # attach visualizer to running process
+```
 
-## Abrindo uma task no opencode
-## Opening a Task in opencode
-
-Cada pasta em `tasks/` tem um `run.sh` que abre um terminal com o opencode
-já focado naquela task. O `AGENTS.md` de cada task diz pra IA o que ela
-precisa fazer. O `STATE.md` diz onde a task parou na última sessão.
-Each folder in `tasks/` has a `run.sh` that opens a terminal with opencode
-already focused on that task. The `AGENTS.md` of each task tells the AI what
-it needs to do. `STATE.md` says where the task stopped in the last session.
-
-## Conceitos principais
 ## Core Concepts
-
-1. **Tudo em blocos**: sua memória vive em blocos que você declara
-2. **Sem stack**: zero variáveis na pilha do C (tudo vai pra blocos)
-3. **Bump allocator**: alocação super rápida (só aumenta um ponteiro)
-4. **Reset, não free**: limpa o bloco inteiro, nunca objeto individual
-5. **Hot reload**: troca código sem parar o programa
-6. **#line directives**: debugar no código .mc original, não no C gerado
 
 1. **Everything in blocks**: your memory lives in blocks you declare
 2. **No stack**: zero variables on the C stack (everything goes to blocks)
 3. **Bump allocator**: super fast allocation (just advances a pointer)
 4. **Reset, not free**: clears the entire block, never individual objects
 5. **Hot reload**: swap code without stopping the program
-6. **#line directives**: debug in the original .mc code, not the generated C
+6. **Fixed-width types**: i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize
+7. **#line directives**: debug in the original .mc code, not the generated C
+
+## Project Structure
+
+| Directory       | Contents                                           |
+|-----------------|----------------------------------------------------|
+| `src/`          | Compiler (Lexer, Parser, Codegen) in C++20         |
+| `runtime/`      | Block memory allocator + hot reload + IO (C)       |
+| `visualizer/`   | ncurses TUI for live memory visualization          |
+| `debugger/`     | GDB pretty-printers and custom commands (Python)   |
+| `vscode-ext/`   | VS Code extension (highlight, LSP, memory view)    |
+| `tests/`        | Unit and integration tests                         |
+| `examples/`     | Example .mc programs                               |
+| `docs/`         | GitHub Pages site                                  |
+| `wiki/`         | GitHub Wiki content                                |
+| `tasks/`        | Development task breakdown (01-11)                 |
+| `benchmarks/`   | Performance benchmarks                             |
+
+## Opening a Task (for contributors)
+
+Each folder in `tasks/` has a `run.sh` that opens opencode focused on that task.
+Each task has `AGENTS.md` (instructions for the AI) and `STATE.md` (where it stopped).

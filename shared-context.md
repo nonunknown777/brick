@@ -94,14 +94,42 @@ game.reset()     // libera TUDO no bloco game
 ## Tipos
 ## Types
 ```meta-c
-int          // inteiro 64-bit / 64-bit integer
-float        // ponto flutuante 64-bit / 64-bit floating point
+// Tipos de largura fixa / Fixed-width types
+i8 i16 i32 i64   // inteiros com sinal / signed integers
+u8 u16 u32 u64   // inteiros sem sinal / unsigned integers
+f32 f64          // ponto flutuante / floating point
+usize isize      // size_t / ptrdiff_t (ponteiro / pointer-size)
+
+// Apelidos / Aliases
+int    = i32     // inteiro 32-bit (padrão) / 32-bit integer (default)
+float  = f32     // ponto flutuante 32-bit (padrão) / 32-bit float (default)
+char   = u8      // caractere 8-bit / 8-bit character
+byte   = u8      // mesmo que char / same as char
+short  = i16     // inteiro curto 16-bit / short 16-bit integer
+long   = i64     // inteiro longo 64-bit / long 64-bit integer
+double = f64     // ponto flutuante 64-bit / 64-bit float
+
 bool         // true | false
-char         // caractere 8-bit / 8-bit character
 String       // string built-in (dinâmica, alocada em bloco) / built-in string (dynamic, block-allocated)
-int[N]       // array fixo de N elementos / fixed array of N elements
+T[N]         // array fixo de N elementos de tipo T / fixed array of N elements of type T
 null         // ponteiro nulo / null pointer
 ```
+
+### Literais com sufixo / Suffixed literals
+```meta-c
+42u8   42u16  42u32  42u64    // unsigned
+42i8   42i16  42i32  42i64    // signed (42 = auto)
+3.14f32  3.14f64              // float
+42usz  42isize                // pointer-size
+```
+
+### Regras de tipo / Type rules
+- Literal sem sufixo: tipo inferido pelo contexto (se cabe no destino, permite)
+- Widening permitido (i8→i16, u8→u64, f32→f64)
+- Narrowing proibido (i64→i32 = erro)
+- Signed↔Unsigned mesmo rank proibido (i32↔u32 = erro)
+- Int + Float → Float (int promove a float)
+- Overflow em literal compile-time: erro
 
 ## Funções
 ## Functions
@@ -156,16 +184,16 @@ fn main() {
 **Regras:**
 - `using IO;` é obrigatório para usar `print()`
 - `print()` sempre adiciona `\n` no final (println semantics)
-- Tipos suportados: int, float, bool, char, String
+- Tipos suportados: todos os numéricos (i8..i64, u8..u64, f32/f64, usize/isize), bool, char, String
 - Formatação: `{0}`, `{1}` etc. referem-se aos argumentos posicionalmente
-- Implementação: codegen gera chamadas para `runtime/io.c` (wrappers de printf)
+- Implementação: codegen gera chamadas para `runtime/io.c` (wrappers de printf com macros PRI)
 
 **Rules:**
 - `using IO;` is required to use `print()`
 - `print()` always adds `\n` at the end (println semantics)
-- Supported types: int, float, bool, char, String
+- Supported types: all numeric (i8..i64, u8..u64, f32/f64, usize/isize), bool, char, String
 - Formatting: `{0}`, `{1}` etc. refer to arguments positionally
-- Implementation: codegen generates calls to `runtime/io.c` (printf wrappers)
+- Implementation: codegen generates calls to `runtime/io.c` (printf wrappers with PRI macros)
 
 ## Compilação
 ## Compilation

@@ -18,7 +18,16 @@ embed_cmd = (
 if target == 'linux' and has_x11:
     embed_cmd += ' --has-x11'
 
-env.Command([gen_h, gen_cpp], ['#scripts/embed_runtime.py'], embed_cmd)
+# All runtime source files trigger regeneration
+# Todos os arquivos fonte de runtime disparam regeneracao
+runtime_deps = Glob('#runtime/*.h') + Glob('#runtime/*.c')
+if target == 'linux':
+    runtime_deps += Glob('#runtime/hot_reload*')
+    runtime_deps += Glob('#runtime/libs/window/*')
+if has_x11:
+    runtime_deps += Glob('#runtime/libs/window/*.c')
+    runtime_deps += Glob('#runtime/libs/window/*.h')
+env.Command([gen_h, gen_cpp], ['#scripts/embed_runtime.py'] + runtime_deps, embed_cmd)
 
 # ─── Libraries ──────────────────────────────────────────────
 lib_lexer   = env.Library('#build/meta_lexer',   ['lexer/lexer.cpp'])
