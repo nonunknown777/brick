@@ -265,6 +265,90 @@ private int y                          ← visible only within own package
 
 > Line comments only (`//`). Block comments (`/* */`) are not supported.
 
+## I/O (Package IO)
+
+```
+using IO
+
+fn main() {
+    print(42)                    → "42"
+    print(3.14)                  → "3.140000"
+    print(true)                  → "true"
+    print("hello")               → "hello"
+    print()                      → (blank line)
+    print("x = {0}", 10)         → "x = 10"
+    print("{0} + {1} = {2}", 1, 2, 3)  → "1 + 2 = 3"
+}
+```
+
+> `using IO` is required to use `print()`. It always adds a newline at the end (println semantics).
+>
+> `{0}`, `{1}` etc. refer to arguments positionally. Supported types: all numeric types, bool, char, String.
+
+## C Interop
+
+### Include a C header and link a library
+
+```
+include "math.h" and link m
+```
+
+Or separately:
+
+```
+include "SDL.h"
+link SDL2
+```
+
+### Declare external C functions
+
+```
+extern fn sqrt(f64 x) -> f64
+extern fn atoi(*u8 str) -> i32
+extern fn puts(*u8 s) -> i32
+extern fn sin(f64 x) -> f64
+```
+
+> Functions from always-included headers (stdio.h, stdlib.h, string.h) only need `extern fn` for the type checker — prototypes are already provided by the headers.
+>
+> `String` → `*u8` conversion happens automatically when passing a String to a `*u8` parameter.
+
+### Pointer syntax
+
+- `*u8` → `char*`
+- `*void` → `void*`
+- `*MyStruct` → `MyStruct*`
+
+### Generate C bindings from a C header
+
+```
+brick bind <header.h>    # generates .brc bindings
+```
+
+## Debugging
+
+Brick generates `#line` directives in the C output so you debug in `.brc` code, not generated C:
+
+```
+brick input.brc -o output.c      # generate C with #line
+gcc -g -O0 output.c ...          # compile with debug info
+gdb ./a.out                      # GDB shows .brc source
+```
+
+GDB pretty-printers are in `debugger/` — they add custom commands:
+
+| Command | What it does |
+|---------|-------------|
+| `info blocks` | Lists all memory blocks and their usage |
+| `block <name>` | Shows detailed info about a block |
+| `block-watch` | Watches block allocations |
+
+Load them automatically with:
+
+```
+gdb -x debugger/.gdbinit ./program
+```
+
 ## Complete Example
 
 ```

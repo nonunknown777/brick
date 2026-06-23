@@ -1,7 +1,7 @@
-# Próximo Passo - Builder
-# Next Step - Builder
+# Task 07 - Builder - NEXT
 
-Completo. runtime/io.c adicionado ao runtime_src.
-56/56 testes passando.
-Complete. runtime/io.c added to runtime_src.
-56/56 tests passing.
+## Futuro (baixa prioridade)
+- Suporte a macOS
+- Cross-compile para ARM (Raspberry Pi)
+- Package manager (brick install <lib>)
+- Ninja backend (opcional)

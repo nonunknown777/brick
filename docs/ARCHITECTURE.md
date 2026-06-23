@@ -90,6 +90,7 @@ Makes VS Code understand the language:
 ```
 You write:
     package GAME
+    block global = 256MB
     block game = 64MB
     struct Player { int hp }
     fn main() { Player p = Player(100) @game }

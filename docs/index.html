@@ -20,7 +20,7 @@
 <!-- What is Brick -->
 <section>
   <div class="container">
-    <h2 class="section-title fade-in">What is Meta‑C?</h2>
+    <h2 class="section-title fade-in">What is Brick?</h2>
     <p class="section-sub fade-in">An OOP language with clean syntax that compiles directly to C. Designed for games, real-time systems, and any domain where performance and memory control matter.</p>
     <div class="philosophy-grid">
       <div class="phil-item fade-in">
@@ -49,10 +49,12 @@
     <h2 class="section-title fade-in">Code Example</h2>
     <p class="section-sub fade-in">Interfaces, fixed-width types, blocks — all working together.</p>
     <div class="code-block fade-in">
-      <span class="lang-label">Meta‑C (.brc)</span>
+      <span class="lang-label">Brick (.brc)</span>
 <pre><span class="kw">package</span> DEMO
 
 <span class="kw">using</span> IO
+
+<span class="kw">block</span> <span class="type">global</span> = <span class="num">256MB</span>
 
 <span class="kw">interface</span> <span class="type">Drawable</span> {
     <span class="kw">fn</span> <span class="fn">draw</span>()
@@ -195,7 +197,7 @@ cd brick</pre></div>
         <div class="step-num">2</div>
         <div class="step-body">
           <h3>Build</h3>
-          <p>Meta‑C uses SCons. Build the compiler and runtime in one command.</p>
+          <p>Brick uses SCons. Build the compiler and runtime in one command.</p>
           <div class="code-block"><pre>scons</pre></div>
         </div>
       </div>
@@ -289,7 +291,7 @@ cd brick</pre></div>
 
 <!-- Footer -->
 <footer>
-  <p>Meta‑C — MIT License</p>
+  <p>Brick — MIT License</p>
   <p class="ai-note"><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
 </footer>
 

@@ -1,19 +1,23 @@
-# Estado Atual
-# Current State
+# Task 01 - Lexer - STATE
 
-Sessão: 3 (C Interop)
-Session: 3 (C Interop)
+## Status: ✅ COMPLETO
 
-Progresso: 100%
-Progress: 100%
+O lexer está completo e funcionando. Todos os 29 testes unitários passam.
 
-Próximo passo: Integração com Parser — ver NEXT.md
-Next step: Integration with Parser — see NEXT.md
+## Implementado
+- Tokenização completa: keywords, operators, literals (string, char, int, float)
+- Literal suffixes: u8/u16/u32/u64, i8/i16/i32/i64, f32/f64, usz/isz
+- Auto-semicolon insertion (parser-level)
+- Source location tracking (line, col, file)
+- Escape sequences em string/char
+- Comments (//)
+- Error handling (unterminated string/char, invalid escape, unexpected char)
 
-Última ação: Adicionados tokens EXTERN, INCLUDE, LINK; "and" removido de keyword map (tratado contextualmente no parser)
-Last action: Added EXTERN, INCLUDE, LINK tokens; "and" removed from keyword map (handled contextually in parser)
+## Arquivos
+- `src/lexer/lexer.h` - API pública
+- `src/lexer/lexer.cpp` - Implementação (~305 linhas)
+- `tests/test_lexer.cpp` - 29 testes
 
-## Realizado / Completed
-- Tokens: `EXTERN` ("extern"), `INCLUDE` ("include"), `LINK` ("link")
-- `"and"` removido de keyword map (era mapeado para `AND`) — agora IDENTIFIER tratado contextualmente pelo parser
-- LSP: adicionados a `token_type_name()` e `collect_symbols()`
+## Observações
+- `and` não é keyword — tratado contextualmente no parser
+- Token types em `src/shared/types.h`

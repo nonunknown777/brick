@@ -1,35 +1,38 @@
-# Estado Atual - Codegen
-# Current State - Codegen
+# Task 03 - Codegen - STATE
 
-Sessão: 2026-06-23 (C Interop)
-Session: 2026-06-23 (C Interop)
+## Status: ✅ COMPLETO
 
-Progresso: 100%
-Progress: 100%
+Codegen completo. 79 testes unitários passam (todos). Geração de C com #line directives, type checking completo, suporte a I/O, C interop, tipos de largura fixa.
 
-Última ação: C Interop — extern fn + include/link + *T pointers + String→*u8
-Last action: C Interop — extern fn + include/link + *T pointers + String→*u8
+## Implementado
+- Type checker completo com:
+  - Tipos built-in: i8-u64, f32/f64, bool, char, String, void, block, usize/isize
+  - Aliases: int=i32, float=f32, byte=u8, short=i16, long=i64, double=f64
+  - Widening permitido, narrowing proibido
+  - Signed↔Unsigned mesmo rank proibido
+  - Int + Float → Float promotion
+  - Overflow em literal compile-time detectado
+  - Literal suffixes (42u8, 3.14f32, etc.)
+  - Pointer types (*T)
+  - can_assign completo com regras de null, ponteiros, String→*u8
+- Struct inheritance com base field
+- Constructor/method codegen
+- Block memory: block_create, block_alloc, block_register, block_reset
+- Block scope push/pop (_current_block)
+- print() I/O com tipos variados e formatação {N}
+- C interop: include/link/extern fn, String→*u8 auto-conversion
+- #line directives para debug
+- error() → fprintf(stderr) + exit(1)
+- __brick_init() com shm_export
 
-## Realizado (C Interop)
-## Completed (C Interop)
+## Arquivos
+- `src/codegen/codegen.h` - API
+- `src/codegen/codegen.cpp` - Codegen C (~1133 linhas)
+- `src/codegen/type_checker.h` - Type checker API
+- `src/codegen/type_checker.cpp` - Type checker (~1012 linhas)
+- `tests/test_codegen.cpp` - 79 testes
 
-### Type Checker
-- `extern_func_defs` map (string name → FuncDecl*) armazena funções externas
-- `check_expression()`: resolve return type via extern_func_defs para chamadas
-- `is_type_known("*T")`: aceita pointer types (prefixo `*`)
-- `can_assign()`: permite String→*u8, null→*T, *T↔*T
-
-### Codegen
-- `#include <header>` emitido para IncludeDecl
-- `link_lib` propagado como `-l<lib>` via `link_flags` em `CodegenResult`
-- `*u8` → `char*` (match BrickString.data), `*T` → `T*` via `map_type()`
-- String→`*u8` auto-conversão em CALL_EXPR (extrai `.data`)
-- Protótipos C NÃO emitidos — headers fornecem declarações (evita `char*` vs `const char*`)
-
-### LSP
-- EXTERN/INCLUDE/LINK tokens adicionados ao switch de `token_type_name()`
-- INCLUDE_DECL/LINK_DECL adicionados ao switch de `collect_symbols()`
-
-### Testes
-- 97/97 unitários passando (79 codegen + 15 window + 3 window HR)
-- Integração: 6/6 passando (5 antigos + test_c_interop.brc)
+## Observações
+- `fn main()` em Brick → `int main()` em C (return 0 implícito)
+- Struct params viram pointers em C (block-allocated semantics)
+- Generated C compila com `gcc -O3 -Wall -Werror` (verificado em test)

@@ -1,35 +1,21 @@
-# Current State
+# Task 11 - Libs - STATE
 
-## Session: 1 (active)
-## Sessão: 1 (ativa)
+## Status: 🔶 PARCIAL
 
-Progress: 50%
-Progresso: 50%
+Bibliotecas oficiais em desenvolvimento.
 
-Next step: Hot reload support implemented — function pointer table, .so build, 3 HR tests passing
-Próximo passo: Suporte a hot reload implementado — tabela de ponteiros de função, build .so, 3 testes HR passando
+## Implementado
+- Window library (X11): create/destroy, set_title, get_size, poll_events, fullscreen, swap_buffers
+- Window library hot reload support
+- 15 testes de window library + 3 de hot reload
 
-Last action: Created window_hr.h/c with MetaWindowFuncTable + meta_window_hr_init/start
-Última ação: Criado window_hr.h/c com MetaWindowFuncTable + meta_window_hr_init/start
+## Pendente
+- input (keyboard/mouse input abstraction)
+- audio (SDL or ALSA)
+- file (file I/O wrapper)
+- net (socket abstraction)
+- math (SIMD math library)
 
-Blockers: None
-Bloqueios: Nenhum
-
-## Delivered
-## Entregue
-
-- window.h: BlockCtx* API with forward declaration
-- window_internal.h: char title[256] (no strdup/free)
-- window_linux/window_win32.c: block_alloc instead of calloc
-- window_hr.h/c: HotReloadEngine integration, atomic function swap
-- SCons: .so build for dlopen, test_libs_window_hr, -rdynamic linker flag
-- tests: 15 base tests + 3 HR tests — all passing, ASan clean
-- hot_reload.c: copy-to-temp approach instead of dlmopen (fixes symbol visibility)
-
-- window.h: API BlockCtx* com forward declaration
-- window_internal.h: char title[256] (sem strdup/free)
-- window_linux/window_win32.c: block_alloc em vez de calloc
-- window_hr.h/c: integração HotReloadEngine, swap atômico de função
-- SCons: build .so para dlopen, test_libs_window_hr, flag linker -rdynamic
-- testes: 15 testes base + 3 testes HR — todos passando, ASan limpo
-- hot_reload.c: abordagem copy-to-temp em vez de dlmopen (corrige visibilidade de símbolo)
+## Arquivos
+- `runtime/libs/window/` - Window library (X11)
+- `runtime/libs/` - Outras libs (não implementadas)

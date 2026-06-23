@@ -64,8 +64,8 @@ brick build examples/hello.brc --release -o hello
 ## Run Tests
 
 ```bash
-scons test                # testes unitários / unit tests
-tests/test_integration.sh # testes de integração (.brc -> compila -> roda) / integration tests (.brc -> compile -> run)
+scons test                # run unit tests
+tests/test_integration.sh # integration tests (compile .brc -> run binary)
 ```
 
 ## Visualize Memory

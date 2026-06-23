@@ -140,7 +140,7 @@ fn add(int a, int b) -> int {
     return a + b
 }
 
-fn void log(String msg) {
+fn log(String msg) {
     // params e retorno: gerenciados pelo bloco anônimo interno
     // params and return: managed by the internal anonymous block
 }
