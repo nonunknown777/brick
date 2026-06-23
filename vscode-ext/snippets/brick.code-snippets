@@ -115,5 +115,27 @@
             "}"
         ],
         "description": "Main entry point"
+    },
+    "Extern function": {
+        "prefix": "extern",
+        "body": [
+            "extern fn ${1:name}(${2:params}) -> ${3:ret}"
+        ],
+        "description": "Declare an external C function"
+    },
+    "Include header": {
+        "prefix": "include",
+        "body": "include \"${1:header.h}\"",
+        "description": "Include a C header file"
+    },
+    "Link library": {
+        "prefix": "link",
+        "body": "link ${1:libname}",
+        "description": "Link a C library"
+    },
+    "Include and link": {
+        "prefix": "incandlink",
+        "body": "include \"${1:header.h}\" and link ${2:libname}",
+        "description": "Include a C header and link a library"
     }
 }

@@ -63,6 +63,7 @@ const keywordSet = new Set([
     'block', 'reset',
     'if', 'else', 'while', 'for', 'error',
     'null', 'true', 'false',
+    'include', 'link', 'extern', 'and',
 ]);
 
 const keywordCompletions: CompletionItem[] = [
@@ -104,6 +105,10 @@ const keywordCompletions: CompletionItem[] = [
     { label: 'null', kind: CompletionItemKind.Constant, detail: 'null literal' },
     { label: 'true', kind: CompletionItemKind.Constant, detail: 'boolean true' },
     { label: 'false', kind: CompletionItemKind.Constant, detail: 'boolean false' },
+    { label: 'include', kind: CompletionItemKind.Keyword, detail: 'include C header', insertText: 'include "${1:header.h}"', insertTextFormat: 2 },
+    { label: 'link', kind: CompletionItemKind.Keyword, detail: 'link C library', insertText: 'link ${1:libname}', insertTextFormat: 2 },
+    { label: 'extern', kind: CompletionItemKind.Keyword, detail: 'declare external C function', insertText: 'extern fn ${1:name}(${2:params}) -> ${3:ret}', insertTextFormat: 2 },
+    { label: 'and', kind: CompletionItemKind.Keyword, detail: 'connects include and link' },
 ];
 
 const snippetCompletions: CompletionItem[] = [
@@ -367,6 +372,18 @@ connection.onCompletion((params: CompletionParams): CompletionItem[] => {
         }
         if (kw === 'package') {
             items.push({ label: 'PACKAGE_NAME', kind: CompletionItemKind.Module, detail: 'package name in UPPER case' });
+            return items;
+        }
+        if (kw === 'extern') {
+            items.push({ label: 'fn', kind: CompletionItemKind.Keyword, detail: 'extern fn declaration', insertText: 'fn ${1:name}(${2:params}) -> ${3:ret}', insertTextFormat: 2 });
+            return items;
+        }
+        if (kw === 'include') {
+            items.push({ label: '"header.h"', kind: CompletionItemKind.Text, detail: 'header file path', insertText: '"${1:header.h}"', insertTextFormat: 2 });
+            return items;
+        }
+        if (kw === 'link') {
+            items.push({ label: 'libname', kind: CompletionItemKind.Text, detail: 'library name (e.g. m, SDL2, pthread)', insertText: '${1:libname}', insertTextFormat: 2 });
             return items;
         }
     }
@@ -759,6 +776,10 @@ connection.languages.semanticTokens.on((params: SemanticTokensParams): SemanticT
             case 'BLOCK':
             case 'RESET':
             case 'ERROR':
+            case 'INCLUDE':
+            case 'LINK':
+            case 'EXTERN':
+            case 'AND':
                 pushToken(line, col, len, 0);
                 break;
             case 'TRUE':

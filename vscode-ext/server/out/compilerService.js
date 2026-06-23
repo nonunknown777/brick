@@ -1,15 +1,15 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.findMetaC = findMetaC;
+exports.findBrick = findBrick;
 exports.runCompiler = runCompiler;
 const child_process_1 = require("child_process");
-function findMetaC() {
+function findBrick() {
     const candidates = [
-        'meta-c',
-        './build/meta-c',
-        '../build/meta-c',
-        '../../build/meta-c',
-        '/usr/local/bin/meta-c',
+        'brick',
+        './build/brick',
+        '../build/brick',
+        '../../build/brick',
+        '/usr/local/bin/brick',
     ];
     for (const cmd of candidates) {
         try {
@@ -20,10 +20,10 @@ function findMetaC() {
             continue;
         }
     }
-    return 'meta-c';
+    return 'brick';
 }
 function runCompiler(filePath) {
-    const cmd = findMetaC();
+    const cmd = findBrick();
     try {
         const raw = (0, child_process_1.execSync)(`"${cmd}" "${filePath}" --lsp`, {
             encoding: 'utf8',

@@ -115,14 +115,20 @@ private:
     }
 
     bool is_type_start() const {
-        return is_type_keyword(peek().type) || peek().type == TokenType::IDENTIFIER;
+        return is_type_keyword(peek().type) || peek().type == TokenType::IDENTIFIER
+            || peek().type == TokenType::STAR;
     }
 
     std::string parse_type_name() {
-        if (is_type_keyword(peek().type)) {
-            return advance().lexeme;
+        std::string prefix;
+        while (peek().type == TokenType::STAR) {
+            prefix += "*";
+            advance();
         }
-        return expect(TokenType::IDENTIFIER, "expected type name").lexeme;
+        if (is_type_keyword(peek().type)) {
+            return prefix + advance().lexeme;
+        }
+        return prefix + expect(TokenType::IDENTIFIER, "expected type name").lexeme;
     }
 
     // ─── Top-level ───
@@ -146,6 +152,9 @@ private:
             case TokenType::INTERFACE: return interface_decl();
             case TokenType::BLOCK:   return block_decl_or_scope();
             case TokenType::FN:      return func_decl();
+            case TokenType::EXTERN:  return extern_decl();
+            case TokenType::INCLUDE: return include_decl();
+            case TokenType::LINK:    return link_decl();
             default:
                 throw std::runtime_error("unexpected token '" + peek().lexeme + "'");
         }
@@ -296,6 +305,52 @@ private:
         return fd;
     }
 
+    std::unique_ptr<ASTNode> extern_decl() {
+        SourceLocation loc = peek().location;
+        advance(); // consume 'extern'
+
+        expect(TokenType::FN, "expected 'fn' after 'extern'");
+        std::string name = expect(TokenType::IDENTIFIER, "expected function name").lexeme;
+        auto fd = std::make_unique<FuncDecl>(name, loc);
+        fd->is_extern = true;
+
+        expect(TokenType::LPAREN, "expected '(' after function name");
+        if (peek().type != TokenType::RPAREN) {
+            fd->params = param_list();
+        }
+        expect(TokenType::RPAREN, "expected ')' after parameters");
+
+        if (match(TokenType::ARROW)) {
+            fd->return_type = parse_type_name();
+        }
+
+        return fd;
+    }
+
+    std::unique_ptr<ASTNode> include_decl() {
+        SourceLocation loc = peek().location;
+        advance(); // consume 'include'
+
+        std::string header = expect(TokenType::STRING_LITERAL, "expected header path").lexeme;
+        auto inc = std::make_unique<IncludeDecl>(header, loc);
+
+        if (peek().type == TokenType::IDENTIFIER && peek().lexeme == "and") {
+            advance(); // consume 'and'
+            expect(TokenType::LINK, "expected 'link' after 'and'");
+            inc->link_lib = expect(TokenType::IDENTIFIER, "expected library name").lexeme;
+        }
+
+        return inc;
+    }
+
+    std::unique_ptr<ASTNode> link_decl() {
+        SourceLocation loc = peek().location;
+        advance(); // consume 'link'
+
+        std::string lib = expect(TokenType::IDENTIFIER, "expected library name").lexeme;
+        return std::make_unique<LinkDecl>(lib, loc);
+    }
+
     std::vector<std::unique_ptr<ASTNode>> param_list() {
         std::vector<std::unique_ptr<ASTNode>> params;
         do {
@@ -379,6 +434,8 @@ private:
             case TokenType::USIZE:
             case TokenType::ISIZE:
             case TokenType::BYTE:
+                return var_decl();
+            case TokenType::STAR:
                 return var_decl();
             default:
                 if (peek().type == TokenType::IDENTIFIER && pos + 1 < tokens.size()) {

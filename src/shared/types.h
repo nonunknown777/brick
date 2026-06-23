@@ -20,6 +20,7 @@ enum class TokenType {
     F32, F64,
     USIZE, ISIZE,
     BYTE,
+    EXTERN, INCLUDE, LINK,
 
     // Literals
     // Literais

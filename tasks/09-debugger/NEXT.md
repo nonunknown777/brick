@@ -22,6 +22,21 @@ não são afetados.
 Se o webview mostra valores de variáveis, atualizar display types
 para incluir os novos tipos primitivos.
 
+## C Interop — verificado
+## C Interop — verified
+
+- [x] `#line` directives: include/link/extern não geram código debuggable → sem interferência
+- [x] Pretty-printers: nenhum novo tipo introduzido pelo interop — GDB lida nativamente com C types
+- [x] GDB commands: `info blocks`, `block`, `block-watch`, `blocks-list` funcionam inalterados
+- [x] Webview memory: block discovery via DAP não é afetado por chamadas a funções C
+- [x] Config: `.mc` → `.brc`, path `.gdbinit` portável
+
+- [x] `#line` directives: include/link/extern produce no debuggable code → no interference
+- [x] Pretty-printers: no new types introduced by interop — GDB handles native C types natively
+- [x] GDB commands: `info blocks`, `block`, `block-watch`, `blocks-list` work unchanged
+- [x] Webview memory: block discovery via DAP unaffected by C function calls
+- [x] Config: `.mc` → `.brc`, `.gdbinit` path portable
+
 ## Pendências anteriores
 ## Previous pending
 

@@ -44,6 +44,11 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"usize",   TokenType::USIZE},
     {"isize",   TokenType::ISIZE},
     {"byte",    TokenType::BYTE},
+    {"extern",  TokenType::EXTERN},
+    {"include", TokenType::INCLUDE},
+    {"link",    TokenType::LINK},
+        // "and" is NOT a keyword — handled contextually in parser
+        // "and" NAO eh keyword — tratado contextualmente no parser
 };
 
 class Lexer {

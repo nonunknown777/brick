@@ -275,6 +275,130 @@ struct Packet {
 });
 
 // ──────────────────────────────────────────
+// Test 14: C interop — include, link, extern
+// ──────────────────────────────────────────
+runSuite('C interop keywords', () => {
+    const r = scanDocument('include "math.h"\nlink m\nextern fn sqrt(f64 x) -> f64');
+    const includeTok = r.tokens.find(t => t.lexeme === 'include');
+    const linkTok = r.tokens.find(t => t.lexeme === 'link');
+    const externTok = r.tokens.find(t => t.lexeme === 'extern');
+
+    assert(includeTok?.type === 'INCLUDE', `include should be INCLUDE, got ${includeTok?.type}`);
+    assert(linkTok?.type === 'LINK', `link should be LINK, got ${linkTok?.type}`);
+    assert(externTok?.type === 'EXTERN', `extern should be EXTERN, got ${externTok?.type}`);
+
+    // String literal for header
+    const strTok = r.tokens.find(t => t.lexeme === '"math.h"');
+    assert(strTok?.type === 'STRING_LITERAL', `"math.h" should be STRING_LITERAL, got ${strTok?.type}`);
+});
+
+// ──────────────────────────────────────────
+// Test 15: C interop — extern fn declaration
+// ──────────────────────────────────────────
+runSuite('Extern fn detection', () => {
+    const r = scanDocument(`
+extern fn sqrt(f64 x) -> f64
+extern fn puts(*u8 s) -> i32
+extern fn sin(f64 x) -> f64
+`);
+    const sqrtSym = r.symbols.find(s => s.name === 'sqrt');
+    const putsSym = r.symbols.find(s => s.name === 'puts');
+    const sinSym = r.symbols.find(s => s.name === 'sin');
+
+    assert(sqrtSym !== undefined, 'sqrt symbol found');
+    assert(putsSym !== undefined, 'puts symbol found');
+    assert(sinSym !== undefined, 'sin symbol found');
+    assert(sqrtSym!.kind === 'function', `sqrt kind is function, got ${sqrtSym!.kind}`);
+    assert(sqrtSym!.type_name === 'f64', `sqrt return type is f64, got ${sqrtSym!.type_name}`);
+    assert(putsSym!.type_name === 'i32', `puts return type is i32, got ${putsSym!.type_name}`);
+});
+
+// ──────────────────────────────────────────
+// Test 16: C interop — include and link combined
+// ──────────────────────────────────────────
+runSuite('Include and link combined', () => {
+    const r = scanDocument('include "math.h" and link m');
+    const includeTok = r.tokens.find(t => t.lexeme === 'include');
+    const andTok = r.tokens.find(t => t.lexeme === 'and');
+    const linkTok = r.tokens.find(t => t.lexeme === 'link');
+
+    assert(includeTok !== undefined, 'include token exists');
+    assert(andTok?.type === 'AND', `and should be AND, got ${andTok?.type}`);
+    assert(linkTok !== undefined, 'link token exists');
+    assert(r.errors.length === 0, `no errors (got ${r.errors.length})`);
+});
+
+// ──────────────────────────────────────────
+// Test 17: Pointer type in struct fields
+// ──────────────────────────────────────────
+runSuite('Pointer type in struct fields', () => {
+    const r = scanDocument(`
+struct Buffer {
+    *u8 data
+    *void ctx
+    int length
+}
+`);
+    const buf = r.structs.get('Buffer');
+    assert(buf !== undefined, 'Buffer struct found');
+    if (buf) {
+        const dataField = buf.fields.find(f => f.name === 'data');
+        const ctxField = buf.fields.find(f => f.name === 'ctx');
+        const lenField = buf.fields.find(f => f.name === 'length');
+        assert(dataField !== undefined, 'data field (*u8) found');
+        assert(ctxField !== undefined, 'ctx field (*void) found');
+        assert(lenField !== undefined, 'length field (int) found');
+        assert(dataField!.type === '*u8', `data type is *u8, got ${dataField!.type}`);
+        assert(ctxField!.type === '*void', `ctx type is *void, got ${ctxField!.type}`);
+    }
+});
+
+// ──────────────────────────────────────────
+// Test 18: Pointer type variable detection
+// ──────────────────────────────────────────
+runSuite('Pointer type variable detection', () => {
+    const r = scanDocument(`
+fn test() {
+    *u8 ptr
+    *void handle
+    *Player ref
+}
+`);
+    const ptrVar = r.symbols.find(s => s.name === 'ptr');
+    const handleVar = r.symbols.find(s => s.name === 'handle');
+    const refVar = r.symbols.find(s => s.name === 'ref');
+
+    assert(ptrVar !== undefined, 'ptr variable found');
+    assert(handleVar !== undefined, 'handle variable found');
+    assert(refVar !== undefined, 'ref variable found');
+    assert(ptrVar!.type_name === '*u8', `ptr type is *u8, got ${ptrVar!.type_name}`);
+    assert(handleVar!.type_name === '*void', `handle type is *void, got ${handleVar!.type_name}`);
+    assert(refVar!.type_name === '*Player', `ref type is *Player, got ${refVar!.type_name}`);
+});
+
+// ──────────────────────────────────────────
+// Test 19: Pointer array types
+// ──────────────────────────────────────────
+runSuite('Pointer array types', () => {
+    const r = scanDocument(`
+struct Team {
+    *Player[10] members
+    *u8[256] buffer
+}
+`);
+    const team = r.structs.get('Team');
+    assert(team !== undefined, 'Team struct found');
+    if (team) {
+        const membersField = team.fields.find(f => f.name === 'members');
+        const bufferField = team.fields.find(f => f.name === 'buffer');
+        assert(membersField !== undefined, 'members field found');
+        assert(bufferField !== undefined, 'buffer field found');
+        assert(membersField!.type === '*Player[]', `members type is *Player[], got ${membersField!.type}`);
+        assert(bufferField!.type === '*u8[]', `buffer type is *u8[], got ${bufferField!.type}`);
+    }
+});
+
+// ──────────────────────────────────────────
 // Summary
 // ──────────────────────────────────────────
 console.log(`\n═══════════════════════════════════`);

@@ -38,6 +38,10 @@ private:
     // Tabelas de simbolos com escopo
     std::vector<std::unordered_map<std::string, SymbolInfo>> scopes;
 
+    // Extern function declarations (for return type resolution)
+    // Declaracoes de funcao externa (para resolucao de tipo de retorno)
+    std::unordered_map<std::string, FuncDecl*> extern_func_defs;
+
     std::string current_package;
     std::string current_struct;
     bool using_io = false;

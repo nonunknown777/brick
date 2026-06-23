@@ -60,6 +60,9 @@ static std::string token_type_name(TokenType t) {
         case TokenType::USIZE: return "USIZE";
         case TokenType::ISIZE: return "ISIZE";
         case TokenType::BYTE: return "BYTE";
+        case TokenType::EXTERN: return "EXTERN";
+        case TokenType::INCLUDE: return "INCLUDE";
+        case TokenType::LINK: return "LINK";
         case TokenType::INT_LITERAL: return "INT_LITERAL";
         case TokenType::FLOAT_LITERAL: return "FLOAT_LITERAL";
         case TokenType::STRING_LITERAL: return "STRING_LITERAL";
@@ -197,6 +200,8 @@ void collect_symbols(ASTNode* node, std::vector<LspSymbol>& symbols) {
         case ASTNodeType::BINARY_OP:
         case ASTNodeType::UNARY_OP:
         case ASTNodeType::ASSIGNMENT:
+        case ASTNodeType::INCLUDE_DECL:
+        case ASTNodeType::LINK_DECL:
             break;
     }
 }

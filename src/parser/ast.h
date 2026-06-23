@@ -15,6 +15,7 @@ enum class ASTNodeType {
     FIELD_DECL, FUNC_DECL, PARAM_DECL,
     BLOCK_DECL, BLOCK_SCOPE,
     ALLOC_INLINE, RESET_EXPR,
+    INCLUDE_DECL, LINK_DECL,
 
     // Statements
     // Statements (comandos)
@@ -54,6 +55,21 @@ struct UsingDecl : ASTNode {
     std::vector<std::string> package_parts;
     UsingDecl(std::vector<std::string> parts, SourceLocation loc)
         : ASTNode(ASTNodeType::USING_DECL, loc), package_parts(std::move(parts)) {}
+};
+
+struct IncludeDecl : ASTNode {
+    std::string header;
+    std::string link_lib; // "m" if "and link m", empty otherwise
+
+    IncludeDecl(std::string h, SourceLocation loc)
+        : ASTNode(ASTNodeType::INCLUDE_DECL, loc), header(std::move(h)) {}
+};
+
+struct LinkDecl : ASTNode {
+    std::string lib;
+
+    LinkDecl(std::string l, SourceLocation loc)
+        : ASTNode(ASTNodeType::LINK_DECL, loc), lib(std::move(l)) {}
 };
 
 struct StructDecl : ASTNode {
@@ -103,6 +119,7 @@ struct FuncDecl : ASTNode {
                                    // BlockStmt
     bool is_private = false;
     bool is_constructor = false;
+    bool is_extern = false;
 
     FuncDecl(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::FUNC_DECL, loc), name(std::move(n)) {}

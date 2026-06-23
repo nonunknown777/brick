@@ -48,14 +48,14 @@ const LAUNCH_TEMPLATE = {
             name: 'Debug Compiler (current file)',
             type: 'cppdbg',
             request: 'launch',
-            program: '${workspaceFolder}/build/meta-c',
+            program: '${workspaceFolder}/build/brick',
             args: ['${file}', '-o', '${workspaceFolder}/build/${fileBasenameNoExtension}.c'],
             cwd: '${workspaceFolder}',
             MIMode: 'gdb',
             setupCommands: [
                 { description: 'Enable pretty-printing for gdb', text: '-enable-pretty-printing', ignoreFailures: true }
             ],
-            preLaunchTask: 'Build Meta-C',
+            preLaunchTask: 'Build Brick',
         },
         {
             name: 'Debug Compiled Program',
@@ -67,7 +67,7 @@ const LAUNCH_TEMPLATE = {
             MIMode: 'gdb',
             setupCommands: [
                 { description: 'Enable pretty-printing', text: '-enable-pretty-printing', ignoreFailures: true },
-                { description: 'Load Meta-C printers', text: 'source ${workspaceFolder}/debugger/.gdbinit', ignoreFailures: true },
+                { description: 'Load Brick printers', text: 'source ${workspaceFolder}/debugger/.gdbinit', ignoreFailures: true },
             ],
             preLaunchTask: 'Compile this .mc file',
         },
@@ -87,7 +87,7 @@ const TASKS_TEMPLATE = {
     version: '2.0.0',
     tasks: [
         {
-            label: 'Build Meta-C',
+            label: 'Build Brick',
             type: 'shell',
             command: 'scons',
             group: { kind: 'build', isDefault: true },
@@ -103,19 +103,19 @@ const TASKS_TEMPLATE = {
         {
             label: 'Compile this .mc file',
             type: 'shell',
-            command: './build/meta-c "${file}" -o "build/${fileBasenameNoExtension}.c" && gcc -g -Iruntime "build/${fileBasenameNoExtension}.c" runtime/block_memory.c runtime/io.c runtime/hot_reload.c -o "build/${fileBasenameNoExtension}" -ldl',
+            command: './build/brick "${file}" -o "build/${fileBasenameNoExtension}.c" && gcc -g -Iruntime "build/${fileBasenameNoExtension}.c" runtime/block_memory.c runtime/io.c runtime/hot_reload.c -o "build/${fileBasenameNoExtension}" -ldl',
             problemMatcher: ['$gcc'],
         },
         {
             label: 'Compile this .mc file (release)',
             type: 'shell',
-            command: './build/meta-c "${file}" -o "build/${fileBasenameNoExtension}.c" && gcc -O3 -Iruntime "build/${fileBasenameNoExtension}.c" runtime/block_memory.c runtime/io.c -o "build/${fileBasenameNoExtension}"',
+            command: './build/brick "${file}" -o "build/${fileBasenameNoExtension}.c" && gcc -O3 -Iruntime "build/${fileBasenameNoExtension}.c" runtime/block_memory.c runtime/io.c -o "build/${fileBasenameNoExtension}"',
             problemMatcher: ['$gcc'],
         },
         {
             label: 'Run this .mc file',
             type: 'shell',
-            command: './build/meta-c "${file}" -o "${fileBasenameNoExtension}.c" && gcc -O3 "build/${fileBasenameNoExtension}.c" runtime/block_memory.c runtime/io.c -o "build/${fileBasenameNoExtension}" && "build/${fileBasenameNoExtension}"',
+            command: './build/brick "${file}" -o "${fileBasenameNoExtension}.c" && gcc -O3 "build/${fileBasenameNoExtension}.c" runtime/block_memory.c runtime/io.c -o "build/${fileBasenameNoExtension}" && "build/${fileBasenameNoExtension}"',
             problemMatcher: [],
         },
     ],
@@ -125,35 +125,35 @@ function activate(context) {
     const provider = new memoryWebview_1.MemoryViewProvider(context.extensionUri);
     context.subscriptions.push(vscode.window.registerWebviewViewProvider(memoryWebview_1.MemoryViewProvider.viewType, provider, { webviewOptions: { retainContextWhenHidden: true } }));
     context.subscriptions.push(vscode.debug.onDidChangeActiveDebugSession(session => {
-        console.log('[Meta-C] onDidChangeActiveDebugSession:', session ? session.id : 'null');
+        console.log('[Brick] onDidChangeActiveDebugSession:', session ? session.id : 'null');
         provider.update();
     }));
     // Real-time updates on pause / step / breakpoint
     context.subscriptions.push(vscode.debug.onDidChangeActiveStackItem(() => {
-        console.log('[Meta-C] onDidChangeActiveStackItem');
+        console.log('[Brick] onDidChangeActiveStackItem');
         if (vscode.debug.activeDebugSession) {
             provider.update();
         }
     }));
     // Auto-update when debug session starts
     context.subscriptions.push(vscode.debug.onDidStartDebugSession(() => {
-        console.log('[Meta-C] onDidStartDebugSession');
+        console.log('[Brick] onDidStartDebugSession');
         provider.update();
     }));
     // Also update when debug session terminates
     context.subscriptions.push(vscode.debug.onDidTerminateDebugSession(() => {
-        console.log('[Meta-C] onDidTerminateDebugSession');
+        console.log('[Brick] onDidTerminateDebugSession');
         provider.update();
     }));
-    context.subscriptions.push(vscode.commands.registerCommand('meta-c.initWorkspace', initWorkspace));
-    context.subscriptions.push(vscode.commands.registerCommand('meta-c.debugProgram', () => {
+    context.subscriptions.push(vscode.commands.registerCommand('brick.initWorkspace', initWorkspace));
+    context.subscriptions.push(vscode.commands.registerCommand('brick.debugProgram', () => {
         const editor = vscode.window.activeTextEditor;
-        if (editor && editor.document.languageId === 'meta-c') {
+        if (editor && editor.document.languageId === 'brick') {
             const filePath = editor.document.uri.fsPath;
             const fileName = path.basename(filePath, '.mc');
             vscode.debug.startDebugging(undefined, {
                 type: 'cppdbg',
-                name: 'Debug Meta-C Program',
+                name: 'Debug Brick Program',
                 request: 'launch',
                 program: `${vscode.workspace.workspaceFolders?.[0]?.uri.fsPath}/build/${fileName}`,
                 args: [],
@@ -161,9 +161,9 @@ function activate(context) {
                 MIMode: 'gdb',
                 setupCommands: [
                     { description: 'Enable pretty-printing', text: '-enable-pretty-printing', ignoreFailures: true },
-                    { description: 'Load Meta-C printers', text: 'source ${workspaceFolder}/debugger/.gdbinit', ignoreFailures: true },
+                    { description: 'Load Brick printers', text: 'source ${workspaceFolder}/debugger/.gdbinit', ignoreFailures: true },
                 ],
-                preLaunchTask: 'Compile Meta-C (debug)',
+                preLaunchTask: 'Compile Brick (debug)',
             });
         }
         else {
@@ -172,15 +172,15 @@ function activate(context) {
     }));
     // Suggest workspace setup when opening .mc files without config
     context.subscriptions.push(vscode.workspace.onDidOpenTextDocument(doc => {
-        if (doc.languageId === 'meta-c' && vscode.workspace.workspaceFolders) {
+        if (doc.languageId === 'brick' && vscode.workspace.workspaceFolders) {
             const wsPath = vscode.workspace.workspaceFolders[0].uri.fsPath;
             const vscodeDir = path.join(wsPath, '.vscode');
             const launchPath = path.join(vscodeDir, 'launch.json');
             if (!fs.existsSync(launchPath)) {
                 setTimeout(() => {
-                    vscode.window.showInformationMessage('Meta-C workspace not configured. Add build & debug configs?', 'Set up workspace').then(selection => {
+                    vscode.window.showInformationMessage('Brick workspace not configured. Add build & debug configs?', 'Set up workspace').then(selection => {
                         if (selection === 'Set up workspace') {
-                            vscode.commands.executeCommand('meta-c.initWorkspace');
+                            vscode.commands.executeCommand('brick.initWorkspace');
                         }
                     });
                 }, 1000);
@@ -208,7 +208,7 @@ function initWorkspace() {
         fs.writeFileSync(tasksPath, JSON.stringify(TASKS_TEMPLATE, null, 4));
     }
     // Reload window to pick up the new files
-    vscode.window.showInformationMessage('Meta-C workspace created! Reload window to activate.', 'Reload Now').then(selection => {
+    vscode.window.showInformationMessage('Brick workspace created! Reload window to activate.', 'Reload Now').then(selection => {
         if (selection === 'Reload Now') {
             vscode.commands.executeCommand('workbench.action.reloadWindow');
         }
@@ -225,12 +225,12 @@ function startLanguageClient(context) {
         },
     };
     const clientOptions = {
-        documentSelector: [{ scheme: 'file', language: 'meta-c' }],
+        documentSelector: [{ scheme: 'file', language: 'brick' }],
         synchronize: {
             fileEvents: vscode.workspace.createFileSystemWatcher('**/*.mc'),
         },
     };
-    client = new node_1.LanguageClient('meta-c-language-server', 'Meta-C Language Server', serverOptions, clientOptions);
+    client = new node_1.LanguageClient('brick-language-server', 'Brick Language Server', serverOptions, clientOptions);
     client.start();
 }
 function deactivate() {

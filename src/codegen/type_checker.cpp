@@ -113,6 +113,11 @@ SymbolInfo* TypeChecker::lookup(const std::string& name) {
 }
 
 bool TypeChecker::is_type_known(const std::string& type_name) {
+    // Pointer type: *T is known if T is known
+    if (!type_name.empty() && type_name[0] == '*') {
+        return is_type_known(type_name.substr(1));
+    }
+
     static const std::unordered_set<std::string> builtins = {
         "int", "float", "bool", "char", "String", "void", "block", "null",
         "u8", "u16", "u32", "u64",
@@ -147,6 +152,12 @@ bool TypeChecker::is_interface_type(const std::string& type_name) {
 bool TypeChecker::can_assign(const std::string& from, const std::string& to) {
     if (from == to) return true;
     if (from == "null" || to == "null") return true;
+
+    // Pointer type compatibility: *T = *T, null = *T, *void = *T, String = *u8
+    bool from_ptr = !from.empty() && from[0] == '*';
+    bool to_ptr = !to.empty() && to[0] == '*';
+    if (from_ptr && to_ptr) return from == to || from == "*void" || to == "*void";
+    if (from == "String" && to == "*u8") return true;
 
     std::string f = normalize_type(from);
     std::string t = normalize_type(to);
@@ -274,9 +285,14 @@ std::vector<std::string> TypeChecker::check(
                 case ASTNodeType::INTERFACE_DECL:
                     check_interface(static_cast<InterfaceDecl*>(decl.get()));
                     break;
-                case ASTNodeType::FUNC_DECL:
-                    check_function(static_cast<FuncDecl*>(decl.get()), "");
+                case ASTNodeType::FUNC_DECL: {
+                    auto* fd = static_cast<FuncDecl*>(decl.get());
+                    if (fd->is_extern) {
+                        extern_func_defs[fd->name] = fd;
+                    }
+                    check_function(fd, "");
                     break;
+                }
                 case ASTNodeType::USING_DECL: {
                     auto* ud = static_cast<UsingDecl*>(decl.get());
                     if (ud->package_parts.size() == 1 && ud->package_parts[0] == "IO") {
@@ -766,6 +782,17 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                 if (ident->name == "error") {
                     expr->resolved_type = "void";
                     return "void";
+                }
+
+                // Extern function call
+                // Chamada de funcao externa
+                {
+                    auto ext = extern_func_defs.find(ident->name);
+                    if (ext != extern_func_defs.end()) {
+                        std::string ret = ext->second->return_type;
+                        expr->resolved_type = ret.empty() ? "void" : ret;
+                        return expr->resolved_type;
+                    }
                 }
 
                 // Regular function call

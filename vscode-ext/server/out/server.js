@@ -26,6 +26,7 @@ const keywordSet = new Set([
     'block', 'reset',
     'if', 'else', 'while', 'for', 'error',
     'null', 'true', 'false',
+    'include', 'link', 'extern', 'and',
 ]);
 const keywordCompletions = [
     { label: 'package', kind: node_1.CompletionItemKind.Keyword, detail: 'package declaration', insertText: 'package ', insertTextFormat: 1 },
@@ -66,6 +67,10 @@ const keywordCompletions = [
     { label: 'null', kind: node_1.CompletionItemKind.Constant, detail: 'null literal' },
     { label: 'true', kind: node_1.CompletionItemKind.Constant, detail: 'boolean true' },
     { label: 'false', kind: node_1.CompletionItemKind.Constant, detail: 'boolean false' },
+    { label: 'include', kind: node_1.CompletionItemKind.Keyword, detail: 'include C header', insertText: 'include "${1:header.h}"', insertTextFormat: 2 },
+    { label: 'link', kind: node_1.CompletionItemKind.Keyword, detail: 'link C library', insertText: 'link ${1:libname}', insertTextFormat: 2 },
+    { label: 'extern', kind: node_1.CompletionItemKind.Keyword, detail: 'declare external C function', insertText: 'extern fn ${1:name}(${2:params}) -> ${3:ret}', insertTextFormat: 2 },
+    { label: 'and', kind: node_1.CompletionItemKind.Keyword, detail: 'connects include and link' },
 ];
 const snippetCompletions = [
     { label: 'struct', kind: node_1.CompletionItemKind.Snippet, detail: 'struct declaration', insertText: 'struct $1 {\n\t$0\n}', insertTextFormat: 2 },
@@ -83,8 +88,8 @@ const snippetCompletions = [
 function getFilePath(uri) {
     return uri.replace(/^file:\/\//, '');
 }
-function isMetaCFile(uri) {
-    return uri.endsWith('.mc') || uri.includes('file:');
+function isBrickFile(uri) {
+    return uri.endsWith('.brc') || uri.includes('file:');
 }
 function runFastScanner(doc) {
     const cached = scanCache.get(doc.uri);
@@ -122,7 +127,7 @@ function computeDiagnostics(doc) {
             severity: node_1.DiagnosticSeverity.Error,
             range: node_1.Range.create(Math.max(0, err.line - 1), Math.max(0, err.col - 1), Math.max(0, err.line - 1), err.col),
             message: err.message,
-            source: 'meta-c',
+            source: 'brick',
         });
     }
     // Merge compiler errors (more accurate but slower)
@@ -136,7 +141,7 @@ function computeDiagnostics(doc) {
                 severity,
                 range: node_1.Range.create(Math.max(0, err.line - 1), Math.max(0, err.col - 1), Math.max(0, err.line - 1), err.col),
                 message: err.message,
-                source: 'meta-c',
+                source: 'brick',
             });
         }
     }
@@ -296,6 +301,18 @@ connection.onCompletion((params) => {
         }
         if (kw === 'package') {
             items.push({ label: 'PACKAGE_NAME', kind: node_1.CompletionItemKind.Module, detail: 'package name in UPPER case' });
+            return items;
+        }
+        if (kw === 'extern') {
+            items.push({ label: 'fn', kind: node_1.CompletionItemKind.Keyword, detail: 'extern fn declaration', insertText: 'fn ${1:name}(${2:params}) -> ${3:ret}', insertTextFormat: 2 });
+            return items;
+        }
+        if (kw === 'include') {
+            items.push({ label: '"header.h"', kind: node_1.CompletionItemKind.Text, detail: 'header file path', insertText: '"${1:header.h}"', insertTextFormat: 2 });
+            return items;
+        }
+        if (kw === 'link') {
+            items.push({ label: 'libname', kind: node_1.CompletionItemKind.Text, detail: 'library name (e.g. m, SDL2, pthread)', insertText: '${1:libname}', insertTextFormat: 2 });
             return items;
         }
     }
@@ -663,6 +680,10 @@ connection.languages.semanticTokens.on((params) => {
             case 'BLOCK':
             case 'RESET':
             case 'ERROR':
+            case 'INCLUDE':
+            case 'LINK':
+            case 'EXTERN':
+            case 'AND':
                 pushToken(line, col, len, 0);
                 break;
             case 'TRUE':

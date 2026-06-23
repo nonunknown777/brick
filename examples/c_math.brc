@@ -1,0 +1,28 @@
+include "math.h" and link m
+
+extern fn sqrt(f64 x) -> f64
+extern fn sin(f64 x) -> f64
+extern fn cos(f64 x) -> f64
+extern fn pow(f64 base, f64 exp) -> f64
+extern fn ceil(f64 x) -> f64
+extern fn floor(f64 x) -> f64
+
+extern fn atoi(*u8 str) -> i32
+extern fn atof(*u8 str) -> f64
+extern fn puts(*u8 s) -> i32
+
+using IO
+
+fn main() {
+    print("=== C Interop ===")
+    print("sqrt(2.0) = {0}", sqrt(2.0))
+    print("pow(2, 10) = {0}", pow(2.0, 10.0))
+    print("ceil(3.14) = {0}", ceil(3.14))
+
+    String num = "42"
+    i32 val = atoi(num)
+    print("atoi('42') = {0}", val)
+
+    String msg = "C interop works!"
+    puts(msg)
+}

@@ -12,6 +12,7 @@ namespace brick {
 struct CodegenResult {
     std::string c_code;
     std::vector<std::string> errors;
+    std::vector<std::string> link_flags;
     bool success = false;
 };
 

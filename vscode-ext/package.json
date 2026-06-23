@@ -4,6 +4,11 @@
     "displayName": "Brick Language",
     "description": "Brick language support: syntax highlighting, snippets, LSP, and debugger",
     "version": "0.2.0",
+    "license": "MIT",
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/nonunknown777/brick.git"
+    },
     "engines": {
         "vscode": "^1.80.0"
     },

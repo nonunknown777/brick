@@ -18,6 +18,7 @@ const KEYWORDS = new Set([
     'f32', 'f64',
     'usize', 'isize', 'byte',
     'null', 'true', 'false',
+    'include', 'link', 'extern', 'and',
 ]);
 const KEYWORD_DOCS = {
     package: 'Declares a package namespace. Example: `package SPRITES`',
@@ -58,6 +59,10 @@ const KEYWORD_DOCS = {
     null: 'Null pointer literal, assignable to any type.',
     true: 'Boolean true literal.',
     false: 'Boolean false literal.',
+    include: 'Include a C header. Example: `include "math.h"`',
+    link: 'Link a C library. Example: `link m` or `link SDL2`',
+    extern: 'Declare an external C function. Example: `extern fn sqrt(f64 x) -> f64`',
+    and: 'Connects include and link: `include "math.h" and link m`',
 };
 const FIXED_WIDTH_TYPES = new Set(['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte']);
 const BUILTIN_TYPES = new Set(['int', 'float', 'bool', 'char', 'String', 'void', ...FIXED_WIDTH_TYPES]);
@@ -379,6 +384,20 @@ function scanDocument(text) {
             i = j;
             continue;
         }
+        // Include: include "header.h"
+        if (t.type === 'INCLUDE' && i + 1 < tok.length && tok[i + 1].type === 'STRING_LITERAL') {
+            i += 2;
+            // Check for optional "and link libname"
+            if (i < tok.length && tok[i].type === 'AND' && i + 1 < tok.length && tok[i + 1].type === 'LINK' && i + 2 < tok.length && tok[i + 2].type === 'IDENTIFIER') {
+                i += 3;
+            }
+            continue;
+        }
+        // Link: link libname
+        if (t.type === 'LINK' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
+            i += 2;
+            continue;
+        }
         // Block declaration: block NAME = NUM UNIT
         if (t.type === 'BLOCK' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
             const blockName = tok[i + 1].lexeme;
@@ -578,6 +597,51 @@ function scanDocument(text) {
                                     k++;
                             }
                         }
+                        // Check for pointer type: * TYPE NAME  (e.g. *u8 data, *Player ref)
+                        else if (tok[k].type === 'STAR' && k + 2 < tok.length && (typeTokenTypes.has(tok[k + 1].type) || BUILTIN_TYPES.has(tok[k + 1].lexeme.toLowerCase())) && tok[k + 2].type === 'IDENTIFIER' && tok[k + 2].lexeme !== '(') {
+                            const ptrType = '*' + tok[k + 1].lexeme;
+                            const fieldName = tok[k + 2].lexeme;
+                            const fieldLine = tok[k + 2].line;
+                            symbols.push({ name: fieldName, kind: 'field', type_name: ptrType, line: fieldLine, col: tok[k + 2].col, parent: structName });
+                            structObj.fields.push({ name: fieldName, type: ptrType, line: fieldLine });
+                            k += 3;
+                            if (k < tok.length && tok[k].type === 'AT') {
+                                k++;
+                                if (k < tok.length && tok[k].type === 'IDENTIFIER')
+                                    k++;
+                            }
+                            if (k < tok.length && tok[k].type === 'ASSIGN') {
+                                k++;
+                                while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN')
+                                    k++;
+                            }
+                        }
+                        // Check for pointer array: * TYPE [ NUMBER ] NAME (e.g. *Player[10] team)
+                        else if (tok[k].type === 'STAR' && k + 4 < tok.length &&
+                            (typeTokenTypes.has(tok[k + 1].type) || BUILTIN_TYPES.has(tok[k + 1].lexeme.toLowerCase())) &&
+                            tok[k + 2].type === 'LBRACKET' &&
+                            (tok[k + 3].type === 'INT_LITERAL' || tok[k + 3].type === 'IDENTIFIER') &&
+                            tok[k + 4].type === 'RBRACKET' &&
+                            k + 5 < tok.length &&
+                            tok[k + 5].type === 'IDENTIFIER' &&
+                            tok[k + 5].lexeme !== '(') {
+                            const ptrType = '*' + tok[k + 1].lexeme;
+                            const fieldName = tok[k + 5].lexeme;
+                            const fieldLine = tok[k + 5].line;
+                            symbols.push({ name: fieldName, kind: 'field', type_name: `${ptrType}[]`, line: fieldLine, col: tok[k + 5].col, parent: structName });
+                            structObj.fields.push({ name: fieldName, type: `${ptrType}[]`, line: fieldLine });
+                            k += 6;
+                            if (k < tok.length && tok[k].type === 'AT') {
+                                k++;
+                                if (k < tok.length && tok[k].type === 'IDENTIFIER')
+                                    k++;
+                            }
+                            if (k < tok.length && tok[k].type === 'ASSIGN') {
+                                k++;
+                                while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN')
+                                    k++;
+                            }
+                        }
                         else {
                             k++;
                         }
@@ -595,6 +659,79 @@ function scanDocument(text) {
             i += 2;
             while (i < tok.length && tok[i].type !== 'LBRACE')
                 i++;
+            if (i < tok.length && tok[i].type === 'LBRACE') {
+                let braceCount = 1;
+                i++;
+                while (i < tok.length && braceCount > 0) {
+                    if (tok[i].type === 'LBRACE')
+                        braceCount++;
+                    if (tok[i].type === 'RBRACE')
+                        braceCount--;
+                    if (braceCount > 0)
+                        i++;
+                }
+                i++;
+            }
+            continue;
+        }
+        // Extern function: extern fn NAME ( params ) -> Type  (no body expected for C interop)
+        // Also handle: extern fn NAME ( params ) -> Type { ... } (with body for wrapping)
+        if (t.type === 'EXTERN' && i + 1 < tok.length && tok[i + 1].type === 'FN' && i + 2 < tok.length && tok[i + 2].type === 'IDENTIFIER') {
+            const fnName = tok[i + 2].lexeme;
+            const fnLine = t.line;
+            let j = i + 3;
+            // Parameters
+            const params = [];
+            if (j < tok.length && tok[j].type === 'LPAREN') {
+                j++;
+                let paramDepth = 1;
+                while (j < tok.length && paramDepth > 0) {
+                    if (tok[j].type === 'LPAREN')
+                        paramDepth++;
+                    if (tok[j].type === 'RPAREN')
+                        paramDepth--;
+                    if (paramDepth > 0 && tok[j].type === 'IDENTIFIER' && j > 0 && tok[j - 1].type !== 'DOT') {
+                        if (j >= 2 && (tok[j - 1].type === 'IDENTIFIER' || BUILTIN_TYPES.has(tok[j - 1].lexeme.toLowerCase()) || tok[j - 1].lexeme === '*')) {
+                            params.push(tok[j].lexeme);
+                        }
+                    }
+                    j++;
+                }
+            }
+            let returnType = 'void';
+            if (j < tok.length && tok[j].type === 'ARROW' && j + 1 < tok.length) {
+                j++;
+                if (tok[j].type === 'IDENTIFIER' || BUILTIN_TYPES.has(tok[j].lexeme.toLowerCase()) || tok[j].lexeme === '*') {
+                    // Handle *T return type
+                    if (tok[j].lexeme === '*' && j + 1 < tok.length) {
+                        returnType = '*' + tok[j + 1].lexeme;
+                        j += 2;
+                    }
+                    else {
+                        returnType = tok[j].lexeme;
+                        j++;
+                    }
+                }
+            }
+            symbols.push({
+                name: fnName,
+                kind: 'function',
+                type_name: returnType,
+                line: fnLine,
+                col: t.col,
+            });
+            for (const p of params) {
+                symbols.push({
+                    name: p,
+                    kind: 'param',
+                    type_name: '',
+                    line: fnLine,
+                    col: 0,
+                    parent: fnName,
+                });
+            }
+            // Skip optional body
+            i = j;
             if (i < tok.length && tok[i].type === 'LBRACE') {
                 let braceCount = 1;
                 i++;
@@ -759,6 +896,43 @@ function scanDocument(text) {
             }
             continue;
         }
+        // Pattern 5: * TYPE NAME  (pointer type, e.g. *u8 ptr, *void data, *Player ref)
+        if (t.type === 'STAR' && idx + 2 < tokens.length &&
+            (isTypeKeyword(tokens[idx + 1]) || isUserType(tokens[idx + 1])) &&
+            isVarNameToken(tokens[idx + 2])) {
+            const ptrType = tokens[idx + 1].lexeme;
+            const varName = tokens[idx + 2].lexeme;
+            if (!symbols.find(s => s.name === varName && (s.kind === 'field' || s.kind === 'param' || s.kind === 'variable'))) {
+                symbols.push({
+                    name: varName,
+                    kind: 'variable',
+                    type_name: `*${ptrType}`,
+                    line: t.line,
+                    col: t.col,
+                });
+            }
+            continue;
+        }
+        // Pattern 6: * TYPE [ NUMBER ] NAME  (pointer array, e.g. *Player[10] team)
+        if (t.type === 'STAR' && idx + 5 < tokens.length &&
+            (isTypeKeyword(tokens[idx + 1]) || isUserType(tokens[idx + 1])) &&
+            tokens[idx + 2].type === 'LBRACKET' &&
+            (tokens[idx + 3].type === 'INT_LITERAL' || tokens[idx + 3].type === 'IDENTIFIER') &&
+            tokens[idx + 4].type === 'RBRACKET' &&
+            isVarNameToken(tokens[idx + 5])) {
+            const ptrType = tokens[idx + 1].lexeme;
+            const varName = tokens[idx + 5].lexeme;
+            if (!symbols.find(s => s.name === varName && (s.kind === 'field' || s.kind === 'param' || s.kind === 'variable'))) {
+                symbols.push({
+                    name: varName,
+                    kind: 'variable',
+                    type_name: `*${ptrType}[]`,
+                    line: t.line,
+                    col: t.col,
+                });
+            }
+            continue;
+        }
     }
     return { tokens, symbols, blocks, structs, errors, packageName, usings };
 }
@@ -793,7 +967,7 @@ function getCompletionContext(text, line, col, triggerChar) {
     const atMatch = prefix.match(/@([a-zA-Z0-9_]*)$/);
     const colonMatch = prefix.match(/:([a-zA-Z0-9_]*)$/);
     // Check if we're after a keyword
-    const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for)\s+([a-zA-Z0-9_]*)$/);
+    const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for|extern|include|link)\s+([a-zA-Z0-9_]*)$/);
     // Check if we're after a type
     const typeMatch = prefix.match(/\b(u(?:8|16|32|64)|i(?:8|16|32|64)|f(?:32|64)|usize|isize|byte|int|float|bool|char|String|void)\s+([a-zA-Z0-9_]*)$/);
     return {

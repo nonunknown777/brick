@@ -4,14 +4,14 @@
 Sessão: 3
 Session: 3
 
-Progresso: 98%
-Progress: 98%
+Progresso: 99.5%
+Progress: 99.5%
 
-Próximo passo: Debug webview memory view com dados reais do GDB; parser principal precisa atualizar para if sem parênteses e @; publicar extensão no Marketplace VS Code
-Next step: Debug webview memory view with real GDB data; main parser needs to update for if without parentheses and @; publish extension on VS Code Marketplace
+Próximo passo: Publicar extensão no Marketplace VS Code; parser principal (task 02) precisa atualizar para if sem parênteses e @
+Next step: Publish extension on VS Code Marketplace; main parser (task 02) needs to update for if without parentheses and @
 
-Última ação: Revisão completa da extensão — correção de bugs críticos (semantic tokens true/false/null com índice 20 inválido → corrigido para 14, semanticTokenScopes mapeados para scopes reais da grammar); token types renomeados (INT→INT_LITERAL, FLOAT→FLOAT_LITERAL, STRING→STRING_LITERAL, CHAR→CHAR_LITERAL) para evitar conflito com type keywords; operadores faltantes adicionados (<<, >>, *=, /=, &, |, ^, ~, BIT_AND, BIT_OR, BIT_XOR, BIT_NOT, STAR, SLASH); detecção de string/char não terminados com erros; sintaxe block: adicionada; detecção de variáveis melhorada (tipos keyword, PascalCase user types, arrays TYPE[N], sem conflito com fields/params); suporte a tipos de array TYPE[N] NAME na detecção de variáveis
-Last action: Full extension review — critical bug fixes (semantic tokens true/false/null at invalid index 20 → fixed to 14, semanticTokenScopes mapped to actual grammar scopes); token types renamed (INT→INT_LITERAL, FLOAT→FLOAT_LITERAL, STRING→STRING_LITERAL, CHAR→CHAR_LITERAL) to avoid conflating with type keywords; missing operators added (<<, >>, *=, /=, &, |, ^, ~, BIT_AND, BIT_OR, BIT_XOR, BIT_NOT, STAR, SLASH); unterminated string/char error detection; block: syntax added; improved variable detection (keyword types, PascalCase user types, arrays TYPE[N], no field/param conflicts); array type support TYPE[N] NAME in variable detection
+Última ação: Implementação completa de suporte a C interop — syntax grammar com keywords include/link/extern/and + *T pointer type; scanner LSP com tokenização e detecção de símbolos para extern fn, include+link, ponteiros *T em struct fields e variáveis; LSP server com completions context-aware para extern/include/link; snippets para extern fn, include, link, include+link combinado; 6 novas suites de teste (169 testes, 0 falhas); fix .mc→.brc no settings.json; adicionado license MIT + repository URL no package.json
+Last action: Full C interop support — syntax grammar with include/link/extern/and keywords + *T pointer type; LSP scanner with tokenization and symbol detection for extern fn, include+link, *T pointers in struct fields and variables; LSP server with context-aware completions for extern/include/link; snippets for extern fn, include, link, combined include+link; 6 new test suites (169 tests, 0 failures); fixed .mc→.brc in settings.json; added MIT license + repository URL in package.json
 
-Pendências: Debug webview precisa de dados reais do GDB (vs demo data); parser principal precisa atualizar para if sem parênteses e @; publicar extensão no Marketplace VS Code; adicionar testes para LSP server
-Pending: Debug webview needs real GDB data (vs demo data); main parser needs to update for if without parentheses and @; publish extension on VS Code Marketplace; add tests for LSP server
+Pendências: Publicar extensão no Marketplace VS Code; parser principal (task 02) precisa atualizar para if sem parênteses e @; debug webview memory view com dados reais do GDB (já implementado, precisa validação em campo)
+Pending: Publish extension on VS Code Marketplace; main parser (task 02) needs to update for if without parentheses and @; debug webview memory view with real GDB data (already implemented, needs field validation)

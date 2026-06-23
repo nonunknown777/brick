@@ -19,3 +19,6 @@
 - [x] Comando GDB `blocks-list` para consumo via DAP
 - [x] GDB command `blocks-list` for consumption via DAP
 - [x] GDB 17 compat: `global_block` property, `-t` flag, event-based stop handler
+- [x] C Interop support: `#line` coverage, pretty-printer compatibility, GDB command compatibility
+- [x] C Interop support: `#line` coverage, pretty-printer compatibility, GDB command compatibility
+- [x] Config migration: `.mc` → `.brc`, portable `.gdbinit` path
