@@ -6,7 +6,7 @@ RELEASE_DIR="$SCRIPT_DIR/build/release"
 BUILD_DIR="$SCRIPT_DIR/build"
 
 echo "╔═══════════════════════════════════════════════╗"
-echo "║     Brick Release Builder v0.1              ║"
+echo "║     Brick Release Builder v0.3              ║"
 echo "╚═══════════════════════════════════════════════╝"
 
 # ─── 1. Build release profile ──────────────────────────────────────────────

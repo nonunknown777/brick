@@ -7,7 +7,7 @@ import { MemoryViewProvider } from './memoryWebview';
 let client: LanguageClient;
 
 const LAUNCH_TEMPLATE = {
-    version: '0.2.0',
+    version: '0.3.0',
     configurations: [
         {
             name: 'Debug Compiler (current file)',
