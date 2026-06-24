@@ -57,6 +57,20 @@ Task sênior. Responsável por testar, otimizar, documentar e coordenar.
     - ✅ `is_macro_callee()`: agora aceita `ExprStmt` além de `CallExpr`
     - ✅ `expand_in_prog()`: desempacota `ExprStmt` antes de chamar `expand_call`
 
+## 14. Bugs corrigidos nesta sessão
+- ✅ `brc-run.sh`: faltava linkar `runtime/io.c` e `runtime/pool_allocator.c` — `pool_create`, `pool_alloc`, `io_print_string` etc. davam undefined reference
+- ✅ Bug 1: `$` em nomes de função dentro de `emit {}` — `func_decl()` agora aceita `DOLLAR` + `IDENTIFIER` como nome de função (via `FuncDecl::name_expr`)
+- ✅ Bug 2: Build variables (`msg = "text"` dentro de `build {}`) agora interpolam automaticamente em `emit {}` (via `subst_build_expr` + `subst_build_stmt` em `build_eval.cpp`)
+
+## 15. Sessão atual: Type checker hardening + testes de erro
+- ✅ Fix: `can_assign()` agora é chamada para variáveis declaradas com tipo (`int x = expr`) em `type_checker.cpp:571` — antes o tipo computado era descartado sem verificação
+- ✅ Literais sem sufixo (`42`, `3.14`) são isentos da verificação (o tipo é inferido do contexto)
+- ✅ 12 novos testes de erro de tipo em `test_codegen.cpp` (signed/unsigned, float→int, f64→f32, narrowing, bool condition, void return, missing return, constructor arg, undefined symbol, member access, C interop)
+- ✅ Testes `signed_unsigned_mix` e `narrowing_int` corrigidos para corresponder ao comportamento real do type checker (bool→int widening é permitido, bool = u8)
+- ✅ Macro error tests (5 `.brc` files + `test_macro_errors.sh`) integrados no `scons test`
+- ✅ C interop test (`test_c_interop.brc`) adicionado à suite de integração
+- ✅ All tests pass: 0 FAIL em unitários + integração + macro errors
+
 ## Observações
 - Projeto está maduro e funcional
 - Compilador, runtime e todos os exemplos funcionam

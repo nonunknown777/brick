@@ -174,6 +174,7 @@ private:
                 // Clone the content
                 auto cloned = clone_ast(es->content.get());
                 if (cloned) {
+                    subst_build_stmt(cloned.get());
                     if (cloned->type == ASTNodeType::BLOCK_STMT) {
                         auto* bs = static_cast<BlockStmt*>(cloned.get());
                         for (auto& s : bs->statements) {
@@ -204,6 +205,145 @@ private:
             return result;
         }
         return exec_stmt(node);
+    }
+
+    // Recursive substitution: walks expr unique_ptrs and replaces IdentExpr with build-scope literals
+    std::unique_ptr<ASTNode> subst_build_expr(std::unique_ptr<ASTNode> node) {
+        if (!node) return nullptr;
+        if (node->type == ASTNodeType::IDENT_EXPR) {
+            auto* ie = static_cast<IdentExpr*>(node.get());
+            auto* val = build_lookup(scope, ie->name);
+            if (val) {
+                switch (val->type) {
+                    case CValType::INT:
+                        return std::make_unique<IntLiteral>(val->int_val, ie->location);
+                    case CValType::FLOAT:
+                        return std::make_unique<FloatLiteral>(val->float_val, ie->location);
+                    case CValType::STRING:
+                        return std::make_unique<StringLiteral>(val->str_val, ie->location);
+                    case CValType::BOOL:
+                        return std::make_unique<BoolLiteral>(val->int_val != 0, ie->location);
+                    default: break;
+                }
+            }
+            return node;
+        }
+        switch (node->type) {
+            case ASTNodeType::BINARY_OP: {
+                auto* bo = static_cast<BinaryOp*>(node.get());
+                auto c = std::make_unique<BinaryOp>(
+                    subst_build_expr(std::move(bo->left)), bo->op,
+                    subst_build_expr(std::move(bo->right)), bo->location);
+                return c;
+            }
+            case ASTNodeType::UNARY_OP: {
+                auto* uo = static_cast<UnaryOp*>(node.get());
+                return std::make_unique<UnaryOp>(uo->op,
+                    subst_build_expr(std::move(uo->operand)), uo->location);
+            }
+            case ASTNodeType::ASSIGNMENT: {
+                auto* as = static_cast<Assignment*>(node.get());
+                auto c = std::make_unique<Assignment>(as->op, as->location);
+                c->target = subst_build_expr(std::move(as->target));
+                c->value = subst_build_expr(std::move(as->value));
+                return c;
+            }
+            case ASTNodeType::CALL_EXPR: {
+                auto* ce = static_cast<CallExpr*>(node.get());
+                auto c = std::make_unique<CallExpr>(ce->location);
+                c->callee = subst_build_expr(std::move(ce->callee));
+                for (auto& a : ce->arguments)
+                    c->arguments.push_back(subst_build_expr(std::move(a)));
+                return c;
+            }
+            case ASTNodeType::MEMBER_EXPR: {
+                auto* me = static_cast<MemberExpr*>(node.get());
+                return std::make_unique<MemberExpr>(
+                    subst_build_expr(std::move(me->object)), me->member, me->location);
+            }
+            case ASTNodeType::INDEX_EXPR: {
+                auto* ie = static_cast<IndexExpr*>(node.get());
+                auto c = std::make_unique<IndexExpr>(ie->location);
+                c->array = subst_build_expr(std::move(ie->array));
+                c->index = subst_build_expr(std::move(ie->index));
+                return c;
+            }
+            case ASTNodeType::ALLOC_INLINE: {
+                auto* ai = static_cast<AllocInline*>(node.get());
+                return std::make_unique<AllocInline>(
+                    subst_build_expr(std::move(ai->expr)), ai->block_name, ai->location);
+            }
+            default:
+                return node;
+        }
+    }
+
+    // Walk statement tree and replace IdentExpr with build-scope literals
+    void subst_build_stmt(ASTNode* node) {
+        if (!node) return;
+        if (node->type == ASTNodeType::EXPR_STMT) {
+            auto* es = static_cast<ExprStmt*>(node);
+            es->expr = subst_build_expr(std::move(es->expr));
+            return;
+        }
+        if (node->type == ASTNodeType::IF_STMT) {
+            auto* is = static_cast<IfStmt*>(node);
+            is->condition = subst_build_expr(std::move(is->condition));
+            subst_build_stmt(is->then_branch.get());
+            subst_build_stmt(is->else_branch.get());
+            return;
+        }
+        if (node->type == ASTNodeType::WHILE_STMT) {
+            auto* ws = static_cast<WhileStmt*>(node);
+            ws->condition = subst_build_expr(std::move(ws->condition));
+            subst_build_stmt(ws->body.get());
+            return;
+        }
+        if (node->type == ASTNodeType::FOR_STMT) {
+            auto* fs = static_cast<ForStmt*>(node);
+            subst_build_stmt(fs->init.get());
+            fs->condition = subst_build_expr(std::move(fs->condition));
+            fs->increment = subst_build_expr(std::move(fs->increment));
+            subst_build_stmt(fs->body.get());
+            return;
+        }
+        if (node->type == ASTNodeType::RETURN_STMT) {
+            auto* rs = static_cast<ReturnStmt*>(node);
+            rs->value = subst_build_expr(std::move(rs->value));
+            return;
+        }
+        if (node->type == ASTNodeType::BLOCK_STMT) {
+            auto* bs = static_cast<BlockStmt*>(node);
+            for (auto& s : bs->statements) subst_build_stmt(s.get());
+            return;
+        }
+        if (node->type == ASTNodeType::BLOCK_SCOPE) {
+            auto* bs = static_cast<BlockScope*>(node);
+            for (auto& s : bs->body) subst_build_stmt(s.get());
+            return;
+        }
+        if (node->type == ASTNodeType::EMIT_STMT) {
+            auto* es = static_cast<EmitStmt*>(node);
+            subst_build_stmt(es->content.get());
+            return;
+        }
+        if (node->type == ASTNodeType::ASSIGNMENT) {
+            auto* as = static_cast<Assignment*>(node);
+            as->target = subst_build_expr(std::move(as->target));
+            as->value = subst_build_expr(std::move(as->value));
+            return;
+        }
+        if (node->type == ASTNodeType::FUNC_DECL) {
+            auto* fd = static_cast<FuncDecl*>(node);
+            subst_build_stmt(fd->body.get());
+            return;
+        }
+        if (node->type == ASTNodeType::STRUCT_DECL) {
+            auto* sd = static_cast<StructDecl*>(node);
+            for (auto& f : sd->fields) subst_build_stmt(f.get());
+            for (auto& m : sd->methods) subst_build_stmt(m.get());
+            return;
+        }
     }
 
     CValue exec_expr(ASTNode* expr) {
@@ -361,6 +501,7 @@ private:
                 result.type = CValType::EMITTED;
                 auto cloned = clone_ast(es->content.get());
                 if (cloned) {
+                    subst_build_stmt(cloned.get());
                     if (cloned->type == ASTNodeType::BLOCK_STMT) {
                         auto* bs = static_cast<BlockStmt*>(cloned.get());
                         for (auto& s : bs->statements)

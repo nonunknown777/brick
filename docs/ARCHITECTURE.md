@@ -14,13 +14,15 @@ Your .brc code  →  Compiler  →  C code  →  gcc  →  Final program
 
 ### src/ — The Brain (Compiler in C++20)
 
-The compiler has 3 parts in an assembly line:
+The compiler has 4 parts in an assembly line:
 
 ```
-1. LEXER         2. PARSER           3. CODEGEN
-   ┌─────┐         ┌──────┐           ┌──────┐
-   │ .brc │ → tokens → │ AST │ → C ───→ │ .c  │
-   └─────┘         └──────┘           └──────┘
+1. LEXER         2. PARSER           3. MACRO SYSTEM    4. CODEGEN
+   ┌─────┐         ┌──────┐           ┌──────────┐        ┌──────┐
+   │ .brc │ → tokens → │ AST │ → expand → │ .c  │
+   └─────┘         └──────┘           └──────────┘        └──────┘
+                                            ↓
+                                    collect + build + expand
 ```
 
 **Lexer** (`src/lexer/`):
@@ -32,9 +34,17 @@ The compiler has 3 parts in an assembly line:
 - Takes tokens and builds an AST (Abstract Syntax Tree)
 - Example: `if (x > 0) { }` becomes a branch with condition + body
 - Also resolves `package` and `using` — figures out imports
+- Handles `macro`, `build`, and `emit` declarations
+
+**Macro System** (`src/parser/` — `macro_expander.cpp`, `build_eval.cpp`):
+- Collects all `macro` declarations into a table
+- Evaluates `build {}` blocks at compile time, running their `emit` calls
+- Expands each `macro_call(...)` by cloning the macro body and substituting `$` parameters
+- Generates unique names for `__`-prefixed variables (gensym)
+- Detects infinite recursion (max 64 levels)
 
 **Codegen** (`src/codegen/`):
-- Walks the AST and writes C code
+- Walks the expanded AST (no macros left) and writes C code
 - Each `struct` becomes `typedef struct`
 - Each method becomes `StructName_method()`
 - Type-checking: validates types, issues errors for mismatches
@@ -97,6 +107,7 @@ You write:
 
          ↓ Lexer breaks into tokens
          ↓ Parser builds tree + resolves packages
+         ↓ Macro system collects, builds, and expands macros
          ↓ Codegen writes C with #line directives
          ↓ gcc compiles C + runtime
          ↓

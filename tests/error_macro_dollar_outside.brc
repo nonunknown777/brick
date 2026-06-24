@@ -1,0 +1,5 @@
+package ERROR_DOLLAR_OUTSIDE
+
+fn main() {
+    $x = 42
+}

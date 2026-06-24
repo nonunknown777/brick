@@ -133,6 +133,38 @@
         "body": "link ${1:libname}",
         "description": "Link a C library"
     },
+    "Macro declaration": {
+        "prefix": "macro",
+        "body": [
+            "macro ${1:name}(${2:params}) {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "Declare a compile-time macro"
+    },
+    "Build block": {
+        "prefix": "build",
+        "body": [
+            "build {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "Compile-time computation block"
+    },
+    "Emit code": {
+        "prefix": "emit",
+        "body": [
+            "emit {",
+            "\t${0}",
+            "}"
+        ],
+        "description": "Generate code at compile time"
+    },
+    "Emit macro call": {
+        "prefix": "emitcall",
+        "body": "emit ${1:macro_name}(${2:args})",
+        "description": "Call a macro via emit"
+    },
     "Include and link": {
         "prefix": "incandlink",
         "body": "include \"${1:header.h}\" and link ${2:libname}",

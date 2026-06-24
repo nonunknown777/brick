@@ -1,0 +1,13 @@
+package ERROR_UNDEFINED
+
+using IO
+
+build {
+    emit {
+        fn main() {
+            print("hello")
+        }
+    }
+    // Calling undefined build variable
+    x = undefined_var + 1
+}

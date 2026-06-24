@@ -15,7 +15,7 @@ Brick is a programming language that compiles to C. It gives you OOP syntax (str
 
 ### Is Brick production-ready?
 
-Brick is in active development (v0.3.0). It works for learning, prototyping, and small-to-medium programs. The compiler, runtime, and tools are functional, but expect rough edges and missing features.
+Brick is in active development (v0.5.0). It works for learning, prototyping, and small-to-medium programs. The compiler, runtime, and tools are functional, but expect rough edges and missing features.
 
 ### What platforms are supported?
 

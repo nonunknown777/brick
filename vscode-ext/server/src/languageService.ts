@@ -51,6 +51,7 @@ const KEYWORDS = new Set([
     'usize', 'isize', 'byte',
     'null', 'true', 'false',
     'include', 'link', 'extern', 'and',
+    'macro', 'build', 'emit',
 ]);
 
 const KEYWORD_DOCS: Record<string, string> = {
@@ -96,6 +97,9 @@ const KEYWORD_DOCS: Record<string, string> = {
     link: 'Link a C library. Example: `link m` or `link SDL2`',
     extern: 'Declare an external C function. Example: `extern fn sqrt(f64 x) -> f64`',
     and: 'Connects include and link: `include "math.h" and link m`',
+    macro: 'Declares a compile-time macro template. Usage:\n```brick\nmacro name(param1, param2, valores...) {\n    $param1 = $param2 + 1\n    emit { fn $param1() { } }\n}\n```\n- `$nome` inserts the argument\n- `$(expr)` evaluates expr at compile time\n- `valores...` captures rest args as an indexable list',
+    build: 'Compile-time computation block. Supports arithmetic, for/while/if, assignment, strings.\n```brick\nbuild {\n    x = 42\n    emit { z = x + 10 }  // z = 52 in final code\n}\n```\n- `emit { }` generates code at the build site\n- `emit nome(args)` calls a macro',
+    emit: 'Generates code at compile time:\n- `emit { /* any Brick code */ }` — inline code generation\n- `emit nome_macro(args)` — call a macro',
     PoolAllocator: 'Pool allocator type for fixed-size slot allocation. Created via `pool_create()`.',
     block_set_tls: 'Sets the thread-local storage block context. Used for per-thread memory blocks.',
     block_get_tls: 'Returns the thread-local storage block context.',
@@ -211,6 +215,32 @@ export function scanDocument(text: string): ScanResult {
                 } else {
                     tokens.push({ type: 'IDENTIFIER', lexeme, line: lineIdx + 1, col: start + 1 });
                 }
+                continue;
+            }
+
+            // Dollar sigil for macro args
+            if (ch === '$') {
+                const start = col;
+                col++;
+                if (col < len && line[col] === '(') {
+                    // $(expr) — compile-time expression
+                    col++;
+                    tokens.push({ type: 'DOLLAR_LPAREN', lexeme: '$(', line: lineIdx + 1, col: start + 1 });
+                } else if (col < len && ((line[col] >= 'a' && line[col] <= 'z') || (line[col] >= 'A' && line[col] <= 'Z') || line[col] === '_')) {
+                    // $name — argument insertion
+                    while (col < len && ((line[col] >= 'a' && line[col] <= 'z') || (line[col] >= 'A' && line[col] <= 'Z') || (line[col] >= '0' && line[col] <= '9') || line[col] === '_')) col++;
+                    const lexeme = line.slice(start, col);
+                    tokens.push({ type: 'DOLLAR_IDENTIFIER', lexeme, line: lineIdx + 1, col: start + 1 });
+                } else {
+                    tokens.push({ type: 'DOLLAR', lexeme: '$', line: lineIdx + 1, col: start + 1 });
+                }
+                continue;
+            }
+
+            // Ellipsis for rest parameters
+            if (ch === '.' && col + 2 < len && line[col + 1] === '.' && line[col + 2] === '.') {
+                tokens.push({ type: 'ELLIPSIS', lexeme: '...', line: lineIdx + 1, col: col + 1 });
+                col += 3;
                 continue;
             }
 
@@ -899,7 +929,7 @@ export function getCompletionContext(text: string, line: number, col: number, tr
     const colonMatch = prefix.match(/:([a-zA-Z0-9_]*)$/);
 
     // Check if we're after a keyword
-    const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for|extern|include|link)\s+([a-zA-Z0-9_]*)$/);
+    const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for|extern|include|link|macro|build|emit)\s+([a-zA-Z0-9_]*)$/);
 
     // Check if we're after a type
     const typeMatch = prefix.match(/\b(u(?:8|16|32|64)|i(?:8|16|32|64)|f(?:32|64)|usize|isize|byte|int|float|bool|char|String|void)\s+([a-zA-Z0-9_]*)$/);

@@ -9,11 +9,11 @@ This page describes the Brick project architecture in detail — for contributor
 Brick is a programming language that compiles to C. The pipeline is:
 
 ```
-.brc file  →  [Lexer] → tokens  →  [Parser] → AST  →  [Codegen] → .c file
-                                                                      ↓
-                                                               [gcc -O3]
-                                                                      ↓
-                                                               binary
+.brc file  →  [Lexer] → tokens  →  [Parser] → AST  →  [Macro System] → clean AST  →  [Codegen] → .c file
+                                                           (collect + build + expand)                     ↓
+                                                                                                    [gcc -O3]
+                                                                                                       ↓
+                                                                                                    binary
 ```
 
 The runtime (C library) is linked at the gcc step. The visualizer, debugger, and VS Code extension are auxiliary tools that operate on the running program.
@@ -45,8 +45,10 @@ struct Token {
 ```
 Keywords:    package, using, public, private, struct, extends,
              interface, fn, return, if, else, while, for,
-             block, reset, true, false, null, error
+             block, reset, true, false, null, error,
+             macro, build, emit
 Types:       int, float, bool, char, String, void
+Macro:       $, ... (ELLIPSIS)
 Literals:    int literal, float literal, string literal, char literal
 Operators:   +, -, *, /, =, ==, !=, <, >, <=, >=,
              &&, ||, !, +=, -=, *=, /=,
@@ -87,25 +89,33 @@ ProgramNode
 ├── PackageDecl        → "package SPRITES.EFFECTS"
 ├── UsingDecl          → "using SPRITES"
 ├── BlockDecl          → "block global = 256MB"
+├── MacroDecl          → "macro swap(a, b) { ... }"              ← MACRO
+├── BuildBlock         → "build { x = 42; emit { ... } }"       ← MACRO
 ├── StructDecl         → "struct Player { ... }"
 │   ├── FieldDecl      → "int hp"
 │   └── FuncDecl       → "fn take_damage(int d) { ... }" (methods)
 │       ├── ParamDecl  → "int d"
 │       └── BlockStmt  → { body }
 ├── InterfaceDecl      → "interface Damageable { ... }"
-└── FuncDecl           → "fn main() { ... }" (top-level functions)
-    ├── ParamDecl
-    └── BlockStmt
-        └── Statements:
-            ├── IfStmt, WhileStmt, ForStmt, ReturnStmt
-            ├── ExprStmt (variable declarations, assignments)
-            ├── BlockScope ("block name: { ... }")
-            └── Expressions:
-                ├── IntLiteral, FloatLiteral, StringLiteral
-                ├── BoolLiteral, CharLiteral, NullLiteral
-                ├── IdentExpr, CallExpr, MemberExpr, IndexExpr
-                ├── BinaryOp, UnaryOp, Assignment
-                └── AllocInline, ResetExpr
+├── FuncDecl           → "fn main() { ... }" (top-level functions)
+│   ├── ParamDecl
+│   └── BlockStmt
+├── MacroCall          → "swap(x, y)"                            ← MACRO
+└── EmitStmt           → "emit { fn $name() { } }"               ← MACRO
+    └── BlockStmt → { body with $ interpolation }
+
+Statements:
+├── IfStmt, WhileStmt, ForStmt, ReturnStmt
+├── ExprStmt (variable declarations, assignments)
+├── BlockScope ("block name: { ... }")
+└── Expressions:
+    ├── IntLiteral, FloatLiteral, StringLiteral
+    ├── BoolLiteral, CharLiteral, NullLiteral
+    ├── IdentExpr, CallExpr, MemberExpr, IndexExpr
+    ├── BinaryOp, UnaryOp, Assignment
+    ├── AllocInline, ResetExpr
+    ├── Interpolate                                 ← MACRO ($name)
+    └── ValuePlaceholder                            ← MACRO ($(expr))
 ```
 
 **Package Resolution** (`package.cpp`):
@@ -117,7 +127,46 @@ ProgramNode
 - `merge_package_tables()` combines tables from multiple files
 - `is_accessible()` checks visibility rules
 
-### 3. Type Checker (`src/codegen/type_checker.cpp`)
+**Macro handling** — The parser recognizes `macro`, `build`, and `emit` keywords and builds the corresponding AST nodes. See [Macro System](#35-macro-system-srcparser) below.
+
+### 3.5. Macro System (`src/parser/`)
+
+**Files**: `macro_expander.cpp`, `macro_expander.h`, `build_eval.cpp`, `build_eval.h`
+
+The macro system sits between the parser and codegen. It runs before type checking, so macros operate on raw AST (no type info yet).
+
+**Pipeline step:**
+```
+Parser AST  →  [Collect Macros]  →  [Eval Build]  →  [Expand Macros]  →  clean AST  →  Type Checker + Codegen
+```
+
+**Collect Macros:**
+- Walks the AST for all `MACRO_DECL` nodes
+- Stores them in a `MacroTable` mapping name → `MacroDecl*`
+- Removes `macro` declarations from the AST (they don't generate C code)
+
+**Eval Build (`build_eval.cpp`):**
+- Interprets `BUILD_BLOCK` nodes at compile time
+- Supports arithmetic, strings, arrays, loops, conditionals
+- Executes `EMIT_STMT` calls to produce generated code
+- Runtime I/O is forbidden inside `build` blocks
+- Provides type reflection: `T.name`, `T.size`, `T.fields`
+
+**Expand Macros (`macro_expander.cpp`):**
+- Deep-clones the macro body AST for each call site
+- Substitutes `$param` with the actual argument expressions
+- Renames `__`-prefixed identifiers with unique gensyms (e.g., `__tmp` → `__tmp__1`)
+- Handles varargs (`...`) by wrapping remaining arguments in a list
+- Nested expansion: expands macros inside macro bodies recursively
+- Recursion guard: aborts after 64 levels to catch infinite recursion
+
+**Result:** A clean AST with no macro nodes — just plain Brick code ready for type checking and codegen.
+
+### 4. Type Checker (`src/codegen/type_checker.cpp`)
+
+**Files**: `type_checker.cpp`, `type_checker.h`
+
+Runs **after** macro expansion on the clean AST.
 
 **Files**: `type_checker.cpp`, `type_checker.h`
 
@@ -360,12 +409,21 @@ INPUT: hello.brc
 │     ├─ PackageDecl("HELLO")
 │     ├─ UsingDecl("IO")
 │     ├─ BlockDecl("global", 64, "MB")
+│     ├─ MacroDecl("swap")                    ← MACRO
+│     ├─ BuildBlock { ... }                    ← MACRO
 │     ├─ StructDecl("Greeter")
 │     │   ├─ FieldDecl("String", "message")
 │     │   ├─ FuncDecl("Greeter") constructor
 │     │   └─ FuncDecl("greet")
 │     └─ FuncDecl("main")
-│         └─ BlockStmt [...]
+│         └─ BlockStmt
+│             └─ MacroCall("swap")             ← MACRO
+│
+├─ [Macro System]
+│  → 1. Collect: gathers MacroDecl into a table
+│  → 2. Build:  evaluates BuildBlock, runs emit calls
+│  → 3. Expand: replaces each MacroCall with cloned/substituted AST
+│  → clean AST (no MacroDecl, BuildBlock, MacroCall, or EmitStmt)
 │
 ├─ TypeChecker
 │  → Types resolved, errors collected

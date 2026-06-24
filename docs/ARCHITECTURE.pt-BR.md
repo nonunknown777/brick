@@ -14,13 +14,15 @@ Seu código .brc → Compilador → Código C →  gcc  →  Programa final
 
 ### src/ — O Cérebro (Compilador em C++20)
 
-O compilador tem 3 partes em uma linha de montagem:
+O compilador tem 4 partes em uma linha de montagem:
 
 ```
-1. LEXER         2. PARSER           3. CODEGEN
-   ┌─────┐         ┌──────┐           ┌──────┐
-   │ .brc │ → tokens → │ AST │ → C ───→ │ .c  │
-   └─────┘         └──────┘           └──────┘
+1. LEXER         2. PARSER           3. SISTEMA MACRO   4. CODEGEN
+   ┌─────┐         ┌──────┐           ┌──────────┐        ┌──────┐
+   │ .brc │ → tokens → │ AST │ → expand → │ .c  │
+   └─────┘         └──────┘           └──────────┘        └──────┘
+                                            ↓
+                                    collect + build + expand
 ```
 
 **Lexer** (`src/lexer/`):
@@ -32,9 +34,17 @@ O compilador tem 3 partes em uma linha de montagem:
 - Pega os tokens e monta uma AST (Árvore Sintática Abstrata)
 - Exemplo: `if (x > 0) { }` vira um galho com condição + corpo
 - Também resolve `package` e `using` — descobre as importações
+- Lida com declarações `macro`, `build` e `emit`
+
+**Sistema de Macros** (`src/parser/` — `macro_expander.cpp`, `build_eval.cpp`):
+- Coleta todas as declarações `macro` em uma tabela
+- Avalia blocos `build {}` em tempo de compilação, executando seus `emit`
+- Expande cada `macro_call(...)` clonando o corpo e substituindo parâmetros `$`
+- Gera nomes únicos para variáveis que começam com `__` (gensym)
+- Detecta recursão infinita (máximo de 64 níveis)
 
 **Codegen** (`src/codegen/`):
-- Anda pela AST e escreve código C
+- Anda pela AST expandida (sem macros) e escreve código C
 - Cada `struct` vira `typedef struct`
 - Cada método vira `StructName_method()`
 - Type-checking: valida tipos, dá erro se algo não bater
@@ -96,6 +106,7 @@ Você escreve:
 
          ↓ Lexer quebra em tokens
          ↓ Parser monta árvore + resolve pacotes
+         ↓ Sistema de macros coleta, executa build e expande
          ↓ Codegen escreve C com diretivas #line
          ↓ gcc compila C + runtime
          ↓

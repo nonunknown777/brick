@@ -361,6 +361,12 @@ test_compile_and_expect "test_macro_enum" "$BUILD_DIR/test_macro_enum.brc" \
 "fist=0 gun=1 rifle=2 rocket=3"
 
 echo ""
+echo "Testing C interop..."
+echo "Testando C interop..."
+
+test_compile_and_run "test_c_interop" "$PROJECT_DIR/tests/test_c_interop.brc"
+
+echo ""
 echo -e "${CYAN}========================================${NC}"
 echo -e "Results: ${GREEN}$PASS passed${NC}, ${RED}$FAIL failed${NC}"
 echo -e "${CYAN}========================================${NC}"

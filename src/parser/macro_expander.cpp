@@ -59,6 +59,7 @@ std::unique_ptr<ASTNode> clone_ast(const ASTNode* node) {
             c->is_private = fd->is_private;
             c->is_constructor = fd->is_constructor;
             c->is_extern = fd->is_extern;
+            if (fd->name_expr) c->name_expr = clone_expr(fd->name_expr.get());
             for (auto& p : fd->params) c->params.push_back(clone_decl(p.get()));
             c->body = clone_stmt(fd->body.get());
             return c;
@@ -374,6 +375,34 @@ static std::unique_ptr<ASTNode> subst_stmt(const ASTNode* node, const ArgMap& ar
                 c->body.push_back(subst_stmt(s.get(), args));
             return c;
         }
+        case ASTNodeType::FUNC_DECL: {
+            auto* fd = static_cast<const FuncDecl*>(node);
+            auto c = std::make_unique<FuncDecl>("", fd->location);
+            c->return_type = fd->return_type;
+            c->is_private = fd->is_private;
+            c->is_constructor = fd->is_constructor;
+            c->is_extern = fd->is_extern;
+            for (auto& p : fd->params) c->params.push_back(clone_decl(p.get()));
+            c->body = subst_stmt(fd->body.get(), args);
+            // Resolve interpolated function name
+            if (fd->name_expr) {
+                auto substituted = subst_expr(fd->name_expr.get(), args);
+                switch (substituted->type) {
+                    case ASTNodeType::IDENT_EXPR:
+                        c->name = static_cast<IdentExpr*>(substituted.get())->name;
+                        break;
+                    case ASTNodeType::STRING_LITERAL:
+                        c->name = static_cast<StringLiteral*>(substituted.get())->value;
+                        break;
+                    default:
+                        c->name_expr = std::move(substituted);
+                        break;
+                }
+            } else {
+                c->name = fd->name;
+            }
+            return c;
+        }
         default:
             return clone_ast(node);
     }
@@ -437,6 +466,7 @@ static void apply_gensym(ASTNode* node) {
         for (auto& m : sd->methods) apply_gensym(m.get()); return;
     }
     if (auto* fd = dynamic_cast<FuncDecl*>(node)) {
+        if (fd->name_expr) apply_gensym(fd->name_expr.get());
         apply_gensym(fd->body.get()); return;
     }
     if (auto* bs = dynamic_cast<BlockScope*>(node)) {

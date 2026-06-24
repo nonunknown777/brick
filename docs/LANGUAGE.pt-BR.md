@@ -265,6 +265,81 @@ private int y                          ← visible only within own package
 
 > Apenas comentários de linha (`//`). Comentários de bloco (`/* */`) não são suportados.
 
+## Macros
+
+Macros geram código em tempo de compilação. Você define um padrão uma vez e o compilador replica onde for chamado.
+
+```
+macro troca(a, b) {
+    __tmp = $a
+    $a = $b
+    $b = __tmp
+}
+
+fn main() {
+    x = 10; y = 20
+    troca(x, y)            // expande pro corpo do macro
+    print("{0} {1}", x, y) // → "20 10"
+}
+```
+
+### Declaração
+
+```
+macro nome(param1, param2, ...) { corpo }
+```
+
+- Parâmetros **não tem tipo** — contêm expressões, não valores
+- `$nome` insere o argumento passado para `nome`
+- `$(expr)` avalia `expr` em tempo de compilação e insere o resultado
+- Nomes começando com `__` ganham gensyms únicos (sem colisão)
+
+### `build {}` — Computação em Tempo de Compilação
+
+```
+build {
+    x = 42
+    emit { z = x }        // gera: z = 42
+}
+```
+
+`build` roda em tempo de compilação. Variáveis dentro de `build` não existem no binário final. Use `emit` para gerar código de verdade.
+
+### `emit {}` — Geração de Código
+
+Tudo dentro de `emit` é código literal com interpolação `$`. O conteúdo é cravado na saída onde o macro for chamado.
+
+```
+macro criar_getter(nome, campo) {
+    emit {
+        fn get_$nome() { return $campo }
+    }
+}
+```
+
+### Higiene
+
+Variáveis que começam com `__` dentro de um macro ganham nomes únicos (ex: `__tmp` → `__tmp__1`), evitando colisão com código do usuário.
+
+### Reflexão de Tipo (dentro de `build`)
+
+| Expressão | Retorna | Exemplo |
+|-----------|---------|---------|
+| `T.name` | Nome do tipo como string | `"i32"` |
+| `T.size` | Tamanho em bytes | `4` |
+| `T.fields` | Nomes dos campos | `["x", "y"]` |
+
+### Tratamento de Erros
+
+| Situação | O que acontece |
+|----------|---------------|
+| Argumentos errados | Erro de compilação |
+| `$` fora de macro/build | Erro: "unexpected $" |
+| Macro recursivo | Pego após 64 níveis |
+| I/O dentro de `build` | `build` não pode chamar print() |
+
+Veja [Macros](MACROS.pt-BR.md) para documentação completa com exemplos.
+
 ## Exemplo Completo
 
 ```

@@ -7,9 +7,9 @@
 - ✅ Macros funcionam em nível top-level e dentro de funções
 - ✅ `emit { }` com conteúdo real (não mais vazio)
 - ✅ `$interpolation` em nomes de variáveis dentro de declarações em macros
-- ❌ `$` em nomes de função dentro de `emit {}` não funciona — `func_decl()` só aceita `IDENTIFIER`
-- ❌ Build variables (`msg = "text"` dentro de `build {}`) não interpolam automaticamente em `emit {}`
-- ❌ `docs/MACROS.md` e `docs/MACROS.pt-BR.md` — criar documentação com exemplos de jogo
+- ✅ `$` em nomes de função dentro de `emit {}` — `func_decl()` agora aceita `DOLLAR` + nome interpolado
+- ✅ Build variables (`msg = "text"` dentro de `build {}`) interpolam automaticamente em `emit {}`
+- ✅ MACROS.md e MACROS.pt-BR.md — documentação criada
 
 ### 1. Documentação (parcial)
 - ~~docs/*.md com visão geral para leigos~~ ✅ revisados/corrigidos + OPTIMIZATIONS.md reescrito com deep-dive

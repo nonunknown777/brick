@@ -399,6 +399,53 @@ struct Team {
 });
 
 // ──────────────────────────────────────────
+// Test 20: Macro keywords and $ sigil
+// ──────────────────────────────────────────
+runSuite('Macro keywords and $ sigil', () => {
+    const r = scanDocument(`
+macro gen_getter(name, type) {
+    $name = $type
+    emit { fn $name() -> $type { return $name } }
+}
+
+build {
+    x = 42
+    emit { z = x + 10 }
+}
+`);
+    assert(r.tokens.some(t => t.type === 'MACRO' && t.lexeme === 'macro'), 'macro keyword token found');
+    assert(r.tokens.some(t => t.type === 'BUILD' && t.lexeme === 'build'), 'build keyword token found');
+    assert(r.tokens.some(t => t.type === 'EMIT' && t.lexeme === 'emit'), 'emit keyword token found');
+    const dollarTokens = r.tokens.filter(t => t.type === 'DOLLAR_IDENTIFIER');
+    assert(dollarTokens.length >= 4, `has at least 4 $name tokens, got ${dollarTokens.length}`);
+    assert(dollarTokens.every(t => t.lexeme.startsWith('$')), 'all $ tokens start with $');
+});
+
+// ──────────────────────────────────────────
+// Test 21: Macro rest params (ellipsis)
+// ──────────────────────────────────────────
+runSuite('Macro rest params (ellipsis)', () => {
+    const r = scanDocument('macro foo(valores...) { $valores }');
+    assert(r.tokens.some(t => t.type === 'ELLIPSIS' && t.lexeme === '...'), 'ellipsis token found');
+    assert(r.tokens.some(t => t.type === 'MACRO'), 'macro token found');
+    assert(r.tokens.some(t => t.type === 'DOLLAR_IDENTIFIER' && t.lexeme === '$valores'), 'dollar identifier found');
+});
+
+// ──────────────────────────────────────────
+// Test 22: Dollar sigil edge cases
+// ──────────────────────────────────────────
+runSuite('Dollar sigil edge cases', () => {
+    // $(expr) syntax
+    const r1 = scanDocument('$(42 + 1)');
+    assert(r1.tokens.some(t => t.type === 'DOLLAR_LPAREN' && t.lexeme === '$('), '$( token found');
+    assert(r1.tokens.some(t => t.type === 'INT_LITERAL' && t.lexeme === '42'), 'int inside $( found');
+
+    // Standalone $
+    const r2 = scanDocument('$');
+    assert(r2.tokens.some(t => t.type === 'DOLLAR' && t.lexeme === '$'), 'standalone $ token found');
+});
+
+// ──────────────────────────────────────────
 // Summary
 // ──────────────────────────────────────────
 console.log(`\n═══════════════════════════════════`);

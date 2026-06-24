@@ -41,7 +41,7 @@
 
 ## Compilação
 ```
-.brc → Lexer → Parser + Package Resolver → Codegen → .c (com #line) → gcc -g → binário
+.brc → Lexer → Parser + Package Resolver → Macro System (collect + build + expand) → Codegen → .c (com #line) → gcc -g → binário
 ```
 
 ## Debugging
@@ -62,7 +62,7 @@
 ## Tasks
 ```
 01-lexer      Tokenizer .brc → tokens
-02-parser     AST + Package Resolution
+02-parser     AST + Package Resolution + Macro system
 03-codegen    Type check + geração C (com #line p/ debug)
 04-runtime    Block memory allocator (C)
 05-hotreload  dlopen + inotify

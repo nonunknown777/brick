@@ -265,6 +265,81 @@ private int y                          ← visible only within own package
 
 > Line comments only (`//`). Block comments (`/* */`) are not supported.
 
+## Macros
+
+Macros generate code at compile time. You define a pattern once and the compiler stamps it out everywhere you call it.
+
+```
+macro swap(a, b) {
+    __tmp = $a
+    $a = $b
+    $b = __tmp
+}
+
+fn main() {
+    x = 10; y = 20
+    swap(x, y)            // expands to the swap body
+    print("{0} {1}", x, y) // → "20 10"
+}
+```
+
+### Declaration
+
+```
+macro name(param1, param2, ...) { body }
+```
+
+- Parameters are **untyped** — they hold expressions, not values
+- `$name` inserts the argument passed for `name`
+- `$(expr)` evaluates `expr` at compile time and inserts the result
+- `__`-prefixed names get unique gensyms (no collision with user code)
+
+### `build {}` — Compile-Time Computation
+
+```
+build {
+    x = 42
+    emit { z = x }        // generates: z = 42
+}
+```
+
+`build` runs at compile time. Variables inside `build` do not exist in the final binary. Use `emit` to produce actual code.
+
+### `emit {}` — Code Generation
+
+Everything inside `emit` is literal code with `$` interpolation. It is stamped into the output at the macro call site.
+
+```
+macro make_getter(name, field) {
+    emit {
+        fn get_$name() { return $field }
+    }
+}
+```
+
+### Hygiene
+
+Variables starting with `__` inside a macro get unique names (e.g. `__tmp` → `__tmp__1`), preventing collisions with user code.
+
+### Type Reflection (inside `build`)
+
+| Expression | Returns | Example |
+|-----------|---------|---------|
+| `T.name` | Type name as string | `"i32"` |
+| `T.size` | Size in bytes | `4` |
+| `T.fields` | Field names as strings | `["x", "y"]` |
+
+### Error Handling
+
+| Situation | What happens |
+|-----------|-------------|
+| Wrong argument count | Compile error |
+| `$` outside macro/build | Compile error: "unexpected $" |
+| Recursive macro | Caught after 64 levels |
+| I/O inside `build` | Build blocks can't call print() |
+
+See [Macros](MACROS.md) for full documentation with examples.
+
 ## I/O (Package IO)
 
 ```

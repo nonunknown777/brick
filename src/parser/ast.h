@@ -112,6 +112,7 @@ struct ParamDecl : ASTNode {
 struct FuncDecl : ASTNode {
     std::string return_type;
     std::string name;
+    std::unique_ptr<ASTNode> name_expr;  // interpolated name ($name) for macro bodies
     std::vector<std::unique_ptr<ASTNode>> params;
     std::unique_ptr<ASTNode> body;
     bool is_private = false;

@@ -10,9 +10,9 @@ Brick is a programming language that compiles to C, with a focus on performance,
 
 | Task | Component | Language | Description |
 |:----:|-----------|:--------:|-------------|
-| 01 | Lexer | C++20 | Tokenize `.brc` files |
-| 02 | Parser | C++20 | Build AST + package resolution |
-| 03 | Codegen | C++20 | Type checking + C code generation |
+| 01 | Lexer | C++20 | Tokenize `.brc` files (includes `macro`/`build`/`emit` keywords, `$`, `...`) |
+| 02 | Parser | C++20 | Build AST + package resolution + macro declaration parsing |
+| 03 | Codegen | C++20 | Type checking + C code generation (runs after macro expansion) |
 | 04 | Runtime | C | Block memory allocator |
 | 05 | Hot Reload | C | dlopen + inotify engine |
 | 06 | Visualizer | C++ | ncurses TUI for memory blocks |
@@ -349,6 +349,7 @@ Then create a Pull Request on GitHub with:
 - New keywords: add to `keywords` map in `lexer.cpp` and `TokenType` enum in `types.h`
 - New operators: add tokenizing logic in `next_token()` switch
 - Always track `SourceLocation` (line, col, file)
+- Macro-related tokens: `macro`, `build`, `emit` keywords; `$` (DOLLAR) and `...` (ELLIPSIS) operators
 
 ### Parser (Task 02)
 
@@ -356,6 +357,7 @@ Then create a Pull Request on GitHub with:
 - Recursive descent: one function per grammar rule
 - Error recovery: parse errors should be collected, not thrown
 - Package resolution: new package features go in `package.cpp`
+- Macro system: handles `MACRO_DECL`, `BUILD_BLOCK`, `EMIT_STMT`, `MACRO_CALL`, `INTERPOLATE`, `VALUE_PLACEHOLDER` nodes
 
 ### Codegen (Task 03)
 
@@ -363,6 +365,7 @@ Then create a Pull Request on GitHub with:
 - Type checking: new type rules in `TypeChecker` class
 - Type mapping: update `map_type()` in `codegen.cpp`
 - Generated C must be valid C11 and compile with `gcc -O3 -Wall`
+- Codegen runs **after** macro expansion — macro nodes are already removed from AST
 
 ### Runtime (Task 04)
 

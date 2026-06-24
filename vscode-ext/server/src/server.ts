@@ -64,6 +64,7 @@ const keywordSet = new Set([
     'if', 'else', 'while', 'for', 'error',
     'null', 'true', 'false',
     'include', 'link', 'extern', 'and',
+    'macro', 'build', 'emit',
 ]);
 
 const keywordCompletions: CompletionItem[] = [
@@ -109,6 +110,9 @@ const keywordCompletions: CompletionItem[] = [
     { label: 'link', kind: CompletionItemKind.Keyword, detail: 'link C library', insertText: 'link ${1:libname}', insertTextFormat: 2 },
     { label: 'extern', kind: CompletionItemKind.Keyword, detail: 'declare external C function', insertText: 'extern fn ${1:name}(${2:params}) -> ${3:ret}', insertTextFormat: 2 },
     { label: 'and', kind: CompletionItemKind.Keyword, detail: 'connects include and link' },
+    { label: 'macro', kind: CompletionItemKind.Keyword, detail: 'macro declaration', insertText: 'macro ${1:name}(${2:params}) {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'build', kind: CompletionItemKind.Keyword, detail: 'compile-time computation block', insertText: 'build {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'emit', kind: CompletionItemKind.Keyword, detail: 'code generation', insertText: 'emit {\n\t$0\n}', insertTextFormat: 2 },
 ];
 
 const runtimeFunctionCompletions: CompletionItem[] = [
@@ -137,6 +141,10 @@ const snippetCompletions: CompletionItem[] = [
     { label: 'package', kind: CompletionItemKind.Snippet, detail: 'package declaration', insertText: 'package $1', insertTextFormat: 2 },
     { label: 'using', kind: CompletionItemKind.Snippet, detail: 'using declaration', insertText: 'using $1', insertTextFormat: 2 },
     { label: 'main', kind: CompletionItemKind.Snippet, detail: 'main function', insertText: 'fn main() {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'macro', kind: CompletionItemKind.Snippet, detail: 'macro declaration', insertText: 'macro $1($2) {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'build', kind: CompletionItemKind.Snippet, detail: 'build block', insertText: 'build {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'emit', kind: CompletionItemKind.Snippet, detail: 'emit code', insertText: 'emit {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'emitcall', kind: CompletionItemKind.Snippet, detail: 'emit macro call', insertText: 'emit $1($2)', insertTextFormat: 2 },
 ];
 
 function getFilePath(uri: string): string {
@@ -800,6 +808,9 @@ connection.languages.semanticTokens.on((params: SemanticTokensParams): SemanticT
             case 'LINK':
             case 'EXTERN':
             case 'AND':
+            case 'MACRO':
+            case 'BUILD':
+            case 'EMIT':
                 pushToken(line, col, len, 0);
                 break;
             case 'TRUE':

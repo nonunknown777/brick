@@ -83,7 +83,8 @@ brick --attach <pid>                  # conecta visualizador a processo rodando 
 4. **Reset, não free**: limpa o bloco inteiro, nunca objetos individuais
 5. **Hot reload**: troca o código sem parar o programa
 6. **Tipos de largura fixa**: i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize
-7. **Diretivas #line**: depura no código .brc original, não no C gerado
+7. **Macros em tempo de compilação**: geração de código via `macro`, `build {}`, e `emit {}`
+8. **Diretivas #line**: depura no código .brc original, não no C gerado
 
 ## Estrutura do Projeto
 

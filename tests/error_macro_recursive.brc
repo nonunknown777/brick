@@ -1,0 +1,9 @@
+package ERROR_RECURSIVE
+
+macro recurse() {
+    recurse()
+}
+
+fn main() {
+    recurse()
+}

@@ -1,0 +1,11 @@
+package ERROR_ARGCOUNT
+
+using IO
+
+macro add(a, b) {
+    c = $a + $b
+}
+
+fn main() {
+    add(1)
+}

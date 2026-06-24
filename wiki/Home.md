@@ -15,11 +15,12 @@
 | Page | Description |
 |------|-------------|
 | [Getting Started](Getting-Started) | Install, build, compile, run, debug your first program |
-| [Language Reference](Language-Reference) | Complete syntax, types, blocks, structs, functions, control flow, operators, packages |
+| [Language Reference](Language-Reference) | Complete syntax, types, blocks, structs, functions, macros, control flow, operators, packages |
+| [Macros](../docs/MACROS.md) | Compile-time code generation with `macro`, `build`, and `emit` |
 | [Memory Blocks](Memory-Blocks) | Deep dive into block memory: declaration, allocation, scope, reset, best practices |
 | [Hot Reload](Hot-Reload) | Architecture, usage, and internals of the hot reload system |
 | [Performance](Performance) | Bump allocator benchmarks, compiler optimizations, comparison vs malloc |
-| [Architecture](Architecture) | Compiler pipeline (Lexer → Parser → Codegen), runtime, visualizer, debugger |
+| [Architecture](Architecture) | Compiler pipeline (Lexer → Parser → Macro System → Codegen), runtime, visualizer, debugger |
 | [Contributing](Contributing) | How to contribute: setup, conventions, testing, build system, PR workflow |
 | [VS Code Extension](VS-Code-Extension) | Syntax highlighting, LSP, debugger integration, Memory Webview |
 | [FAQ](FAQ) | Frequently asked questions |

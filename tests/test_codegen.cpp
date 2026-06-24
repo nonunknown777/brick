@@ -38,6 +38,24 @@ static bool parse_and_check(const std::string& source, ParseResult& out,
     return true;
 }
 
+// Negative test: compile source, expect codegen to FAIL (type error)
+static void expect_codegen_error(const std::string& source, const std::string& label) {
+    auto tokens = tokenize(source);
+    auto parse_result = parse(tokens);
+    if (!parse_result.errors.empty()) {
+        check(true, label + " (parse error is fine)");
+        return;
+    }
+    auto packages = resolve_packages(parse_result.ast, "test.brc");
+    std::vector<std::unique_ptr<ProgramNode>> asts;
+    asts.push_back(std::move(parse_result.ast));
+    auto cr = generate_c(asts, packages);
+    check(!cr.success, label + " should fail");
+    if (cr.success) {
+        std::cerr << "  Expected type error but codegen succeeded!\n";
+    }
+}
+
 static bool codegen_from_ast(ParseResult& parse_result,
                              CodegenResult& out, const std::string& label) {
     auto packages = resolve_packages(parse_result.ast, "test.brc");
@@ -481,6 +499,145 @@ void pool_destroy(PoolAllocator* p) { free(p); }
     }
 }
 
+void test_type_error_signed_unsigned_mix() {
+    std::cout << "=== test_type_error_signed_unsigned_mix ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() {
+    i32 x = 10
+    u32 y = 20
+    u32 z = x + y     // i32 + u32 promotes to i32, can't assign to u32
+}
+)", "signed_unsigned_mix");
+}
+
+void test_type_error_float_to_int_narrow() {
+    std::cout << "=== test_type_error_float_to_int_narrow ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() {
+    f32 x = 1.5
+    int y = x
+}
+)", "float_to_int_narrow");
+}
+
+void test_type_error_float_float_narrow() {
+    std::cout << "=== test_type_error_float_float_narrow ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() {
+    f64 x = 1.5
+    f32 y = x
+}
+)", "float_float_narrow");
+}
+
+void test_type_error_narrowing_int() {
+    std::cout << "=== test_type_error_narrowing_int ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() {
+    i32 x = 10
+    i8 y = x        // i32 → i8 narrowing
+}
+)", "narrowing_int");
+}
+
+void test_type_error_if_condition_not_bool() {
+    std::cout << "=== test_type_error_if_condition_not_bool ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() {
+    int x = 1
+    if x { }
+}
+)", "if_condition_bool");
+}
+
+void test_type_error_return_from_void() {
+    std::cout << "=== test_type_error_return_from_void ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() {
+    return 42
+}
+)", "return_from_void");
+}
+
+void test_type_error_missing_return() {
+    std::cout << "=== test_type_error_missing_return ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() -> int {
+    return        // return without value in non-void
+}
+)", "missing_return");
+}
+
+void test_type_error_constructor_arg_mismatch() {
+    std::cout << "=== test_type_error_constructor_arg_mismatch ===\n";
+    expect_codegen_error(R"(
+package TEST
+struct Foo {
+    int val
+    fn Foo(int v) { val = v }
+}
+fn test() {
+    Foo f = Foo("wrong")
+}
+)", "constructor_arg_mismatch");
+}
+
+void test_type_error_undefined_symbol() {
+    std::cout << "=== test_type_error_undefined_symbol ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() {
+    int x = undefined_var
+}
+)", "undefined_symbol");
+}
+
+void test_type_error_member_access_non_struct() {
+    std::cout << "=== test_type_error_member_access_non_struct ===\n";
+    expect_codegen_error(R"(
+package TEST
+fn test() {
+    int x = 5
+    int y = x.something
+}
+)", "member_access_non_struct");
+}
+
+void test_codegen_c_interop() {
+    std::cout << "=== test_codegen_c_interop ===\n";
+    std::string source = R"(
+package TEST
+include "math.h" and link m
+extern fn sqrt(f64 x) -> f64
+fn main() {
+    f64 r = sqrt(2.0)
+}
+)";
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "c_interop")) return;
+    auto packages = resolve_packages(pr.ast, "test.brc");
+    std::vector<std::unique_ptr<ProgramNode>> asts;
+    asts.push_back(std::move(pr.ast));
+    auto cr = generate_c(asts, packages);
+    check(cr.success, "c_interop codegen");
+    if (!cr.success) {
+        for (const auto& e : cr.errors)
+            std::cerr << "  CODEGEN ERROR: " << e << "\n";
+        return;
+    }
+    std::string c = cr.c_code;
+    check(c.find("#include <math.h>") != std::string::npos, "#include math.h");
+    check(c.find("sqrt") != std::string::npos, "sqrt call");
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
 void test_codegen_print() {
     std::cout << "=== test_codegen_print ===\n";
     std::string source = R"(
@@ -765,6 +922,19 @@ int main() {
     test_codegen_block_scope();
     test_codegen_type_errors();
     test_codegen_undefined_symbol();
+
+    // Type checker error tests
+    test_type_error_signed_unsigned_mix();
+    test_type_error_float_to_int_narrow();
+    test_type_error_float_float_narrow();
+    test_type_error_narrowing_int();
+    test_type_error_if_condition_not_bool();
+    test_type_error_return_from_void();
+    test_type_error_missing_return();
+    test_type_error_constructor_arg_mismatch();
+    test_type_error_undefined_symbol();
+    test_type_error_member_access_non_struct();
+
     test_codegen_print();
     test_codegen_print_without_using();
     test_codegen_compile_c();
@@ -772,6 +942,9 @@ int main() {
     test_codegen_literal_suffix();
     test_codegen_literal_overflow();
     test_codegen_type_promotion();
+
+    // C interop
+    test_codegen_c_interop();
 
     // Optimization tests
     test_optimization_inline_hints();

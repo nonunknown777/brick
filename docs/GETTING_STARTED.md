@@ -83,7 +83,8 @@ brick --attach <pid>                  # conecta visualizador a processo rodando 
 4. **Reset, not free**: clears the entire block, never individual objects
 5. **Hot reload**: swap code without stopping the program
 6. **Fixed-width types**: i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize
-7. **#line directives**: debug in the original .brc code, not the generated C
+7. **Compile-time macros**: code generation via `macro`, `build {}`, and `emit {}`
+8. **#line directives**: debug in the original .brc code, not the generated C
 
 ## Project Structure
 

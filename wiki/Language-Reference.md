@@ -495,6 +495,108 @@ Rules:
 - Formatting uses `{0}`, `{1}`, etc. referencing positional arguments
 - Internally generates calls to `runtime/io.c` (printf wrappers)
 
+## Macros
+
+Macros generate code at compile time. You define a pattern once and the compiler stamps it out everywhere you call it.
+
+```brick
+macro swap(a, b) {
+    __tmp = $a
+    $a = $b
+    $b = __tmp
+}
+
+fn main() {
+    x = 10; y = 20
+    swap(x, y)            // expands to the swap body
+    print("{0} {1}", x, y) // → "20 10"
+}
+```
+
+### Declaration
+
+```brick
+macro name(param1, param2, ...) {
+    // body — any Brick code with $ interpolation
+}
+```
+
+- Parameters are **untyped** — they hold expressions, not values
+- `$name` inserts the argument passed for `name`
+- `$(expr)` evaluates `expr` at compile time and inserts the result
+
+### `build {}` — Compile-Time Computation
+
+```brick
+build {
+    x = 42
+    emit { z = x }        // generates: z = 42
+}
+```
+
+`build` runs at **compile time**. Variables created inside `build` don't exist in the final binary — only the `emit` calls produce actual code.
+
+### `emit {}` — Code Generation
+
+Everything inside `emit` is literal code with `$` interpolation. It is stamped into the output at the macro call site.
+
+```brick
+macro vec2_add(name) {
+    emit {
+        fn $name(x1, y1, x2, y2, out_x, out_y) {
+            out_x = x1 + x2
+            out_y = y1 + y2
+        }
+    }
+}
+
+vec2_add(add_positions)
+```
+
+### Varargs (`...`)
+
+```brick
+macro print_all(values...) {
+    $values[0]    // first value
+    $values[1]    // second value
+}
+```
+
+`values...` captures all remaining arguments as a list.
+
+### Hygiene
+
+Variables starting with `__` inside a macro get **unique names** automatically (e.g. `__tmp` → `__tmp__1`), preventing collisions with user code.
+
+```brick
+macro twice(body) {
+    __i = 0
+    while __i < 2 {
+        $body
+        __i = __i + 1
+    }
+}
+```
+
+### Type Reflection (inside `build`)
+
+| Expression | Returns | Example |
+|-----------|---------|---------|
+| `T.name` | Type name as string | `"i32"` |
+| `T.size` | Size in bytes | `4` |
+| `T.fields` | Field names as strings | `["x", "y"]` |
+
+### Error Handling
+
+| Situation | What happens |
+|-----------|-------------|
+| Wrong argument count | Compile error: "macro expects N args, got M" |
+| `$` outside macro/build | Compile error: "unexpected $" |
+| Recursive macro | Caught after 64 levels: "macro recursion too deep" |
+| I/O inside `build` | Build blocks can't call print() or file operations |
+
+See [Macros](../docs/MACROS.md) for complete documentation with examples.
+
 ## Error Handling
 
 ```brick
@@ -514,6 +616,7 @@ extends   interface fn        return    if
 else      while     for       block     reset
 true      false     null      error     int
 float     bool      char      String    void
+macro     build     emit
 ```
 
 ## Complete Example

@@ -1035,8 +1035,27 @@ private:
         SourceLocation loc = peek().location;
         advance();
 
-        std::string name = expect(TokenType::IDENTIFIER, "expected function name").lexeme;
+        // Support $interpolated function names inside macro bodies
+        std::unique_ptr<ASTNode> name_expr;
+        std::string name;
+        if (peek().type == TokenType::DOLLAR) {
+            advance();
+            if (peek().type == TokenType::LPAREN) {
+                advance();
+                auto inner_expr = expression_macro();
+                expect(TokenType::RPAREN, "expected ')' after interpolated expr");
+                name_expr = std::make_unique<Interpolate>(std::move(inner_expr), loc);
+            } else if (peek().type == TokenType::IDENTIFIER) {
+                std::string iname = advance().lexeme;
+                name_expr = std::make_unique<Interpolate>(iname, loc);
+            } else {
+                throw std::runtime_error("expected identifier or expr after '$' in function name");
+            }
+        } else {
+            name = expect(TokenType::IDENTIFIER, "expected function name").lexeme;
+        }
         auto fd = std::make_unique<FuncDecl>(name, loc);
+        if (name_expr) fd->name_expr = std::move(name_expr);
 
         expect(TokenType::LPAREN, "expected '(' after function name");
         if (peek().type != TokenType::RPAREN) {

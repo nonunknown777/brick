@@ -559,14 +559,30 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
                             // Check if unsuffixed literal fits in declared type
                             // Verifica se literal sem sufixo cabe no tipo declarado
                             if (!ident->declared_type.empty()) {
+                                bool is_unsuffixed_literal = false;
                                 if (assign->value->type == ASTNodeType::INT_LITERAL) {
                                     auto* il = static_cast<IntLiteral*>(assign->value.get());
-                                    if (il->literal_type.empty() && !int_fits_in_type(il->value, ident->declared_type)) {
-                                        add_error(assign->location.file + ":" +
-                                                  std::to_string(assign->location.line) +
-                                                  ": value " + std::to_string(il->value) +
-                                                  " does not fit in type '" + ident->declared_type + "'");
+                                    if (il->literal_type.empty()) {
+                                        is_unsuffixed_literal = true;
+                                        if (!int_fits_in_type(il->value, ident->declared_type)) {
+                                            add_error(assign->location.file + ":" +
+                                                      std::to_string(assign->location.line) +
+                                                      ": value " + std::to_string(il->value) +
+                                                      " does not fit in type '" + ident->declared_type + "'");
+                                        }
                                     }
+                                }
+                                if (assign->value->type == ASTNodeType::FLOAT_LITERAL) {
+                                    auto* fl = static_cast<FloatLiteral*>(assign->value.get());
+                                    if (fl->literal_type.empty()) {
+                                        is_unsuffixed_literal = true;
+                                    }
+                                }
+                                // Check type compatibility for non-literal values
+                                if (!is_unsuffixed_literal && !can_assign(val_type, ident->declared_type)) {
+                                    add_error(assign->location.file + ":" +
+                                              std::to_string(assign->location.line) +
+                                              ": cannot assign '" + val_type + "' to '" + ident->declared_type + "'");
                                 }
                                 val_type = ident->declared_type;
                             }

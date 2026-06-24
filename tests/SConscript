@@ -79,4 +79,10 @@ if not is_cross:
         env.AlwaysBuild(run)
         env.Alias('test', run)
 
+    # Also run shell-based error tests
+    macro_error_run = env.Command('.run_macro_errors', [],
+        f'{root_dir}/tests/test_macro_errors.sh')
+    env.AlwaysBuild(macro_error_run)
+    env.Alias('test', macro_error_run)
+
 Return('test_bins')

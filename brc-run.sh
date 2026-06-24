@@ -23,6 +23,8 @@ echo "--- $BASENAME ---"
 gcc -O3 -I"$RUNTIME_DIR" "$C_FILE" \
     "$RUNTIME_DIR/block_memory.c" \
     "$RUNTIME_DIR/hot_reload.c" \
+    "$RUNTIME_DIR/io.c" \
+    "$RUNTIME_DIR/pool_allocator.c" \
     -o "$BIN_FILE" -ldl
 
 "$BIN_FILE"

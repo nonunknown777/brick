@@ -1,0 +1,7 @@
+package ERROR_IO_IN_BUILD
+
+using IO
+
+build {
+    print("no I/O in build")
+}

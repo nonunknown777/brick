@@ -103,6 +103,27 @@ build/brick --visualize examples/hello.brc   # compile, run, show TUI
 build/brick --attach <pid>                  # attach to running process
 ```
 
+## Macros
+
+Brick has a built-in macro system for compile-time code generation:
+
+```brick
+macro swap(a, b) {
+    __tmp = $a
+    $a = $b
+    $b = __tmp
+}
+
+build {
+    max_enemies = 100
+    emit {
+        ENEMY_COUNT = max_enemies
+    }
+}
+```
+
+See [Macros](../docs/MACROS.md) for the full guide.
+
 ## Quick Reference
 
 ```bash
