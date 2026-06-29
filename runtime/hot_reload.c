@@ -1,3 +1,6 @@
+#ifndef _WIN32
+#define _POSIX_C_SOURCE 199309L
+#endif
 #include "hot_reload.h"
 #include "block_memory.h"
 #include <time.h>
@@ -40,7 +43,7 @@
 #  define HR_MUTEX_LOCK(m)       pthread_mutex_lock((m))
 #  define HR_MUTEX_UNLOCK(m)     pthread_mutex_unlock((m))
 #  define HR_MUTEX_DESTROY(m)    pthread_mutex_destroy((m))
-#  define HR_THREAD_CREATE(t, f, a) (pthread_create(&(t), NULL, (f), (a)) == 0)
+#  define HR_THREAD_CREATE(t, f, a) (pthread_create((t), NULL, (f), (a)) == 0)
 #  define HR_THREAD_JOIN(t)      pthread_join((t), NULL)
 #  define HR_SLEEP(ms)           usleep((ms) * 1000)
 #  define HR_ATOMIC_STORE(p, v)  __atomic_store_n((p), (v), __ATOMIC_SEQ_CST)
@@ -66,8 +69,8 @@ struct HotReloadEngine {
     volatile int  running;
     hr_callback_t callback;
     HR_MUTEX_T    mutex;
-#if defined(_WIN32)
     char          watch_dir[1024];
+#if defined(_WIN32)
     HANDLE        watch_handle;
     HANDLE        watch_event;
 #else
