@@ -1,4 +1,6 @@
-#define _GNU_SOURCE
+#ifndef _WIN32
+#  define _GNU_SOURCE
+#endif
 #include "pool_allocator.h"
 #include <stdlib.h>
 #include <string.h>

@@ -2,7 +2,7 @@
 # Brick Build System (SCons) — Entry Point
 # Sistema de Build Brick (SCons) — Ponto de Entrada
 # =============================================================================
-import os, subprocess
+import os, subprocess, sys
 from os.path import join
 
 Help("""
@@ -22,66 +22,82 @@ Alvos:
   scons install            Install to prefix (default: /usr/local)
   scons install            Instala no prefixo (padrao: /usr/local)
 
-Cross-compilation:
-Cross-compilacao:
-  scons target=windows     Cross-compile to Windows (needs mingw-w64)
-  scons target=windows     Cross-compila para Windows (requer mingw-w64)
-  scons target=linux       Explicit native build (default)
-  scons target=linux       Build nativo explicito (padrao)
-
 Profiles:
 Perfis:
   release     -std=c++20 -O3 -Wall
   debug       -std=c++20 -g -O0 -DDEBUG
-  sanitize    -std=c++20 -g -O1 -fsanitize=address,undefined
-  pgo-gen     -std=c++20 -O3 -Wall -fprofile-generate (PGO generate)
-  pgo-use     -std=c++20 -O3 -Wall -fprofile-use (PGO use)
+  sanitize    -std=c++20 -g -O1 -fsanitize=address,undefined (linux only)
+  pgo-gen     -std=c++20 -O3 -Wall -fprofile-generate (PGO generate, linux only)
+  pgo-use     -std=c++20 -O3 -Wall -fprofile-use (PGO use, linux only)
 
 Options:
 Opcoes:
   prefix=/usr/local        Install prefix
   prefix=/usr/local        Prefixo de instalacao
   compiler=gcc             Force gcc (default: auto-detect)
-  compiler=gcc             Forca gcc (padrao: auto-detect)
+  compiler=gcc             Forca gcc (default: auto-detect)
   compiler=clang           Force clang
   compiler=clang           Forca clang
-  visualizer=no            Skip ncurses visualizer
-  visualizer=no            Pula visualizador ncurses
+  visualizer=no            Skip ncurses / PDCurses visualizer
+  visualizer=no            Pula visualizador ncurses / PDCurses
+
+Target:
+Alvo:
+  scons target=windows     Native Windows build (default on Windows)
+  scons target=windows     Build nativo Windows (padrao no Windows)
+  scons target=linux       Explicit Linux build (default on Linux)
+  scons target=linux       Build Linux explicito (padrao no Linux)
+
 """)
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 1. ARGUMENTS
 # 1. ARGUMENTOS
 # ═════════════════════════════════════════════════════════════════════════════
-target   = ARGUMENTS.get('target', 'linux')
+is_windows_host = sys.platform == 'win32'
+default_target = 'windows' if is_windows_host else 'linux'
+
+target   = ARGUMENTS.get('target', default_target)
 profile  = ARGUMENTS.get('profile', 'release')
 compiler = ARGUMENTS.get('compiler', 'auto')
 viz_opt  = ARGUMENTS.get('visualizer', 'yes')
-prefix   = ARGUMENTS.get('prefix', '/usr/local')
+prefix   = ARGUMENTS.get('prefix', '/usr/local' if not is_windows_host else 'C:/Brick')
 
-is_cross    = target not in ('linux', '')
+is_cross    = target not in ('linux', 'windows')
 prog_suffix = ''
 platform_libs = []
+
+def find_prog(names):
+    for n in names:
+        try:
+            subprocess.run([n, '--version'], capture_output=True, check=True)
+            return n
+        except OSError:
+            continue
+    return names[0]
 
 # ═════════════════════════════════════════════════════════════════════════════
 # 2. COMPILER DETECTION (per target)
 # 2. DETECCAO DE COMPILADOR (por alvo)
 # ═════════════════════════════════════════════════════════════════════════════
 if target == 'windows':
-    cxx = 'x86_64-w64-mingw32-g++'
-    cc  = 'x86_64-w64-mingw32-gcc'
     prog_suffix = '.exe'
-    print(f"[build] target=windows  CXX={cxx}")
+    if is_windows_host:
+        if compiler == 'clang':
+            cxx, cc = 'clang++', 'clang'
+        elif compiler == 'gcc':
+            cxx, cc = 'g++', 'gcc'
+        else:
+            cxx = find_prog(['g++', 'clang++', 'g++'])
+            cc  = find_prog(['gcc', 'clang', 'gcc'])
+        print(f"[build] target=windows (native)  CXX={cxx}  CC={cc}")
+    else:
+        cxx = 'x86_64-w64-mingw32-g++'
+        cc  = 'x86_64-w64-mingw32-gcc'
+        print(f"[build] target=windows (cross)  CXX={cxx}")
+        is_cross = True
 
 elif target == 'linux':
-    def find_prog(names):
-        for n in names:
-            try:
-                subprocess.run([n, '--version'], capture_output=True, check=True)
-                return n
-            except OSError:
-                continue
-        return names[0]
     if compiler == 'clang':
         cxx, cc = 'clang++', 'clang'
     elif compiler == 'gcc':
@@ -159,8 +175,23 @@ has_ncurses    = False
 has_visualizer = False
 has_hotreload  = False
 has_x11        = False
+has_pdcurses   = False
 
-if target != 'windows':
+if target == 'windows':
+    # Windows: hot reload via LoadLibrary (always available)
+    has_hotreload = True
+    # Visualizer: try PDCurses if available
+    if viz_opt != 'no':
+        try:
+            subprocess.run(['pkg-config', 'pdcurses'], capture_output=True, check=True)
+            has_pdcurses  = True
+            has_visualizer = True
+        except (OSError, subprocess.CalledProcessError):
+            print("[build] PDCurses not found, skipping visualizer on Windows")
+            print("[build] PDCurses nao encontrado, pulando visualizador no Windows")
+    env.Append(CPPPATH=['#visualizer'])
+else:
+    # Linux / other Unix
     has_hotreload = True
     if viz_opt != 'no':
         try:
@@ -181,6 +212,10 @@ if target == 'linux':
     except (OSError, subprocess.CalledProcessError):
         print("[build] X11 not found, skipping window library")
         print("[build] X11 nao encontrado, pulando biblioteca de janela")
+elif target == 'windows':
+    # Win32 backend is embedded via runtime — no separate library build needed
+    # Backend Win32 e embutido via runtime — sem build separado de biblioteca
+    pass
 
 if has_visualizer:
     env.Append(CFLAGS=['-DBRICK_TRACK_BLOCKS'],
@@ -192,7 +227,7 @@ if has_visualizer:
 # ═════════════════════════════════════════════════════════════════════════════
 Export(
     'env', 'platform_libs', 'prog_suffix',
-    'has_ncurses', 'has_visualizer', 'has_hotreload', 'has_x11',
+    'has_ncurses', 'has_pdcurses', 'has_visualizer', 'has_hotreload', 'has_x11',
     'is_cross', 'prefix', 'target', 'profile',
 )
 
@@ -202,7 +237,7 @@ Export(
 # ═════════════════════════════════════════════════════════════════════════════
 SConscript('runtime/SConscript', chdir=True)
 
-if has_x11:
+if target == 'linux' and has_x11:
     SConscript('runtime/libs/window/SConscript', chdir=True)
 
 if has_visualizer:

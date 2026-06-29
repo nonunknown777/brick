@@ -4,7 +4,7 @@
 
 namespace brick {
 
-static std::string escape_json(const std::string& s) {
+static std::string escape_json(std::string_view s) {
     std::string out;
     out.reserve(s.size());
     for (char c : s) {
@@ -104,6 +104,13 @@ static std::string token_type_name(TokenType t) {
         case TokenType::RBRACKET: return "RBRACKET";
         case TokenType::SEMICOLON: return "SEMICOLON";
         case TokenType::COMMA: return "COMMA";
+        case TokenType::PLUS_PLUS: return "PLUS_PLUS";
+        case TokenType::MINUS_MINUS: return "MINUS_MINUS";
+        case TokenType::MACRO: return "MACRO";
+        case TokenType::BUILD: return "BUILD";
+        case TokenType::EMIT: return "EMIT";
+        case TokenType::DOLLAR: return "DOLLAR";
+        case TokenType::ELLIPSIS: return "ELLIPSIS";
         case TokenType::EOF_: return "EOF";
     }
     return "UNKNOWN";

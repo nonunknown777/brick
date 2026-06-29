@@ -65,10 +65,12 @@ Sem `gcc` manual — `brick build` e `brick run` cuidam de tudo.
 - **Compila para C Puro** — Código C legível com diretivas `#line` para debug. Sem VM, sem interpretador — código nativo.
 - **Memória por Blocos** — Sem `malloc`/`free`, sem GC. Declare blocos (`block nome = 64MB`) e o bump allocator cuida do resto.
 - **Sem Pilha para Dados** — Tudo vive em blocos gerenciados. Reset de bloco recupera tudo instantaneamente.
-- **Hot Reload Nativo** — Troque código sem parar o programa via `dlopen` + `inotify`.
-- **Visualizador TUI** — Dashboard ncurses mostrando estado dos blocos em tempo real.
+- **Hot Reload Nativo** — Troque código sem parar o programa via `dlopen`+`inotify` (Linux) ou `LoadLibrary`+`ReadDirectoryChangesW` (Windows).
+- **Visualizador TUI** — Dashboard ncurses (Linux) ou PDCurses (Windows) mostrando estado dos blocos em tempo real.
 - **Integração GDB** — Debug no código `.brc` original com pretty-printers para `BlockCtx`.
 - **Extensão VS Code** — Syntax highlighting, LSP e webview de memória.
+- **Multiplataforma** — Linux primário. Windows com suporte nativo via MinGW-w64 e pipeline CI completo.
+- **Portabilidade Windows** — `VirtualAlloc`/`VirtualFree`, `CRITICAL_SECTION`, `LoadLibrary`/`ReadDirectoryChangesW`, biblioteca de janela Win32 (`CreateWindow`). Todos os 159 testes de código aprovados no Windows.
 - **Tipos de Largura Fixa** — `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `usize`/`isize`.
 
 ---
@@ -77,13 +79,12 @@ Sem `gcc` manual — `brick build` e `brick run` cuidam de tudo.
 
 ### Pré-requisitos
 
-- Linux (ou Windows com mingw-w64)
-- Compilador C++20 (GCC ≥ 11 ou Clang ≥ 14)
-- SCons (`pip install scons`)
-- ncurses (opcional, para o visualizador)
+- **Linux**: GCC ≥ 11 ou Clang ≥ 14, ncurses (opcional)
+- **Windows**: [MinGW-w64](https://www.mingw-w64.org/) com GCC ≥ 13, SCons (`pip install scons`)
 
 ### Build do Compilador
 
+**Linux:**
 ```bash
 git clone https://github.com/nonunknown777/brick.git
 cd brick
@@ -92,7 +93,18 @@ scons                        # build release
 ./build-release.sh           # release completo + extensão VS Code
 ```
 
-O binário `brick` estará em `build/`.
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/nonunknown777/brick.git
+cd brick
+scons target=windows profile=release
+# ou
+.\build-release.ps1          # build release completo
+```
+
+O binário `brick` (Linux) ou `brick.exe` (Windows) estará em `build/`.
+
+No Windows, você também pode usar `.\brc-run.bat` para compilar e rodar arquivos `.brc` diretamente.
 
 ### Executar um Demo
 

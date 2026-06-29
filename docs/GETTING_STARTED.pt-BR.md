@@ -4,14 +4,13 @@
 
 ## O Que Você Precisa
 
-- **Linux** (qualquer distro)
-- **g++** com suporte a C++20 (GCC >= 11 ou Clang >= 14)
-- **gcc** pra compilar o código gerado
+- **Linux** (qualquer distro) — GCC >= 11 ou Clang >= 14, ncurses (opcional)
+- **Windows** — [MinGW-w64](https://www.mingw-w64.org/) com GCC >= 13, SCons (`pip install scons`)
 - **SCons** (`pip install scons`)
-- **ncurses** pro visualizador (opcional)
 
 ## Compilar o Compilador
 
+### Linux
 ```bash
 git clone https://github.com/nonunknown777/brick.git
 cd brick
@@ -19,7 +18,17 @@ scons                     # build release / release build
 scons profile=debug       # build debug / debug build
 ```
 
-> O binário `brick` vai ficar em `build/brick`.
+### Windows (PowerShell)
+```powershell
+git clone https://github.com/nonunknown777/brick.git
+cd brick
+scons target=windows profile=release
+scons target=windows profile=debug
+```
+
+> O binário `brick` (Linux) ou `brick.exe` (Windows) vai ficar em `build/`.
+
+> No Windows, você também pode usar `.\build-release.ps1` para um build release completo.
 
 ## Compilar e Rodar um Programa Brick
 

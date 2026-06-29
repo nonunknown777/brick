@@ -9,6 +9,29 @@ const char _runtime_block_memory_h[] = R"(
 #include <stddef.h>
 #include <stdint.h>
 
+// ─── Platform portability macros ────────────────────────────
+#if defined(_MSC_VER)
+#  define BRICK_PACKED_STRUCT __pragma(pack(push, 1)) struct __pragma(pack(pop))
+#  define BRICK_PACKED_ATTR
+#  define BRICK_TLS __declspec(thread)
+#  define BRICK_ALIGNED(n) __declspec(align(n))
+#elif defined(__MINGW32__) || defined(__MINGW64__)
+#  define BRICK_PACKED_STRUCT struct __attribute__((packed))
+#  define BRICK_PACKED_ATTR __attribute__((packed))
+#  define BRICK_TLS __thread
+#  define BRICK_ALIGNED(n) __attribute__((aligned(n)))
+#elif defined(__GNUC__) || defined(__clang__)
+#  define BRICK_PACKED_STRUCT struct __attribute__((packed))
+#  define BRICK_PACKED_ATTR __attribute__((packed))
+#  define BRICK_TLS __thread
+#  define BRICK_ALIGNED(n) __attribute__((aligned(n)))
+#else
+#  define BRICK_PACKED_STRUCT struct
+#  define BRICK_PACKED_ATTR
+#  define BRICK_TLS
+#  define BRICK_ALIGNED(n)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -47,7 +70,7 @@ typedef struct {
 
 #define BRICK_SHM_MAGIC 0x4D455441  // "META"
 
-typedef struct __attribute__((packed)) {
+typedef BRICK_PACKED_STRUCT {
     uint32_t magic;
     uint32_t version;
     int32_t  pid;
@@ -126,7 +149,7 @@ void block_thaw(void);
 // Declara um ponteiro de bloco atual thread-local
 // Each thread can have its own current block, avoiding locks
 // Cada thread pode ter seu proprio bloco atual, evitando locks
-extern __thread BlockCtx* _tls_current_block;
+extern BRICK_TLS BlockCtx* _tls_current_block;
 
 // Set the current thread-local block
 // Define o bloco atual thread-local
@@ -168,14 +191,18 @@ int block_has_double_buffer(BlockCtx* ctx);
 const size_t _runtime_block_memory_h_len = sizeof(_runtime_block_memory_h) - 1;
 
 const char _runtime_block_memory_c[] = R"X(
-#define _GNU_SOURCE
+#ifndef _WIN32
+#  define _GNU_SOURCE
+#  include <sys/mman.h>
+#else
+#  include <windows.h>
+#endif
 #include "block_memory.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdatomic.h>
-#include <sys/mman.h>
 
 #define DEFAULT_ALIGNMENT 8
 
@@ -195,7 +222,7 @@ static atomic_int block_frozen_flag = 0;
 
 // Thread-local current block
 // Bloco atual thread-local
-__thread BlockCtx* _tls_current_block = NULL;
+BRICK_TLS BlockCtx* _tls_current_block = NULL;
 
 // Double-buffer support
 // Suporte a double-buffer
@@ -217,11 +244,15 @@ typedef struct {
 // ─── Registro Global de Blocos ────────────────────────────────
 #ifdef BRICK_TRACK_BLOCKS
 
-#include <pthread.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/time.h>
+#if defined(_WIN32)
+#  include <windows.h>
+#else
+#  include <pthread.h>
+#  include <unistd.h>
+#  include <fcntl.h>
+#  include <sys/stat.h>
+#  include <sys/time.h>
+#endif
 
 #define REGISTRY_MAX BRICK_MAX_BLOCKS
 
@@ -233,18 +264,37 @@ typedef struct {
 
 static RegistryEntry     registry[REGISTRY_MAX];
 static int               registry_initialized = 0;
+#if defined(_WIN32)
+static CRITICAL_SECTION registry_cs;
+static int              registry_cs_initialized = 0;
+#else
 static pthread_mutex_t   registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+#if defined(_WIN32)
+#  define REGISTRY_LOCK()   EnterCriticalSection(&registry_cs)
+#  define REGISTRY_UNLOCK() LeaveCriticalSection(&registry_cs)
+#else
+#  define REGISTRY_LOCK()   pthread_mutex_lock(&registry_mutex)
+#  define REGISTRY_UNLOCK() pthread_mutex_unlock(&registry_mutex)
+#endif
 
 static void registry_init(void) {
     if (!registry_initialized) {
         memset(registry, 0, sizeof(registry));
         registry_initialized = 1;
+#if defined(_WIN32)
+        if (!registry_cs_initialized) {
+            InitializeCriticalSection(&registry_cs);
+            registry_cs_initialized = 1;
+        }
+#endif
     }
 }
 
 void block_register(BlockCtx* ctx, const char* name) {
     registry_init();
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     int slot = -1;
     for (int i = 0; i < REGISTRY_MAX; i++) {
@@ -258,12 +308,12 @@ void block_register(BlockCtx* ctx, const char* name) {
         registry[slot].active = 1;
     }
 
-    pthread_mutex_unlock(&registry_mutex);
+    REGISTRY_UNLOCK();
 }
 
 void block_unregister(BlockCtx* ctx) {
     registry_init();
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     for (int i = 0; i < REGISTRY_MAX; i++) {
         if (registry[i].active && registry[i].ctx == ctx) {
@@ -272,12 +322,12 @@ void block_unregister(BlockCtx* ctx) {
         }
     }
 
-    pthread_mutex_unlock(&registry_mutex);
+    REGISTRY_UNLOCK();
 }
 
 BlockCtx* block_find(const char* name) {
     registry_init();
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     BlockCtx* found = NULL;
     for (int i = 0; i < REGISTRY_MAX; i++) {
@@ -287,13 +337,13 @@ BlockCtx* block_find(const char* name) {
         }
     }
 
-    pthread_mutex_unlock(&registry_mutex);
+    REGISTRY_UNLOCK();
     return found;
 }
 
 size_t block_snapshot(BlockInfo* out, size_t max_count) {
     registry_init();
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     size_t written = 0;
     for (int i = 0; i < REGISTRY_MAX && written < max_count; i++) {
@@ -308,7 +358,7 @@ size_t block_snapshot(BlockInfo* out, size_t max_count) {
         }
     }
 
-    pthread_mutex_unlock(&registry_mutex);
+    REGISTRY_UNLOCK();
     return written;
 }
 
@@ -316,7 +366,11 @@ size_t block_snapshot(BlockInfo* out, size_t max_count) {
 // ─── Exportacao de Memoria Compartilhada ──────────────────────
 
 static void shm_path(char* buf, size_t bufsize) {
+#if defined(_WIN32)
+    snprintf(buf, bufsize, "%s\\brick-mem-%d.bin", getenv("TEMP") ? getenv("TEMP") : "C:\\Temp", (int)GetCurrentProcessId());
+#else
     snprintf(buf, bufsize, "/tmp/brick-mem-%d.bin", (int)getpid());
+#endif
 }
 
 int block_shm_export(void) {
@@ -325,7 +379,7 @@ int block_shm_export(void) {
     char path[256];
     shm_path(path, sizeof(path));
 
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     int count = 0;
     for (int i = 0; i < REGISTRY_MAX; i++)
@@ -333,22 +387,39 @@ int block_shm_export(void) {
 
     size_t file_size = sizeof(BrickShmHeader) + (size_t)count * sizeof(BlockInfo);
 
+#if defined(_WIN32)
+    HANDLE fd = CreateFileA(path, GENERIC_WRITE, 0, NULL,
+                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (fd == INVALID_HANDLE_VALUE) { REGISTRY_UNLOCK(); return -1; }
+    SetFilePointer(fd, (LONG)file_size, NULL, FILE_BEGIN);
+    SetEndOfFile(fd);
+    SetFilePointer(fd, 0, NULL, FILE_BEGIN);
+#else
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) { pthread_mutex_unlock(&registry_mutex); return -1; }
-
+    if (fd < 0) { REGISTRY_UNLOCK(); return -1; }
     ftruncate(fd, (off_t)file_size);
+#endif
 
     BrickShmHeader header;
     header.magic   = BRICK_SHM_MAGIC;
     header.version = 1;
+#if defined(_WIN32)
+    header.pid     = (int32_t)GetCurrentProcessId();
+    header.timestamp_us = (uint64_t)GetTickCount64() * 1000ULL;
+#else
     header.pid     = (int32_t)getpid();
-    header.block_count = (uint32_t)count;
-
     struct timeval tv;
     gettimeofday(&tv, NULL);
     header.timestamp_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec;
+#endif
+    header.block_count = (uint32_t)count;
 
+#if defined(_WIN32)
+    DWORD written_bytes;
+    WriteFile(fd, &header, sizeof(header), &written_bytes, NULL);
+#else
     write(fd, &header, sizeof(header));
+#endif
 
     int written = 0;
     for (int i = 0; i < REGISTRY_MAX && written < count; i++) {
@@ -360,13 +431,21 @@ int block_shm_export(void) {
             info.used            = registry[i].ctx->used;
             info.peak_used       = registry[i].ctx->peak_used;
             info.allocation_count = registry[i].ctx->allocation_count;
+#if defined(_WIN32)
+            WriteFile(fd, &info, sizeof(info), &written_bytes, NULL);
+#else
             write(fd, &info, sizeof(info));
+#endif
             written++;
         }
     }
 
+#if defined(_WIN32)
+    CloseHandle(fd);
+#else
     close(fd);
-    pthread_mutex_unlock(&registry_mutex);
+#endif
+    REGISTRY_UNLOCK();
     return 0;
 }
 
@@ -386,11 +465,18 @@ BlockCtx* block_create_bytes(size_t bytes) {
     BlockCtx* ctx = (BlockCtx*)malloc(sizeof(BlockCtx));
     if (!ctx) error("out of memory");
 
-    // Use mmap for large allocations (>= 64KB) — better for huge pages,
-    // shared memory export, and cleaner deallocation
-    // Usa mmap para alocacoes grandes (>= 64KB) — melhor para huge pages,
-    // exportacao de memoria compartilhada e desalocacao mais limpa
+    // Use mmap / VirtualAlloc for large allocations (>= 64KB)
+    // Usa mmap / VirtualAlloc para alocacoes grandes (>= 64KB)
     if (bytes >= 65536) {
+#if defined(_WIN32)
+        ctx->data = (uint8_t*)VirtualAlloc(NULL, bytes,
+                                           MEM_RESERVE | MEM_COMMIT,
+                                           PAGE_READWRITE);
+        if (!ctx->data) {
+            free(ctx);
+            error("out of memory (VirtualAlloc failed)");
+        }
+#else
         ctx->data = (uint8_t*)mmap(NULL, bytes, PROT_READ | PROT_WRITE,
                                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
                                    -1, 0);
@@ -398,6 +484,7 @@ BlockCtx* block_create_bytes(size_t bytes) {
             free(ctx);
             error("out of memory (mmap failed)");
         }
+#endif
     } else {
         ctx->data = (uint8_t*)malloc(bytes);
         if (!ctx->data) {
@@ -426,7 +513,11 @@ void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment) {
     while (atomic_load_explicit(&block_frozen_flag, memory_order_acquire)) {
         // spin — will be very brief (nanoseconds)
         // giro — sera muito breve (nanossegundos)
+#if defined(_WIN32) && !defined(__GNUC__)
+        YieldProcessor();
+#else
         __asm__ volatile("pause");
+#endif
     }
 
     // Align current position
@@ -473,7 +564,11 @@ void block_reset(BlockCtx* ctx) {
 void block_destroy(BlockCtx* ctx) {
     if (ctx) {
         if (ctx->capacity >= 65536) {
+#if defined(_WIN32)
+            VirtualFree(ctx->data, 0, MEM_RELEASE);
+#else
             munmap(ctx->data, ctx->capacity);
+#endif
         } else {
             free(ctx->data);
         }
@@ -543,11 +638,18 @@ int block_enable_double_buffer(BlockCtx* ctx) {
     ext->db.active_buffer = 0;
 
     if (ctx->capacity >= 65536) {
+#if defined(_WIN32)
+        ext->db.shadow_data = (uint8_t*)VirtualAlloc(NULL, ctx->capacity,
+                                                     MEM_RESERVE | MEM_COMMIT,
+                                                     PAGE_READWRITE);
+        if (!ext->db.shadow_data) { free(ext); return -1; }
+#else
         ext->db.shadow_data = (uint8_t*)mmap(NULL, ctx->capacity,
                                              PROT_READ | PROT_WRITE,
                                              MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
                                              -1, 0);
         if (ext->db.shadow_data == MAP_FAILED) { free(ext); return -1; }
+#endif
     } else {
         ext->db.shadow_data = (uint8_t*)malloc(ctx->capacity);
         if (!ext->db.shadow_data) { free(ext); return -1; }
@@ -722,6 +824,204 @@ void io_printf(const char* fmt, ...) {
 }
 )";
 const size_t _runtime_io_c_len = sizeof(_runtime_io_c) - 1;
+
+const char _runtime_pool_allocator_h[] = R"(
+#ifndef BRICK_POOL_ALLOCATOR_H
+#define BRICK_POOL_ALLOCATOR_H
+
+#include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+// Fixed-size block pool allocator for small objects (like String, small structs)
+// Alocador de pool de tamanho fixo para objetos pequenos (como String, structs pequenas)
+// Much faster than malloc for many small allocations — O(1) alloc and free
+// Muito mais rapido que malloc para muitas alocacoes pequenas — O(1) alloc e free
+
+#define POOL_MAX_SLOTS 8
+
+typedef struct PoolSlot {
+    size_t   block_size;     // size of each block in this slot
+    size_t   capacity;       // total number of blocks
+    size_t   count;          // number of free blocks
+    void**   free_list;      // linked list of free blocks
+    uint8_t* data;           // contiguous memory pool
+} PoolSlot;
+
+typedef struct {
+    PoolSlot slots[POOL_MAX_SLOTS];
+    int      slot_count;
+} PoolAllocator;
+
+// Create a pool with a fixed block size and count
+// Cria um pool com tamanho de bloco fixo e contagem
+PoolAllocator* pool_create(void);
+
+// Add a slot with a given block size and count
+// Adiciona um slot com um dado tamanho de bloco e contagem
+// Returns slot index or -1 on failure
+// Retorna indice do slot ou -1 em falha
+int pool_add_slot(PoolAllocator* pool, size_t block_size, size_t count);
+
+// Allocate a block from the smallest slot that fits the requested size
+// Aloca um bloco do menor slot que cabe o tamanho solicitado
+void* pool_alloc(PoolAllocator* pool, size_t size);
+
+// Return a block to the pool
+// Retorna um bloco ao pool
+void pool_free(PoolAllocator* pool, void* ptr);
+
+// Destroy the pool and free all memory
+// Destroi o pool e libera toda a memoria
+void pool_destroy(PoolAllocator* pool);
+
+// Get stats
+typedef struct {
+    size_t block_size;
+    size_t capacity;
+    size_t used;
+    size_t free;
+} PoolStats;
+
+PoolStats pool_slot_stats(PoolAllocator* pool, int slot);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif
+)";
+const size_t _runtime_pool_allocator_h_len = sizeof(_runtime_pool_allocator_h) - 1;
+
+const char _runtime_pool_allocator_c[] = R"(
+#ifndef _WIN32
+#  define _GNU_SOURCE
+#endif
+#include "pool_allocator.h"
+#include <stdlib.h>
+#include <string.h>
+#include <stdio.h>
+
+typedef struct {
+    PoolAllocator* pool;
+    int slot;
+} PoolBlockHeader;
+
+static void error(const char* msg) {
+    fprintf(stderr, "Brick pool allocator error: %s\n", msg);
+    exit(1);
+}
+
+PoolAllocator* pool_create(void) {
+    PoolAllocator* pool = (PoolAllocator*)calloc(1, sizeof(PoolAllocator));
+    if (!pool) error("out of memory");
+    pool->slot_count = 0;
+    return pool;
+}
+
+int pool_add_slot(PoolAllocator* pool, size_t block_size, size_t count) {
+    if (pool->slot_count >= POOL_MAX_SLOTS) return -1;
+
+    int idx = pool->slot_count;
+    PoolSlot* slot = &pool->slots[idx];
+    slot->block_size = block_size;
+    slot->capacity = count;
+    slot->count = count;
+
+    // Allocate contiguous data + free list
+    // Aloca dados contiguos + lista livre
+    size_t total = count * block_size;
+    slot->data = (uint8_t*)calloc(1, total);
+    if (!slot->data) return -1;
+
+    slot->free_list = (void**)calloc(count, sizeof(void*));
+    if (!slot->free_list) {
+        free(slot->data);
+        return -1;
+    }
+
+    // Initialize free list: each entry points to a block
+    // Inicializa lista livre: cada entrada aponta para um bloco
+    for (size_t i = 0; i < count; i++) {
+        slot->free_list[i] = slot->data + (i * block_size);
+    }
+
+    pool->slot_count++;
+    return idx;
+}
+
+void* pool_alloc(PoolAllocator* pool, size_t size) {
+    // Find the smallest slot that fits the requested size + header
+    // Encontra o menor slot que cabe o tamanho solicitado + cabecalho
+    size_t needed = size + sizeof(PoolBlockHeader);
+    for (int i = 0; i < pool->slot_count; i++) {
+        PoolSlot* slot = &pool->slots[i];
+        if (slot->block_size >= needed && slot->count > 0) {
+            slot->count--;
+            void* ptr = slot->free_list[slot->count];
+            slot->free_list[slot->count] = NULL;
+
+            // Store metadata at the beginning of the block
+            // Armazena metadados no inicio do bloco
+            PoolBlockHeader* hdr = (PoolBlockHeader*)ptr;
+            hdr->pool = pool;
+            hdr->slot = i;
+
+            // Return pointer after the header
+            // Retorna ponteiro depois do cabecalho
+            return (uint8_t*)ptr + sizeof(PoolBlockHeader);
+        }
+    }
+
+    // No slot available — return NULL (caller should fall back to block alloc)
+    // Nenhum slot disponivel — retorna NULL (caller deve usar block alloc como fallback)
+    return NULL;
+}
+
+void pool_free(PoolAllocator* pool, void* ptr) {
+    if (!ptr || !pool) return;
+
+    // Retrieve metadata from before the pointer
+    // Recupera metadados de antes do ponteiro
+    PoolBlockHeader* hdr = (PoolBlockHeader*)((uint8_t*)ptr - sizeof(PoolBlockHeader));
+    if (hdr->pool != pool) return; // safety check
+
+    int idx = hdr->slot;
+    if (idx < 0 || idx >= pool->slot_count) return;
+
+    PoolSlot* slot = &pool->slots[idx];
+    if (slot->count >= slot->capacity) return; // shouldn't happen
+
+    // Return to free list (pointer to the start of the block, before header)
+    // Retorna para lista livre (ponteiro pro inicio do bloco, antes do cabecalho)
+    slot->free_list[slot->count] = (void*)hdr;
+    slot->count++;
+}
+
+void pool_destroy(PoolAllocator* pool) {
+    if (!pool) return;
+    for (int i = 0; i < pool->slot_count; i++) {
+        free(pool->slots[i].data);
+        free(pool->slots[i].free_list);
+    }
+    free(pool);
+}
+
+PoolStats pool_slot_stats(PoolAllocator* pool, int slot) {
+    PoolStats stats = {0, 0, 0, 0};
+    if (!pool || slot < 0 || slot >= pool->slot_count) return stats;
+    PoolSlot* s = &pool->slots[slot];
+    stats.block_size = s->block_size;
+    stats.capacity   = s->capacity;
+    stats.used       = s->capacity - s->count;
+    stats.free       = s->count;
+    return stats;
+}
+)";
+const size_t _runtime_pool_allocator_c_len = sizeof(_runtime_pool_allocator_c) - 1;
 
 const char _runtime_hot_reload_h[] = R"(
 #ifndef BRICK_HOT_RELOAD_H
@@ -1115,23 +1415,57 @@ struct HotReloadEngine* meta_window_hr_start(const char* so_path);
 const size_t _runtime_libs_window_window_hr_h_len = sizeof(_runtime_libs_window_window_hr_h) - 1;
 
 const char _runtime_hot_reload_c[] = R"(
-#define _GNU_SOURCE
-#define _POSIX_C_SOURCE 200112L
 #include "hot_reload.h"
 #include "block_memory.h"
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dlfcn.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <sys/inotify.h>
 #include <errno.h>
 #include <stdatomic.h>
 
+#if defined(_WIN32)
+#  include <windows.h>
+#  define HR_DLOPEN(path)        ((void*)LoadLibraryA(path))
+#  define HR_DLSYM(handle, name) ((void*)GetProcAddress((HMODULE)(handle), (name)))
+#  define HR_DLCLOSE(handle)     (void)(FreeLibrary((HMODULE)(handle)) ? 0 : 1)
+#  define HR_DLERROR()           ("GetLastError")
+#  define HR_THREAD_T            HANDLE
+#  define HR_MUTEX_T             CRITICAL_SECTION
+#  define HR_MUTEX_INIT(m)       InitializeCriticalSection((m))
+#  define HR_MUTEX_LOCK(m)       EnterCriticalSection((m))
+#  define HR_MUTEX_UNLOCK(m)     LeaveCriticalSection((m))
+#  define HR_MUTEX_DESTROY(m)    DeleteCriticalSection((m))
+#  define HR_THREAD_CREATE(t, f, a) ((*(t) = CreateThread(NULL, 0, (f), (a), 0, NULL)) != NULL)
+#  define HR_THREAD_JOIN(t)      WaitForSingleObject((t), INFINITE); CloseHandle(t)
+#  define HR_SLEEP(ms)           Sleep(ms)
+#  define HR_ATOMIC_STORE(p, v)  InterlockedExchange((long*)(p), (long)(v))
+#  define HR_PATH_SEP            '\\'
+#  define HR_SO_EXT              ".dll"
+#else
+#  include <dlfcn.h>
+#  include <pthread.h>
+#  include <unistd.h>
+#  include <sys/inotify.h>
+#  define HR_DLOPEN(path)        dlopen(path, RTLD_NOW | RTLD_LOCAL)
+#  define HR_DLSYM(handle, name) dlsym(handle, name)
+#  define HR_DLCLOSE(handle)     dlclose(handle)
+#  define HR_DLERROR()           dlerror()
+#  define HR_THREAD_T            pthread_t
+#  define HR_MUTEX_T             pthread_mutex_t
+#  define HR_MUTEX_INIT(m)       pthread_mutex_init((m), NULL)
+#  define HR_MUTEX_LOCK(m)       pthread_mutex_lock((m))
+#  define HR_MUTEX_UNLOCK(m)     pthread_mutex_unlock((m))
+#  define HR_MUTEX_DESTROY(m)    pthread_mutex_destroy((m))
+#  define HR_THREAD_CREATE(t, f, a) (pthread_create(&(t), NULL, (f), (a)) == 0)
+#  define HR_THREAD_JOIN(t)      pthread_join((t), NULL)
+#  define HR_SLEEP(ms)           usleep((ms) * 1000)
+#  define HR_ATOMIC_STORE(p, v)  __atomic_store_n((p), (v), __ATOMIC_SEQ_CST)
+#  define HR_PATH_SEP            '/'
+#  define HR_SO_EXT              ".so"
+#endif
+
 #define MAX_SYMBOLS 256
-#define EVENT_BUF_LEN 4096
 
 typedef struct {
     char  name[128];
@@ -1139,21 +1473,24 @@ typedef struct {
 } SymbolEntry;
 
 struct HotReloadEngine {
-    char          so_path[1024];
-    char          so_basename[256];
-    char          so_path_tmp[1024];  // path + ".new" for atomic swap
-                                       // path + ".new" para troca atomica
+    char          dll_path[1024];
+    char          dll_basename[256];
     void*         handle_current;
-    void*         handle_new;
     SymbolEntry   symbols[MAX_SYMBOLS];
     int           symbol_count;
     atomic_int    state;
-    pthread_t     watch_thread;
-    int           inotify_fd;
-    int           watch_fd;
+    HR_THREAD_T   watch_thread;
     volatile int  running;
     hr_callback_t callback;
-    pthread_mutex_t mutex;
+    HR_MUTEX_T    mutex;
+#if defined(_WIN32)
+    char          watch_dir[1024];
+    HANDLE        watch_handle;
+    HANDLE        watch_event;
+#else
+    int           inotify_fd;
+    int           watch_fd;
+#endif
 };
 
 static void error(const char* msg) {
@@ -1161,46 +1498,65 @@ static void error(const char* msg) {
     exit(1);
 }
 
-HotReloadEngine* hr_create(const char* so_path) {
+HotReloadEngine* hr_create(const char* dll_path) {
     HotReloadEngine* hr = (HotReloadEngine*)calloc(1, sizeof(HotReloadEngine));
     if (!hr) error("out of memory");
 
-    strncpy(hr->so_path, so_path, sizeof(hr->so_path) - 1);
+    strncpy(hr->dll_path, dll_path, sizeof(hr->dll_path) - 1);
 
     // Extract basename
-    // Extrai o nome base
-    const char* slash = strrchr(so_path, '/');
-    strncpy(hr->so_basename, slash ? slash + 1 : so_path, sizeof(hr->so_basename) - 1);
+    const char* sep = strrchr(dll_path, '/');
+#if defined(_WIN32)
+    {
+        const char* sep2 = strrchr(dll_path, '\\');
+        if (sep2 && (!sep || sep2 > sep)) sep = sep2;
+    }
+#endif
+    strncpy(hr->dll_basename, sep ? sep + 1 : dll_path, sizeof(hr->dll_basename) - 1);
 
-    snprintf(hr->so_path_tmp, sizeof(hr->so_path_tmp), "%s.new", so_path);
+    // Extract watch directory
+    if (sep) {
+        size_t dirlen = (size_t)(sep - dll_path);
+        memcpy(hr->watch_dir, dll_path, dirlen);
+        hr->watch_dir[dirlen] = '\0';
+    } else {
+#if defined(_WIN32)
+        GetCurrentDirectoryA(sizeof(hr->watch_dir), hr->watch_dir);
+#else
+        strcpy(hr->watch_dir, ".");
+#endif
+    }
 
     hr->state = HR_WAITING;
     hr->running = 0;
     hr->callback = NULL;
+#if defined(_WIN32)
+    hr->watch_handle = INVALID_HANDLE_VALUE;
+    hr->watch_event = NULL;
+#else
     hr->inotify_fd = -1;
     hr->watch_fd = -1;
-    pthread_mutex_init(&hr->mutex, NULL);
+#endif
+    HR_MUTEX_INIT(&hr->mutex);
 
     return hr;
 }
 
 int hr_load_initial(HotReloadEngine* hr) {
-    pthread_mutex_lock(&hr->mutex);
+    HR_MUTEX_LOCK(&hr->mutex);
 
-    hr->handle_current = dlopen(hr->so_path, RTLD_NOW | RTLD_LOCAL);
+    hr->handle_current = HR_DLOPEN(hr->dll_path);
     if (!hr->handle_current) {
-        fprintf(stderr, "hr: dlopen failed: %s\n", dlerror());
+        fprintf(stderr, "hr: dlopen/LoadLibrary failed: %s\n", HR_DLERROR());
         hr->state = HR_ERROR;
-        pthread_mutex_unlock(&hr->mutex);
+        HR_MUTEX_UNLOCK(&hr->mutex);
         return -1;
     }
 
     hr->state = HR_OK;
 
-    // Resolve registered symbols
-    // Resolve simbolos registrados
     for (int i = 0; i < hr->symbol_count; i++) {
-        void* sym = dlsym(hr->handle_current, hr->symbols[i].name);
+        void* sym = HR_DLSYM(hr->handle_current, hr->symbols[i].name);
         if (sym) {
             *(hr->symbols[i].func_ptr) = sym;
         } else {
@@ -1208,7 +1564,7 @@ int hr_load_initial(HotReloadEngine* hr) {
         }
     }
 
-    pthread_mutex_unlock(&hr->mutex);
+    HR_MUTEX_UNLOCK(&hr->mutex);
     return 0;
 }
 
@@ -1223,21 +1579,16 @@ int hr_register_func(HotReloadEngine* hr, const char* name, void** func_ptr) {
 }
 
 int hr_reload(HotReloadEngine* hr) {
-    pthread_mutex_lock(&hr->mutex);
+    HR_MUTEX_LOCK(&hr->mutex);
     hr->state = HR_LOADING;
 
-    // Freeze block allocations during swap
-    // Congela alocacoes de bloco durante a troca
     block_freeze();
 
-    // Copy the .so to a temp path so dlopen gets a fresh load
-    // Copia o .so para um caminho temporario para dlopen obter carga fresca
-    // (dlopen caches by path; a copy bypasses the cache)
-    // (dlopen armazena em cache por caminho; uma copia contorna o cache)
+    // Copy the library to a temp path so LoadLibrary/dlopen gets a fresh load
     char tmp_path[1088];
-    snprintf(tmp_path, sizeof(tmp_path), "%s.%d", hr->so_path, (int)time(NULL));
+    snprintf(tmp_path, sizeof(tmp_path), "%s.%d", hr->dll_path, (int)time(NULL));
 
-    FILE* src = fopen(hr->so_path, "rb");
+    FILE* src = fopen(hr->dll_path, "rb");
     void* new_handle = NULL;
     if (src) {
         FILE* dst = fopen(tmp_path, "wb");
@@ -1248,57 +1599,131 @@ int hr_reload(HotReloadEngine* hr) {
                 fwrite(buf, 1, n, dst);
             fclose(dst);
 
-            new_handle = dlopen(tmp_path, RTLD_NOW | RTLD_LOCAL);
-            unlink(tmp_path);
+            new_handle = HR_DLOPEN(tmp_path);
+            remove(tmp_path);
         }
         fclose(src);
     }
 
     if (!new_handle) {
-        const char* err = dlerror();
-        fprintf(stderr, "hr: reload failed: %s\n", err ? err : "cannot open .so file");
-        // Rollback: keep old handle, function pointers untouched
-        // Rollback: mantem handle antigo, ponteiros de funcao intocados
+        fprintf(stderr, "hr: reload failed\n");
         hr->state = hr->handle_current ? HR_OK : HR_ERROR;
         block_thaw();
-        if (hr->callback) hr->callback(hr->so_path);
-        pthread_mutex_unlock(&hr->mutex);
+        if (hr->callback) hr->callback(hr->dll_path);
+        HR_MUTEX_UNLOCK(&hr->mutex);
         return -1;
     }
 
     // Swap function pointers atomically
-    // Troca ponteiros de funcao atomicamente
     for (int i = 0; i < hr->symbol_count; i++) {
-        void* sym = dlsym(new_handle, hr->symbols[i].name);
+        void* sym = HR_DLSYM(new_handle, hr->symbols[i].name);
         if (sym) {
-            __atomic_store(hr->symbols[i].func_ptr, &sym, __ATOMIC_SEQ_CST);
+            HR_ATOMIC_STORE(hr->symbols[i].func_ptr, sym);
         } else {
-            fprintf(stderr, "hr: symbol '%s' not found in new .so\n",
+            fprintf(stderr, "hr: symbol '%s' not found in new library\n",
                     hr->symbols[i].name);
         }
     }
 
     // Close old handle
-    // Fecha handle antigo
     if (hr->handle_current) {
-        dlclose(hr->handle_current);
+        HR_DLCLOSE(hr->handle_current);
     }
     hr->handle_current = new_handle;
     hr->state = HR_OK;
 
     block_thaw();
-    if (hr->callback) hr->callback(hr->so_path);
+    if (hr->callback) hr->callback(hr->dll_path);
 
-    pthread_mutex_unlock(&hr->mutex);
+    HR_MUTEX_UNLOCK(&hr->mutex);
     return 0;
 }
 
-// Watch thread function
-// Funcao da thread de monitoramento
+#if defined(_WIN32)
+
+static DWORD WINAPI watch_thread_fn_win32(LPVOID arg) {
+    HotReloadEngine* hr = (HotReloadEngine*)arg;
+
+    char dir_path[1024];
+    strcpy(dir_path, hr->watch_dir);
+
+    HANDLE hDir = CreateFileA(
+        dir_path,
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+        NULL
+    );
+
+    if (hDir == INVALID_HANDLE_VALUE) {
+        return 1;
+    }
+
+    hr->watch_handle = hDir;
+
+    char notify_buf[4096];
+    OVERLAPPED overlapped;
+    memset(&overlapped, 0, sizeof(overlapped));
+    hr->watch_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    overlapped.hEvent = hr->watch_event;
+
+    // Start first overlapped read
+    DWORD bytes_returned;
+    ReadDirectoryChangesW(
+        hDir, notify_buf, sizeof(notify_buf), FALSE,
+        FILE_NOTIFY_CHANGE_LAST_WRITE,
+        &bytes_returned, &overlapped, NULL
+    );
+
+    while (hr->running) {
+        DWORD wait = WaitForSingleObject(hr->watch_event, 500);
+        if (wait == WAIT_OBJECT_0) {
+            DWORD bytes;
+            if (GetOverlappedResult(hDir, &overlapped, &bytes, FALSE)) {
+                FILE_NOTIFY_INFORMATION* event = (FILE_NOTIFY_INFORMATION*)notify_buf;
+                if (event->Action == FILE_ACTION_MODIFIED) {
+                    // Check if this is our DLL
+                    int dll_len = (int)strlen(hr->dll_basename);
+                    int name_len = (int)(event->FileNameLength / sizeof(wchar_t));
+                    if (name_len == dll_len) {
+                        // Compare wide char basename with our DLL name
+                        // Convert our DLL name to wide for comparison
+                        wchar_t wname[256];
+                        MultiByteToWideChar(CP_UTF8, 0, hr->dll_basename, -1, wname, 256);
+                        if (_wcsnicmp(event->FileName, wname, dll_len) == 0) {
+                            HR_SLEEP(50);
+                            hr_reload(hr);
+                        }
+                    }
+                }
+
+                // Reset for next read
+                memset(&overlapped, 0, sizeof(overlapped));
+                overlapped.hEvent = hr->watch_event;
+                ReadDirectoryChangesW(
+                    hDir, notify_buf, sizeof(notify_buf), FALSE,
+                    FILE_NOTIFY_CHANGE_LAST_WRITE,
+                    &bytes_returned, &overlapped, NULL
+                );
+            }
+            ResetEvent(hr->watch_event);
+        }
+    }
+
+    CancelIo(hDir);
+    CloseHandle(hDir);
+    hr->watch_handle = INVALID_HANDLE_VALUE;
+    return 0;
+}
+
+#else // Linux
+
 static void* watch_thread_fn(void* arg) {
     HotReloadEngine* hr = (HotReloadEngine*)arg;
 
-    char buf[EVENT_BUF_LEN] __attribute__((aligned(8)));
+    char buf[4096] BRICK_ALIGNED(8);
 
     while (hr->running) {
         ssize_t len = read(hr->inotify_fd, buf, sizeof(buf));
@@ -1310,9 +1735,7 @@ static void* watch_thread_fn(void* arg) {
 
             if ((event->mask & IN_CLOSE_WRITE) &&
                 event->len > 0 &&
-                strcmp(event->name, hr->so_basename) == 0) {
-                // Small delay to let file writes complete
-                // Pequeno atraso para permitir que escritas no arquivo terminem
+                strcmp(event->name, hr->dll_basename) == 0) {
                 struct timespec ts = {0, 50000000};
                 nanosleep(&ts, NULL);
                 hr_reload(hr);
@@ -1324,39 +1747,39 @@ static void* watch_thread_fn(void* arg) {
 
     return NULL;
 }
+#endif
 
 int hr_start_watching(HotReloadEngine* hr) {
+#if defined(_WIN32)
+    // Windows: watch thread is created during hr_create
+    hr->running = 1;
+    if (!HR_THREAD_CREATE(&hr->watch_thread, watch_thread_fn_win32, hr)) {
+        hr->running = 0;
+        return -1;
+    }
+    return 0;
+#else
     hr->inotify_fd = inotify_init1(IN_NONBLOCK);
     if (hr->inotify_fd < 0) {
         perror("inotify_init");
         return -1;
     }
 
-    // Watch directory of the .so file
-    // Monitora diretorio do arquivo .so
-    char dir_path[1024];
-    size_t path_len = strlen(hr->so_path);
-    if (path_len >= sizeof(dir_path)) path_len = sizeof(dir_path) - 1;
-    memcpy(dir_path, hr->so_path, path_len);
-    dir_path[path_len] = '\0';
-    char* last_slash = strrchr(dir_path, '/');
-    if (last_slash) *last_slash = '\0';
-    else strcpy(dir_path, ".");
-
-    hr->watch_fd = inotify_add_watch(hr->inotify_fd, dir_path, IN_CLOSE_WRITE);
+    hr->watch_fd = inotify_add_watch(hr->inotify_fd, hr->watch_dir, IN_CLOSE_WRITE);
     if (hr->watch_fd < 0) {
         perror("inotify_add_watch");
         return -1;
     }
 
     hr->running = 1;
-    if (pthread_create(&hr->watch_thread, NULL, watch_thread_fn, hr) != 0) {
+    if (!HR_THREAD_CREATE(&hr->watch_thread, watch_thread_fn, hr)) {
         perror("pthread_create");
         hr->running = 0;
         return -1;
     }
 
     return 0;
+#endif
 }
 
 HotReloadState hr_state(HotReloadEngine* hr) {
@@ -1370,63 +1793,210 @@ void hr_set_callback(HotReloadEngine* hr, hr_callback_t cb) {
 void hr_destroy(HotReloadEngine* hr) {
     if (hr->running) {
         hr->running = 0;
-        pthread_join(hr->watch_thread, NULL);
+        HR_THREAD_JOIN(hr->watch_thread);
     }
 
+#if defined(_WIN32)
+    if (hr->watch_handle != INVALID_HANDLE_VALUE) {
+        CancelIo(hr->watch_handle);
+        CloseHandle(hr->watch_handle);
+    }
+    if (hr->watch_event) CloseHandle(hr->watch_event);
+#else
     if (hr->inotify_fd >= 0) close(hr->inotify_fd);
-    if (hr->handle_current) dlclose(hr->handle_current);
-    if (hr->handle_new) dlclose(hr->handle_new);
+#endif
+    if (hr->handle_current) HR_DLCLOSE(hr->handle_current);
 
-    pthread_mutex_destroy(&hr->mutex);
+    HR_MUTEX_DESTROY(&hr->mutex);
     free(hr);
 }
 )";
 const size_t _runtime_hot_reload_c_len = sizeof(_runtime_hot_reload_c) - 1;
 
-const char _runtime_libs_window_window_linux_c[] = R"(
+const char _runtime_libs_window_window_win32_c[] = R"(
 /**
- * window_linux.c — X11 backend for Brick Window library
+ * window_win32.c — Win32 backend for Brick Window library
  *
- * Uses Xlib directly (no XCB) for lower overhead and simpler sync.
- * The event queue is allocated from the Brick block allocator.
+ * Uses raw Win32 API (user32 + gdi32). The event queue integrates
+ * with the Windows message pump via PeekMessage().
  */
 
 #include "window_internal.h"
 
-#include <X11/Xlib.h>
-#include <X11/Xatom.h>
-#include <X11/Xutil.h>
-#include <X11/keysym.h>
-#include <stdio.h>
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
 #include <stdlib.h>
 #include <string.h>
 
-/* Reuse io.h's printf-style logging — or we add a simple log macro. */
 #include "../../io.h"
 
-/* ─── Key mapping helpers ─── */
+/* ─── Forward declare the window procedure ─── */
+static LRESULT CALLBACK meta_win32_wndproc(HWND hwnd, UINT msg,
+                                           WPARAM wp, LPARAM lp);
 
-static int x11_keycode_to_meta(KeySym ks) {
-    switch (ks) {
-        case XK_Escape:    return 256;
-        case XK_Return:    return 257;
-        case XK_Tab:       return 258;
-        case XK_Left:      return 263;
-        case XK_Right:     return 262;
-        case XK_Up:        return 265;
-        case XK_Down:      return 264;
-        case XK_Shift_L:
-        case XK_Shift_R:   return 340;
-        case XK_Control_L:
-        case XK_Control_R: return 341;
-        case XK_Alt_L:
-        case XK_Alt_R:     return 342;
-        case XK_space:     return 32;
+/* ─── Store/retrieve MetaWindow* from GWLP_USERDATA ─── */
+
+static void set_window_ptr(HWND hwnd, MetaWindow* w) {
+    SetWindowLongPtrW(hwnd, GWLP_USERDATA, (LONG_PTR)w);
+}
+
+static MetaWindow* get_window_ptr(HWND hwnd) {
+    return (MetaWindow*)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
+}
+
+/* ─── Key mapping ─── */
+
+static int win32_vk_to_meta(WPARAM vk) {
+    switch (vk) {
+        case VK_ESCAPE:   return 256;
+        case VK_RETURN:   return 257;
+        case VK_TAB:      return 258;
+        case VK_LEFT:     return 263;
+        case VK_RIGHT:    return 262;
+        case VK_UP:       return 265;
+        case VK_DOWN:     return 264;
+        case VK_SHIFT:    return 340;
+        case VK_CONTROL:  return 341;
+        case VK_MENU:     return 342;
+        case VK_SPACE:    return 32;
         default:
-            if (ks >= XK_a && ks <= XK_z) return (int)ks - XK_a + 97;
-            if (ks >= XK_0 && ks <= XK_9) return (int)ks;
+            if (vk >= 'A' && vk <= 'Z') return (int)(vk - 'A' + 97);
+            if (vk >= '0' && vk <= '9') return (int)vk;
             return 0;
     }
+}
+
+/* ─── Window class registration (one-time) ─── */
+
+static const char* META_WIN_CLASS = "BrickWindow";
+
+static int register_window_class(HINSTANCE inst) {
+    WNDCLASSW wc;
+    memset(&wc, 0, sizeof(wc));
+    wc.style         = CS_HREDRAW | CS_VREDRAW;
+    wc.lpfnWndProc   = meta_win32_wndproc;
+    wc.hInstance     = inst;
+    wc.hCursor       = LoadCursor(NULL, IDC_ARROW);
+    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.lpszClassName = L"BrickWindow";
+    return RegisterClassW(&wc) != 0;
+}
+
+/* ─── Window procedure ─── */
+
+static LRESULT CALLBACK meta_win32_wndproc(HWND hwnd, UINT msg,
+                                           WPARAM wp, LPARAM lp) {
+    MetaWindow* w = get_window_ptr(hwnd);
+
+    switch (msg) {
+        case WM_CLOSE:
+            if (w) w->should_close = 1;
+            return 0;
+
+        case WM_DESTROY:
+            if (w) w->should_close = 1;
+            PostQuitMessage(0);
+            return 0;
+
+        case WM_SIZE: {
+            if (w) {
+                int new_w = (int)(LOWORD(lp));
+                int new_h = (int)(HIWORD(lp));
+                if (new_w != w->width || new_h != w->height) {
+                    w->width  = new_w;
+                    w->height = new_h;
+                    MetaEvent me;
+                    memset(&me, 0, sizeof(me));
+                    me.type = META_EVENT_RESIZE;
+                    me.data.resize.width  = new_w;
+                    me.data.resize.height = new_h;
+                    event_queue_push(&w->event_queue, &me);
+                }
+            }
+            return 0;
+        }
+
+        case WM_KEYDOWN:
+        case WM_SYSKEYDOWN: {
+            if (w) {
+                MetaEvent me;
+                memset(&me, 0, sizeof(me));
+                me.type = META_EVENT_KEY_DOWN;
+                me.data.key.keycode = win32_vk_to_meta(wp);
+                me.data.key.mods    = (int)wp; /* raw VK for now */
+                event_queue_push(&w->event_queue, &me);
+            }
+            return 0;
+        }
+
+        case WM_KEYUP:
+        case WM_SYSKEYUP: {
+            if (w) {
+                MetaEvent me;
+                memset(&me, 0, sizeof(me));
+                me.type = META_EVENT_KEY_UP;
+                me.data.key.keycode = win32_vk_to_meta(wp);
+                event_queue_push(&w->event_queue, &me);
+            }
+            return 0;
+        }
+
+        case WM_MOUSEMOVE: {
+            if (w) {
+                MetaEvent me;
+                memset(&me, 0, sizeof(me));
+                me.type = META_EVENT_MOUSE_MOVE;
+                me.data.mouse_move.x = (double)(int16_t)(LOWORD(lp));
+                me.data.mouse_move.y = (double)(int16_t)(HIWORD(lp));
+                event_queue_push(&w->event_queue, &me);
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONDOWN:
+        case WM_RBUTTONDOWN:
+        case WM_MBUTTONDOWN: {
+            if (w) {
+                MetaEvent me;
+                memset(&me, 0, sizeof(me));
+                me.type = META_EVENT_MOUSE_BTN;
+                me.data.mouse_btn.button = (msg == WM_LBUTTONDOWN) ? 1
+                                          : (msg == WM_RBUTTONDOWN) ? 2 : 3;
+                me.data.mouse_btn.action = 1;
+                event_queue_push(&w->event_queue, &me);
+            }
+            return 0;
+        }
+
+        case WM_LBUTTONUP:
+        case WM_RBUTTONUP:
+        case WM_MBUTTONUP: {
+            if (w) {
+                MetaEvent me;
+                memset(&me, 0, sizeof(me));
+                me.type = META_EVENT_MOUSE_BTN;
+                me.data.mouse_btn.button = (msg == WM_LBUTTONUP) ? 1
+                                          : (msg == WM_RBUTTONUP) ? 2 : 3;
+                me.data.mouse_btn.action = 0;
+                event_queue_push(&w->event_queue, &me);
+            }
+            return 0;
+        }
+
+        case WM_MOUSEWHEEL: {
+            if (w) {
+                MetaEvent me;
+                memset(&me, 0, sizeof(me));
+                me.type = META_EVENT_MOUSE_WHEEL;
+                short delta = GET_WHEEL_DELTA_WPARAM(wp);
+                me.data.mouse_wheel.delta = (double)delta / 120.0;
+                event_queue_push(&w->event_queue, &me);
+            }
+            return 0;
+        }
+    }
+
+    return DefWindowProcW(hwnd, msg, wp, lp);
 }
 
 /* ─── Creation ─── */
@@ -1435,6 +2005,17 @@ MetaWindow* meta_window_create(
     BlockCtx* block, const char* title, int width, int height, uint32_t flags
 ) {
     if (!block) return NULL;
+
+    HINSTANCE inst = GetModuleHandleW(NULL);
+
+    static int class_registered = 0;
+    if (!class_registered) {
+        class_registered = register_window_class(inst);
+        if (!class_registered) {
+            io_print_string("FATAL: Cannot register Win32 window class", 41);
+            return NULL;
+        }
+    }
 
     MetaWindow* w = (MetaWindow*)block_alloc(block, sizeof(MetaWindow));
     if (!w) return NULL;
@@ -1454,65 +2035,50 @@ MetaWindow* meta_window_create(
         memcpy(w->title, "Brick", 7);
     }
 
-    /* Open X display */
-    Display* dpy = XOpenDisplay(NULL);
-    if (!dpy) {
-        io_print_string("FATAL: Cannot open X display", 28);
+    DWORD style = WS_OVERLAPPEDWINDOW;
+    DWORD ex_style = WS_EX_APPWINDOW;
+
+    if (flags & META_WINDOW_BORDERLESS) {
+        style = WS_POPUP;
+    }
+    if (flags & META_WINDOW_FULLSCREEN) {
+        style = WS_POPUP | WS_VISIBLE;
+        ex_style = WS_EX_TOPMOST;
+    }
+
+    /* Convert title to wide char */
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, w->title, -1, NULL, 0);
+    wchar_t* wtitle = (wchar_t*)malloc(wlen * sizeof(wchar_t));
+    MultiByteToWideChar(CP_UTF8, 0, w->title, -1, wtitle, wlen);
+
+    RECT rect = {0, 0, width, height};
+    AdjustWindowRect(&rect, style, FALSE);
+
+    HWND hwnd = CreateWindowExW(
+        ex_style, L"BrickWindow", wtitle,
+        style,
+        CW_USEDEFAULT, CW_USEDEFAULT,
+        rect.right - rect.left,
+        rect.bottom - rect.top,
+        NULL, NULL, inst, NULL
+    );
+
+    free(wtitle);
+
+    if (!hwnd) {
+        io_print_string("FATAL: Cannot create Win32 window", 36);
         return NULL;
     }
 
-    int screen = DefaultScreen(dpy);
-    Window root = RootWindow(dpy, screen);
+    set_window_ptr(hwnd, w);
+    w->hinstance = (void*)inst;
+    w->hwnd      = (void*)hwnd;
+    w->hdc       = (void*)GetDC(hwnd);
 
-    /* Window attributes */
-    XSetWindowAttributes attrs;
-    attrs.event_mask =
-        ExposureMask | KeyPressMask | KeyReleaseMask |
-        ButtonPressMask | ButtonReleaseMask |
-        PointerMotionMask |
-        StructureNotifyMask | FocusChangeMask;
-
-    Window xwin = XCreateWindow(
-        dpy, root,
-        0, 0, width, height, 0,
-        CopyFromParent, InputOutput,
-        CopyFromParent,
-        CWEventMask, &attrs
-    );
-
-    /* Set title via WM hints */
-    XStoreName(dpy, xwin, w->title);
-    Atom wm_delete = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
-    XSetWMProtocols(dpy, xwin, &wm_delete, 1);
-
-    /* Resizability */
-    if (!(flags & META_WINDOW_RESIZABLE)) {
-        XSizeHints hints;
-        hints.flags = PMinSize | PMaxSize;
-        hints.min_width  = width;
-        hints.max_width  = width;
-        hints.min_height = height;
-        hints.max_height = height;
-        XSetWMNormalHints(dpy, xwin, &hints);
+    if (!(flags & META_WINDOW_HIDDEN)) {
+        ShowWindow(hwnd, SW_SHOW);
+        UpdateWindow(hwnd);
     }
-
-    /* Fullscreen */
-    if (flags & META_WINDOW_FULLSCREEN) {
-        Atom wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
-        Atom full = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
-        XChangeProperty(dpy, xwin, wm_state, XA_ATOM, 32,
-                        PropModeReplace, (unsigned char*)&full, 1);
-    }
-
-    GC gc = XCreateGC(dpy, xwin, 0, NULL);
-
-    /* Sync before storing */
-    XMapWindow(dpy, xwin);
-    XFlush(dpy);
-
-    w->display = (void*)dpy;
-    w->window  = (unsigned long)xwin;
-    w->gc      = (unsigned long)gc;
 
     return w;
 }
@@ -1521,102 +2087,23 @@ MetaWindow* meta_window_create(
 
 void meta_window_destroy(MetaWindow* w) {
     if (!w) return;
-    Display* dpy = (Display*)w->display;
-    if (dpy) {
-        XFreeGC(dpy, (GC)w->gc);
-        XDestroyWindow(dpy, (Window)w->window);
-        XCloseDisplay(dpy);
+    if (w->hwnd) {
+        ReleaseDC((HWND)w->hwnd, (HDC)w->hdc);
+        DestroyWindow((HWND)w->hwnd);
+        w->hwnd = NULL;
     }
-    w->display = NULL;
 }
 
 /* ─── Event polling ─── */
 
 int meta_window_poll_events(MetaWindow* w) {
     if (!w) return 0;
-    Display* dpy = (Display*)w->display;
+    MSG msg;
     int count = 0;
-
-    /* Process all pending X11 events */
-    XEvent xe;
-    while (XPending(dpy)) {
-        XNextEvent(dpy, &xe);
-
-        MetaEvent me;
-        memset(&me, 0, sizeof(me));
-        me.timestamp_ms = 0; /* X11 timestamps are server-time; skip for now */
-
-        switch (xe.type) {
-            case ClientMessage: {
-                Atom wm_delete = XInternAtom(dpy, "WM_DELETE_WINDOW", False);
-                if ((Atom)xe.xclient.data.l[0] == wm_delete) {
-                    me.type = META_EVENT_CLOSE;
-                    w->should_close = 1;
-                }
-                break;
-            }
-            case DestroyNotify:
-                me.type = META_EVENT_CLOSE;
-                w->should_close = 1;
-                break;
-            case ConfigureNotify: {
-                int new_w = xe.xconfigure.width;
-                int new_h = xe.xconfigure.height;
-                if (new_w != w->width || new_h != w->height) {
-                    w->width  = new_w;
-                    w->height = new_h;
-                    me.type = META_EVENT_RESIZE;
-                    me.data.resize.width  = new_w;
-                    me.data.resize.height = new_h;
-                }
-                break;
-            }
-            case KeyPress: {
-                KeySym ks = XLookupKeysym(&xe.xkey, 0);
-                me.type = META_EVENT_KEY_DOWN;
-                me.data.key.keycode = x11_keycode_to_meta(ks);
-                me.data.key.mods    = xe.xkey.state;
-                break;
-            }
-            case KeyRelease: {
-                KeySym ks = XLookupKeysym(&xe.xkey, 0);
-                me.type = META_EVENT_KEY_UP;
-                me.data.key.keycode = x11_keycode_to_meta(ks);
-                me.data.key.mods    = xe.xkey.state;
-                break;
-            }
-            case ButtonPress:
-            case ButtonRelease: {
-                if (xe.xbutton.button >= 4 && xe.xbutton.button <= 7) {
-                    /* Scroll wheel */
-                    me.type = META_EVENT_MOUSE_WHEEL;
-                    me.data.mouse_wheel.delta =
-                        (xe.xbutton.button == 4 || xe.xbutton.button == 6) ? 1.0 : -1.0;
-                } else {
-                    me.type = (xe.type == ButtonPress)
-                              ? META_EVENT_MOUSE_BTN
-                              : META_EVENT_MOUSE_BTN;
-                    me.data.mouse_btn.button = (int)xe.xbutton.button;
-                    me.data.mouse_btn.action = (xe.type == ButtonPress) ? 1 : 0;
-                    me.data.mouse_btn.mods   = xe.xbutton.state;
-                }
-                break;
-            }
-            case MotionNotify:
-                me.type = META_EVENT_MOUSE_MOVE;
-                me.data.mouse_move.x = xe.xmotion.x;
-                me.data.mouse_move.y = xe.xmotion.y;
-                break;
-            default:
-                continue; /* skip unhandled */
-        }
-
-        if (me.type != META_EVENT_NONE) {
-            event_queue_push(&w->event_queue, &me);
-            count++;
-        }
+    while (PeekMessageW(&msg, (HWND)w->hwnd, 0, 0, PM_REMOVE)) {
+        TranslateMessage(&msg);
+        DispatchMessageW(&msg);
     }
-
     return count;
 }
 
@@ -1628,9 +2115,8 @@ int meta_window_next_event(MetaWindow* w, MetaEvent* out) {
 /* ─── Swap buffers ─── */
 
 void meta_window_swap_buffers(MetaWindow* w) {
-    if (!w) return;
-    Display* dpy = (Display*)w->display;
-    XFlush(dpy);
+    if (!w || !w->hwnd || !w->hdc) return;
+    SwapBuffers((HDC)w->hdc);
 }
 
 /* ─── Queries ─── */
@@ -1645,8 +2131,11 @@ void meta_window_set_title(MetaWindow* w, const char* title) {
     if (len >= sizeof(w->title)) len = sizeof(w->title) - 1;
     memcpy(w->title, title, len);
     w->title[len] = '\0';
-    Display* dpy = (Display*)w->display;
-    if (dpy) XStoreName(dpy, (Window)w->window, w->title);
+    int wlen = MultiByteToWideChar(CP_UTF8, 0, title, -1, NULL, 0);
+    wchar_t* wtitle = (wchar_t*)malloc(wlen * sizeof(wchar_t));
+    MultiByteToWideChar(CP_UTF8, 0, title, -1, wtitle, wlen);
+    SetWindowTextW((HWND)w->hwnd, wtitle);
+    free(wtitle);
 }
 
 void meta_window_get_size(MetaWindow* w, int* out_w, int* out_h) {
@@ -1656,29 +2145,30 @@ void meta_window_get_size(MetaWindow* w, int* out_w, int* out_h) {
 }
 
 void meta_window_set_fullscreen(MetaWindow* w, int fullscreen) {
-    if (!w) return;
-    Display* dpy = (Display*)w->display;
-    if (!dpy) return;
-    Atom wm_state = XInternAtom(dpy, "_NET_WM_STATE", False);
-    Atom full     = XInternAtom(dpy, "_NET_WM_STATE_FULLSCREEN", False);
-    XEvent xe;
-    memset(&xe, 0, sizeof(xe));
-    xe.type = ClientMessage;
-    xe.xclient.window = (Window)w->window;
-    xe.xclient.message_type = wm_state;
-    xe.xclient.format = 32;
-    xe.xclient.data.l[0] = fullscreen ? 1 : 0; /* _NET_WM_STATE_ADD / _REMOVE */
-    xe.xclient.data.l[1] = (long)full;
-    XSendEvent(dpy, DefaultRootWindow(dpy), False,
-               SubstructureRedirectMask | SubstructureNotifyMask, &xe);
+    if (!w || !w->hwnd) return;
+    HWND hwnd = (HWND)w->hwnd;
+    if (fullscreen) {
+        SetWindowLongPtrW(hwnd, GWL_STYLE,
+                          WS_POPUP | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_TOPMOST, 0, 0,
+                     GetSystemMetrics(SM_CXSCREEN),
+                     GetSystemMetrics(SM_CYSCREEN),
+                     SWP_FRAMECHANGED);
+    } else {
+        SetWindowLongPtrW(hwnd, GWL_STYLE,
+                          WS_OVERLAPPEDWINDOW | WS_VISIBLE);
+        SetWindowPos(hwnd, HWND_NOTOPMOST, 0, 0,
+                     w->width, w->height,
+                     SWP_FRAMECHANGED);
+    }
 }
 
 void* meta_window_native_handle(MetaWindow* w) {
     if (!w) return NULL;
-    return (void*)(uintptr_t)w->window;
+    return w->hwnd;
 }
 )";
-const size_t _runtime_libs_window_window_linux_c_len = sizeof(_runtime_libs_window_window_linux_c) - 1;
+const size_t _runtime_libs_window_window_win32_c_len = sizeof(_runtime_libs_window_window_win32_c) - 1;
 
 const char _runtime_libs_window_window_hr_c[] = R"(
 /**
@@ -1741,27 +2231,28 @@ const EmbeddedFile _runtime_sources[] = {
     {"block_memory.c", _runtime_block_memory_c, _runtime_block_memory_c_len},
     {"io.h", _runtime_io_h, _runtime_io_h_len},
     {"io.c", _runtime_io_c, _runtime_io_c_len},
+    {"pool_allocator.h", _runtime_pool_allocator_h, _runtime_pool_allocator_h_len},
+    {"pool_allocator.c", _runtime_pool_allocator_c, _runtime_pool_allocator_c_len},
     {"hot_reload.h", _runtime_hot_reload_h, _runtime_hot_reload_h_len},
     {"libs/window/window.h", _runtime_libs_window_window_h, _runtime_libs_window_window_h_len},
     {"libs/window/window_internal.h", _runtime_libs_window_window_internal_h, _runtime_libs_window_window_internal_h_len},
     {"libs/window/window_hr.h", _runtime_libs_window_window_hr_h, _runtime_libs_window_window_hr_h_len},
     {"hot_reload.c", _runtime_hot_reload_c, _runtime_hot_reload_c_len},
-    {"libs/window/window_linux.c", _runtime_libs_window_window_linux_c, _runtime_libs_window_window_linux_c_len},
+    {"libs/window/window_win32.c", _runtime_libs_window_window_win32_c, _runtime_libs_window_window_win32_c_len},
     {"libs/window/window_hr.c", _runtime_libs_window_window_hr_c, _runtime_libs_window_window_hr_c_len},
 };
 
 const char* _runtime_flags[] = {
-    "-ldl",
-    "-lpthread",
-    "-lX11",
+    "-luser32",
+    "-lgdi32",
 };
 
 const RuntimeInfo runtime_info = {
-    "linux",
-    "gcc",
-    11,
+    "windows",
+    "C:/msys64/mingw32/bin/gcc.EXE",
+    13,
     _runtime_sources,
-    3,
+    2,
     _runtime_flags,
 };
 

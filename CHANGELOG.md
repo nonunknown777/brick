@@ -1,5 +1,27 @@
 # Changelog
 
+## v0.6.0 — Windows Support
+
+### Major: Native Windows Port
+- Full Windows support via MinGW-w64 (GCC ≥ 13)
+- `block_memory.c`: `VirtualAlloc`/`VirtualFree` (was `mmap`/`munmap`), `CRITICAL_SECTION` (was `pthread_mutex`), `BRICK_TLS` (was `__thread`)
+- `hot_reload.c`: `LoadLibraryA`/`GetProcAddress`/`FreeLibrary` (was `dlopen`/`dlsym`/`dlclose`), `ReadDirectoryChangesW` with overlapped I/O (was `inotify`)
+- `pool_allocator.c`: guarded `_GNU_SOURCE` behind `#ifndef _WIN32`
+- `src/main.cpp`: `CreateProcess` for visualize mode, `GetTempPathA`/`CreateDirectoryA` for temp dirs, `cmd /c` for shell commands
+- `SConstruct`: native Windows host detection, `g++`/`gcc` auto-detection, skips X11/pthread on Windows
+- `scripts/embed_runtime.py`: Windows CC auto-detection via `shutil.which`, forward-slash path normalization
+- `brc-run.bat`: Windows wrapper to compile `.brc` → `.c` → `.exe`
+- `build-release.ps1`: Windows equivalent of `build-release.sh`
+- `libs/window`: `window_win32.c` with Win32 API (CreateWindow, PeekMessage, etc.) — user32/gdi32 linking
+- All 159 codegen tests pass on Windows, 18 new Windows-specific runtime tests
+- 6 new Windows integration tests (`brick build`, `brick run`, error detection, C interop)
+
+### Documentation
+- All docs updated with Windows build instructions and platform details
+- AGENTS.md updated with Windows stack and conventions
+
+---
+
 ## v0.5.0 — Macro System
 
 ### Major: Compile-Time Macro System

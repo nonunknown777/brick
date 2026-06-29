@@ -36,8 +36,23 @@ std::unique_ptr<ASTNode> clone_ast(const ASTNode* node) {
             c->extends = sd->extends;
             c->interfaces = sd->interfaces;
             c->is_private = sd->is_private;
+            c->is_anonymous = sd->is_anonymous;
             for (auto& f : sd->fields) c->fields.push_back(clone_decl(f.get()));
             for (auto& m : sd->methods) c->methods.push_back(clone_decl(m.get()));
+            return c;
+        }
+        case ASTNodeType::UNION_DECL: {
+            auto* ud = static_cast<const UnionDecl*>(node);
+            if (ud->is_anonymous) {
+                auto c = std::make_unique<UnionDecl>(ud->location);
+                c->is_anonymous = true;
+                for (auto& f : ud->fields) c->fields.push_back(clone_decl(f.get()));
+                return c;
+            }
+            auto c = std::make_unique<UnionDecl>(ud->name, ud->location);
+            c->is_anonymous = ud->is_anonymous;
+            c->is_private = ud->is_private;
+            for (auto& f : ud->fields) c->fields.push_back(clone_decl(f.get()));
             return c;
         }
         case ASTNodeType::INTERFACE_DECL: {
@@ -50,6 +65,7 @@ std::unique_ptr<ASTNode> clone_ast(const ASTNode* node) {
             auto* fd = static_cast<const FieldDecl*>(node);
             auto c = std::make_unique<FieldDecl>(fd->type_name, fd->name, fd->location);
             c->is_private = fd->is_private;
+            c->bit_width = fd->bit_width;
             return c;
         }
         case ASTNodeType::FUNC_DECL: {
@@ -66,7 +82,9 @@ std::unique_ptr<ASTNode> clone_ast(const ASTNode* node) {
         }
         case ASTNodeType::PARAM_DECL: {
             auto* pd = static_cast<const ParamDecl*>(node);
-            return std::make_unique<ParamDecl>(pd->type_name, pd->name, pd->location);
+            auto c = std::make_unique<ParamDecl>(pd->type_name, pd->name, pd->location);
+            if (pd->default_value) c->default_value = clone_expr(pd->default_value.get());
+            return c;
         }
         case ASTNodeType::BLOCK_DECL: {
             auto* bd = static_cast<const BlockDecl*>(node);
@@ -95,6 +113,24 @@ std::unique_ptr<ASTNode> clone_ast(const ASTNode* node) {
         case ASTNodeType::LINK_DECL: {
             auto* ld = static_cast<const LinkDecl*>(node);
             return std::make_unique<LinkDecl>(ld->lib, ld->location);
+        }
+        case ASTNodeType::TYPE_ALIAS: {
+            auto* ta = static_cast<const TypeAliasDecl*>(node);
+            return std::make_unique<TypeAliasDecl>(ta->alias_name, ta->underlying_type, ta->location);
+        }
+        case ASTNodeType::CONST_DECL: {
+            auto* cd = static_cast<const ConstDecl*>(node);
+            auto c = std::make_unique<ConstDecl>(cd->name, cd->location);
+            c->type_name = cd->type_name;
+            c->value = clone_expr(cd->value.get());
+            return c;
+        }
+        case ASTNodeType::ENUM_DECL: {
+            auto* ed = static_cast<const EnumDecl*>(node);
+            auto c = std::make_unique<EnumDecl>(ed->name, ed->location);
+            c->variants = ed->variants;
+            c->is_private = ed->is_private;
+            return c;
         }
         case ASTNodeType::BLOCK_STMT: {
             auto* bs = static_cast<const BlockStmt*>(node);
@@ -131,6 +167,32 @@ std::unique_ptr<ASTNode> clone_ast(const ASTNode* node) {
             auto c = std::make_unique<ReturnStmt>(rs->location);
             c->value = clone_expr(rs->value.get());
             return c;
+        }
+        case ASTNodeType::BREAK_STMT: {
+            auto* bs = static_cast<const BreakStmt*>(node);
+            return std::make_unique<BreakStmt>(bs->location);
+        }
+        case ASTNodeType::CONTINUE_STMT: {
+            auto* cs = static_cast<const ContinueStmt*>(node);
+            return std::make_unique<ContinueStmt>(cs->location);
+        }
+        case ASTNodeType::MATCH_STMT: {
+            auto* ms = static_cast<const MatchStmt*>(node);
+            auto c = std::make_unique<MatchStmt>(ms->location);
+            c->value = clone_expr(ms->value.get());
+            for (auto& arm : ms->arms) {
+                MatchStmt::Arm cloned_arm;
+                for (auto& p : arm.patterns)
+                    cloned_arm.patterns.push_back(clone_expr(p.get()));
+                cloned_arm.body = clone_stmt(arm.body.get());
+                cloned_arm.guard = clone_expr(arm.guard.get());
+                c->arms.push_back(std::move(cloned_arm));
+            }
+            return c;
+        }
+        case ASTNodeType::DEFER_STMT: {
+            auto* ds = static_cast<const DeferStmt*>(node);
+            return std::make_unique<DeferStmt>(clone_stmt(ds->body.get()), ds->location);
         }
         case ASTNodeType::EXPR_STMT: {
             auto* es = static_cast<const ExprStmt*>(node);

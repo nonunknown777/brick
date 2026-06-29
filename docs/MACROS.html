@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Macro System — Brick</title>
+<meta name="description" content="Brick macro system documentation">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<nav class="doc-nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">Brick</a>
+    <div class="nav-links">
+      <a href="LANGUAGE.html">Language</a>
+      <a href="MACROS.html">Macros</a>
+      <a href="ARCHITECTURE.html">Architecture</a>
+      <a href="GETTING_STARTED.html">Getting Started</a>
+      <a href="OPTIMIZATIONS.html">Optimizations</a>
+      <a href="hot-reload.html">Hot Reload</a>
+      <a href="index.html" class="nav-back">← Home</a>
+    </div>
+  </div>
+</nav>
+
+<main class="doc-main">
+  <div class="container doc-content">
+<h1>Brick Macros</h1>
+<p>Macros let you generate code at compile time. Think of them as &quot;smart templates&quot; — you write the pattern once, and the compiler stamps it out wherever you call it.</p>
+<blockquote>
+<p><strong>Zero cost.</strong> Macros expand before type-checking. The generated code is exactly as fast as if you'd written it by hand.</p>
+</blockquote>
+<hr />
+<h2>Quick Example: Swap</h2>
+<div class="code-block"><pre class="language-brick">macro swap(a, b) {
+    __tmp = $a
+    $a = $b
+    $b = __tmp
+}
+
+fn main() {
+    x = 10
+    y = 20
+    swap(x, y)
+    print("x={0} y={1}", x, y)   // x=20 y=10
+}
+</pre></div>
+<p>The <code>macro swap(a, b)</code> defines a pattern. <code>$a</code> and <code>$b</code> are replaced with the actual variables you pass. <code>__tmp</code> gets a unique name so it never conflicts with other variables.</p>
+<hr />
+<h2>Defining a Macro</h2>
+<div class="code-block"><pre class="language-brick">macro name(param1, param2, ...) {
+    // body — any Brick code with $ interpolation
+}
+</pre></div>
+<ul>
+<li>Parameters are <strong>untyped</strong> — they hold expressions, not values</li>
+<li><code>$name</code> inserts the expression passed for <code>name</code></li>
+<li><code>$(expr)</code> evaluates <code>expr</code> and inserts the result (for computed names)</li>
+</ul>
+<hr />
+<h2>Interpolation (<code>$</code>)</h2>
+<table>
+<thead>
+<tr><th>Syntax</th><th>What it does</th><th>Example</th></tr>
+</thead>
+<tbody>
+<tr><td>`$name`</td><td>Inserts the argument passed for `name`</td><td>`$a` → `x`</td></tr>
+<tr><td>`$(expr)`</td><td>Evaluates `expr` at compile time, inserts result</td><td>`$("vec2_" ++ name)` → `vec2_position`</td></tr>
+</tbody>
+</table>
+<hr />
+<h2>Varargs (<code>...</code>)</h2>
+<div class="code-block"><pre class="language-brick">macro print_all(values...) {
+    $values[0]    // first value
+    $values[1]    // second value
+    // ...
+}
+</pre></div>
+<p><code>values...</code> captures <strong>all remaining arguments</strong> as a list. Access them by index.</p>
+<hr />
+<h2><code>emit</code> — Generate Code</h2>
+<div class="code-block"><pre class="language-brick">macro vec2_add(name) {
+    emit {
+        fn $name(x1, y1, x2, y2, out_x, out_y) {
+            out_x = x1 + x2
+            out_y = y1 + y2
+        }
+    }
+}
+
+vec2_add(add_positions)
+
+fn main() {
+    add_positions(1, 2, 3, 4, result_x, result_y)
+}
+</pre></div>
+<p><code>emit { ... }</code> stamps its contents into the output at the call site. Everything inside <code>emit</code> is literal code with <code>$</code> interpolation.</p>
+<hr />
+<h2><code>build</code> — Compile-Time Computation</h2>
+<div class="code-block"><pre class="language-brick">build {
+    x = 42
+    y = x + 10
+    emit { z = y }
+}
+</pre></div>
+<p><code>build</code> runs at <strong>compile time</strong>. Variables created inside <code>build</code> don't exist in the final binary — only the <code>emit</code> calls produce actual code.</p>
+<h3>Real Example: Compile-Time Damage Table</h3>
+<div class="code-block"><pre class="language-brick">build {
+    // Pre-compute damage values for all weapon types
+    damages = [10, 25, 50, 100]    // fist, pistol, rifle, rocket
+    max_hp = 100
+    
+    for i = 0; i &lt; 4; i = i + 1 {
+        dmg = damages[i]
+        hp_after = max_hp - dmg
+        
+        emit {
+            if weapon_type == i {
+                hp = hp - dmg
+                print("Hit! HP left: {0}", hp_after)
+            }
+        }
+    }
+}
+</pre></div>
+<p>This generates 4 <code>if</code> branches — all computed at compile time, zero runtime overhead.</p>
+<hr />
+<h2>Real Game Examples</h2>
+<h3>1. Assert Macro (Debug Checking)</h3>
+<div class="code-block"><pre class="language-brick">macro assert(condition, message) {
+    if !($condition) {
+        print("ASSERT FAILED: {0}", $message)
+    }
+}
+
+fn take_damage(hp, dmg) {
+    assert(dmg &gt;= 0, "damage can't be negative")
+    assert(hp &gt; 0, "already dead")
+    hp = hp - dmg
+}
+</pre></div>
+<h3>2. Enum Pattern (Named Constants)</h3>
+<div class="code-block"><pre class="language-brick">macro enum(name, values...) {
+    emit {
+        $name = 0     // first value = 0
+    }
+    for i = 1; i &lt; 4; i = i + 1 {
+        emit {
+            ${"$" ++ values[i]} = i
+        }
+    }
+}
+
+// Usage:
+enum(WeaponType, WEAPON_FIST, WEAPON_PISTOL, WEAPON_RIFLE, WEAPON_ROCKET)
+
+fn main() {
+    if current_weapon == WEAPON_ROCKET {
+        print("Fire in the hole!")
+    }
+}
+</pre></div>
+<h3>3. Property Getter/Setter</h3>
+<div class="code-block"><pre class="language-brick">macro property(name, type) {
+    __hidden_$name = 0
+    
+    emit {
+        fn get_$name() {
+            return __hidden_$name
+        }
+        fn set_$name(val) {
+            __hidden_$name = val
+        }
+    }
+}
+
+struct Player {
+    property(hp, i32)
+    property(mana, i32)
+    
+    fn take_damage(dmg) {
+        set_hp(get_hp() - dmg)
+    }
+}
+</pre></div>
+<h3>4. Saveable Struct Serialization</h3>
+<div class="code-block"><pre class="language-brick">macro saveable(name, fields...) {
+    emit {
+        fn save_$name(obj, file) {
+            print(file, $name)
+        }
+        fn load_$name(file) -&gt; $name {
+            result = $name()
+            print("loaded")
+            return result
+        }
+    }
+}
+
+struct GameState {
+    i32 level
+    f64 health
+    String checkpoint
+    
+    saveable(GameState, level, health, checkpoint)
+}
+</pre></div>
+<h3>5. Block Pool (Typed Allocator)</h3>
+<div class="code-block"><pre class="language-brick">macro block_pool(name, type, count) {
+    block $name = count * 64   // reserve memory
+    
+    emit {
+        fn alloc_$name() -&gt; $type {
+            return $type() @$name
+        }
+        fn reset_$name() {
+            reset $name
+        }
+    }
+}
+
+block_pool(enemies, Enemy, 100)
+
+fn spawn_enemy(x, y) {
+    e = alloc_enemies()
+    e.x = x
+    e.y = y
+    return e
+}
+</pre></div>
+<h3>6. Compile-Time Constants</h3>
+<div class="code-block"><pre class="language-brick">build {
+    max_players = 4
+    tile_size = 16
+    screen_w = 800
+    screen_h = 600
+    
+    emit {
+        PLAYER_SPEED = 3.0f64 * tile_size / 60.0f64
+        BULLET_SPEED = 10.0f64 * tile_size / 60.0f64
+    }
+}
+</pre></div>
+<hr />
+<h2>Hygiene (Name Conflicts)</h2>
+<p>Variables starting with <code>__</code> inside a macro get <strong>unique names</strong> automatically:</p>
+<div class="code-block"><pre class="language-brick">macro twice(body) {
+    __i = 0
+    while __i &lt; 2 {
+        $body
+        __i = __i + 1
+    }
+}
+
+fn main() {
+    __i = 100       // ← this is a DIFFERENT variable
+    twice(print("hi"))
+    print(__i)      // still 100 — macro used __i__1 internally
+}
+</pre></div>
+<p>The macro's <code>__i</code> becomes <code>__i__1</code> (or <code>__i__2</code>, etc.) — no collision.</p>
+<hr />
+<h2>Type Reflection (inside <code>build</code>)</h2>
+<p>Inside <code>build</code> blocks you can inspect types at compile time:</p>
+<table>
+<thead>
+<tr><th>Expression</th><th>Returns</th><th>Example</th></tr>
+</thead>
+<tbody>
+<tr><td>`T.name`</td><td>Type name as string</td><td>`"i32"`</td></tr>
+<tr><td>`T.size`</td><td>Size in bytes</td><td>`4`</td></tr>
+<tr><td>`T.fields`</td><td>Field names as strings</td><td>`["x", "y"]`</td></tr>
+</tbody>
+</table>
+<div class="code-block"><pre class="language-brick">struct Vec2 { f32 x; f32 y }
+
+build {
+    v = Vec2
+    name = v.name       // "Vec2"
+    size = v.size       // 8
+    fields = v.fields   // ["x", "y"]
+    
+    emit {
+        print("Type {0} has {1} fields: {2}, {3}", name, fields.len, fields[0], fields[1])
+    }
+}
+</pre></div>
+<hr />
+<h2>Error Handling</h2>
+<table>
+<thead>
+<tr><th>Situation</th><th>What happens</th></tr>
+</thead>
+<tbody>
+<tr><td>Wrong argument count</td><td>Compile error: "macro 'name' expects N args, got M"</td></tr>
+<tr><td>`$` outside macro/build</td><td>Compile error: "unexpected $"</td></tr>
+<tr><td>Recursive macro</td><td>Caught after 64 levels: "macro recursion too deep"</td></tr>
+<tr><td>I/O inside `build`</td><td>Build blocks can't call print() or file operations</td></tr>
+</tbody>
+</table>
+<hr />
+<h2>How It Works (Pipeline)</h2>
+<div class="code-block"><pre class="">.brc → Lexer → Parser → [Collect Macros] → [Eval Build] → [Expand Macros] → Type Checker → Codegen → .c
+</pre></div>
+<ol>
+<li><strong>Collect</strong>: All <code>macro</code> declarations are gathered into a table (and removed from the AST)</li>
+<li><strong>Eval Build</strong>: <code>build {}</code> blocks run at compile time — their <code>emit</code> calls produce generated code</li>
+<li><strong>Expand</strong>: Each <code>macro_call(...)</code> is replaced by the macro's body with <code>$</code> substitutions and <code>__</code> renaming</li>
+<li><strong>Clean</strong>: Only regular Brick code reaches the type checker and codegen</li>
+</ol>
+<hr />
+<h2>See Also</h2>
+<ul>
+<li><a href="LANGUAGE.md">Language Reference</a> — full syntax and type system</li>
+<li><a href="GETTING_STARTED.md">Getting Started</a> — install and first project</li>
+<li><a href="ARCHITECTURE.md">Architecture</a> — how the compiler pipeline works</li>
+</ul>
+
+  </div>
+</main>
+
+<footer>
+  <p>Brick — MIT License</p>
+  <p><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
+</footer>
+
+</body>
+</html>

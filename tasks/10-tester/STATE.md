@@ -62,14 +62,31 @@ Task sênior. Responsável por testar, otimizar, documentar e coordenar.
 - ✅ Bug 1: `$` em nomes de função dentro de `emit {}` — `func_decl()` agora aceita `DOLLAR` + `IDENTIFIER` como nome de função (via `FuncDecl::name_expr`)
 - ✅ Bug 2: Build variables (`msg = "text"` dentro de `build {}`) agora interpolam automaticamente em `emit {}` (via `subst_build_expr` + `subst_build_stmt` em `build_eval.cpp`)
 
-## 15. Sessão atual: Type checker hardening + testes de erro
-- ✅ Fix: `can_assign()` agora é chamada para variáveis declaradas com tipo (`int x = expr`) em `type_checker.cpp:571` — antes o tipo computado era descartado sem verificação
-- ✅ Literais sem sufixo (`42`, `3.14`) são isentos da verificação (o tipo é inferido do contexto)
-- ✅ 12 novos testes de erro de tipo em `test_codegen.cpp` (signed/unsigned, float→int, f64→f32, narrowing, bool condition, void return, missing return, constructor arg, undefined symbol, member access, C interop)
-- ✅ Testes `signed_unsigned_mix` e `narrowing_int` corrigidos para corresponder ao comportamento real do type checker (bool→int widening é permitido, bool = u8)
-- ✅ Macro error tests (5 `.brc` files + `test_macro_errors.sh`) integrados no `scons test`
-- ✅ C interop test (`test_c_interop.brc`) adicionado à suite de integração
-- ✅ All tests pass: 0 FAIL em unitários + integração + macro errors
+## 15. Sessão atual: string_view optimization + bug fixes
+- ✅ **Token::lexeme** changed from `std::string` to `std::string_view` — eliminates per-token heap allocations
+- ✅ Lexer rewritten to emit `string_view` into source buffer instead of allocating strings
+- ✅ Escape processing moved from lexer to parser (`process_string_escapes` / `process_char_escape`)
+- ✅ `std::from_chars` replaces `std::stoll`/`std::stod` for numeric parsing (works on `string_view`)
+- ✅ **Bug fix**: triple `advance()` call in `block_decl_or_scope()` (`block_create_bytes(0)` → `block_create_bytes(67108864)`)
+- ✅ **Bug fix**: all `tokenize()` call sites in tests fixed to keep source string alive (prevents dangling `string_view`)
+- ✅ README.md: acknowledgments section added thanking "the penguim"
+- ✅ 108/108 codegen tests pass, 29/29 lexer, 6/6 parser, all runtime + hot reload + window tests
+- ✅ Build: `scons build/brick` compiles successfully
+
+## 16. Sessão atual: Pointer arithmetic + and/or keywords + ++/--
+- ✅ **PLUS_PLUS** (`++`) e **MINUS_MINUS** (`--`) tokens adicionados
+- ✅ Keywords **`and`** e **`or`** adicionados (alias para `&&`/`||`)
+- ✅ **Aritmética de ponteiros**: `*p` dereferência, `&x` address-of, `ptr + N`, `ptr - N`, `ptr += N`, `ptr -= N`, `ptr - ptr` diferença
+- ✅ **Indexação de ponteiro**: `p[N]` funciona em tipo `*T`
+- ✅ **Comparação de ponteiros**: `p == q`, `p < q`, `p != null`, etc.
+- ✅ **++/-- prefix e postfix**: desugeram para `x += 1` / `x -= 1`
+- ✅ **Auto-semicolon** após `++`/`--` (nova linha detectada)
+- ✅ **Parser**: `*` no início de statement diferencia declaração de dereferência
+- ✅ **Type checker**: valida todos os casos de ponteiro + erro para uso incorreto
+- ✅ **Codegen**: `*x` emite `*x`, `&x` emite `&x`; aritmética usa C nativo
+- ✅ **Bug fix**: null-initialized pointer vars não duplicam `*` no C gerado
+- ✅ **Testes**: 40 novos testes — 151 codegen + 27 lexer + 5 parser + 15 runtime
+- ✅ **Integração**: 11/11 passam
 
 ## Observações
 - Projeto está maduro e funcional
@@ -77,6 +94,6 @@ Task sênior. Responsável por testar, otimizar, documentar e coordenar.
 - Sistema de macros funcional com expansão aninhada, gensym, detecção de recursão, e `$` interpolation
 - Macros podem ser chamadas no nível top-level (gerando declarações via `emit`) ou dentro de funções
 - C interop funcional (math.h, stdlib.h)
-- CI/CD pipeline não verificado
-- GitHub Pages site (index.html) agora usa "Brick" consistentemente
-- Todos os testes passam: 10/10 integração + 151+ unitários
+- Aritmética de ponteiros implementada: `*`, `&`, `+`, `-`, `+=`, `-=`, `++`, `--`, `[]`
+- Keywords `and`/`or` como alias para `&&`/`||`
+- Todos os testes passam: 11/11 integração + 198 unitários

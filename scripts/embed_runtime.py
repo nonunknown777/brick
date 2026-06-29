@@ -4,7 +4,7 @@
 Uso:
   embed_runtime.py --target linux|windows --runtime-dir <dir> --out-h <file> --out-cpp <file> [--has-x11]
 """
-import argparse, os, sys
+import argparse, os, sys, shutil
 
 def raw_delim(s):
     """Gera delimitador pra C++ raw string literal R\"...\"(content)...\".
@@ -35,6 +35,7 @@ def main():
     always = [
         'block_memory.h', 'block_memory.c',
         'io.h', 'io.c',
+        'pool_allocator.h', 'pool_allocator.c',
     ]
 
     if args.target == 'linux':
@@ -48,12 +49,23 @@ def main():
         cc = 'gcc'
         target_name = 'linux'
     else:
-        extra_c = ['libs/window/window_win32.c']
-        extra_h = ['libs/window/window.h', 'libs/window/window_internal.h']
-        extra_c_hr = []
+        extra_c = ['hot_reload.c', 'libs/window/window_win32.c']
+        extra_h = ['hot_reload.h', 'libs/window/window.h',
+                   'libs/window/window_internal.h', 'libs/window/window_hr.h']
+        extra_c_hr = ['libs/window/window_hr.c']
         flags_required = ['-luser32', '-lgdi32']
         flags_optional = []
-        cc = 'x86_64-w64-mingw32-gcc'
+        # Auto-detect C compiler on Windows (use forward slashes for MinGW compat)
+        cc = shutil.which('gcc')
+        if not cc:
+            cc = shutil.which('clang')
+        if not cc:
+            cc = shutil.which('cl')
+        if not cc:
+            cc = 'gcc'
+        if cc:
+            # Normalize path separators to forward slashes for system() calls
+            cc = cc.replace('\\', '/')
         target_name = 'windows'
 
     files = []

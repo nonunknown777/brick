@@ -1,4 +1,4 @@
-# Brick Language Specification v0.5.0
+# Brick Language Specification v0.6.0
 
 ## Filosofia
 ## Philosophy
@@ -194,6 +194,76 @@ fn main() {
 - Supported types: all numeric (i8..i64, u8..u64, f32/f64, usize/isize), bool, char, String
 - Formatting: `{0}`, `{1}` etc. refer to arguments positionally
 - Implementation: codegen generates calls to `runtime/io.c` (printf wrappers with PRI macros)
+
+## Ponteiros e Aritmética
+## Pointers and Arithmetic
+
+```brick
+// Declaração de ponteiro (*T)
+// Pointer declaration (*T)
+*int p = &x          // &x = endereço de x / address of x
+int v = *p           // *p = dereferência / dereference
+
+// Aritmética de ponteiros (C semantics — escala por sizeof(T))
+// Pointer arithmetic (C semantics — scales by sizeof(T))
+p = p + 1            // avança 1 elemento / advance 1 element
+p += 2               // avança 2 elementos / advance 2 elements
+p -= 1               // recua 1 elemento / go back 1 element
+
+// Diferença entre ponteiros (resultado: isize)
+// Pointer difference (result: isize)
+isize diff = q - p
+
+// Indexação de ponteiro (igual a array)
+// Pointer indexing (same as array)
+int v = p[0]
+
+// Comparação de ponteiros
+// Pointer comparison
+bool eq = p == q
+bool lt = p < q
+bool null_check = p != null
+
+// Incremento / Decremento (desugeram para +=1 / -=1)
+// Increment / Decrement (desugar to +=1 / -=1)
+++p                  // p += 1
+p++                  // p += 1 (postfix, mesmo efeito)
+--p                  // p -= 1
+p--                  // p -= 1 (postfix, mesmo efeito)
+
+// Ponteiro nulo
+// Null pointer
+*int p = null
+if p != null { }
+```
+
+**Regras:**
+- `ptr + int` / `ptr - int` → o inteiro é o número de elementos (não bytes)
+- `ptr - ptr` → `isize` (número de elementos entre os dois endereços)
+- `*T + *T` é erro — subtração só de mesmo tipo
+- `*T + float` é erro — offset deve ser inteiro
+- `&literal` é erro — só pode tirar endereço de variável
+- `p[N]` funciona em qualquer `*T` como em C (`*(p + N)`)
+
+**Rules:**
+- `ptr + int` / `ptr - int` → the integer is element count (not bytes)
+- `ptr - ptr` → `isize` (number of elements between addresses)
+- `*T + *T` is error — subtraction only for same type
+- `*T + float` is error — offset must be integer
+- `&literal` is error — only variables have addresses
+- `p[N]` works on any `*T` like C (`*(p + N)`)
+
+## Operadores Lógicos (and / or / not)
+## Logical Operators (and / or / not)
+
+Além dos operadores `&&` e `||`, Brick suporta as palavras-chave `and` e `or`:
+Besides `&&` and `||`, Brick supports `and` and `or` keywords:
+
+```brick
+bool r = a and b     // mesmo que a && b / same as a && b
+bool s = a or b      // mesmo que a || b / same as a || b
+bool t = not a       // mesmo que !a / same as !a
+```
 
 ## C Interop (extern / include / link)
 ```brick

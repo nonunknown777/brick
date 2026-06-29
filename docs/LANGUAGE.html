@@ -1,0 +1,462 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Language Reference — Brick</title>
+<meta name="description" content="Brick language specification documentation">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<nav class="doc-nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">Brick</a>
+    <div class="nav-links">
+      <a href="LANGUAGE.html">Language</a>
+      <a href="MACROS.html">Macros</a>
+      <a href="ARCHITECTURE.html">Architecture</a>
+      <a href="GETTING_STARTED.html">Getting Started</a>
+      <a href="OPTIMIZATIONS.html">Optimizations</a>
+      <a href="hot-reload.html">Hot Reload</a>
+      <a href="index.html" class="nav-back">← Home</a>
+    </div>
+  </div>
+</nav>
+
+<main class="doc-main">
+  <div class="container doc-content">
+<h1>Brick Language Reference</h1>
+<blockquote>
+<p>Everything you need to know to write code in Brick.</p>
+</blockquote>
+<h2>File Structure (.brc)</h2>
+<div class="code-block"><pre class="">package NAME              ← which package this file belongs to
+using OTHER               ← import another package
+
+block global = 256MB       ← block declaration (REQUIRED in main file)
+block game   = 64MB
+
+struct Player { }          ← your structs with methods
+
+fn main() { }              ← program entry point
+</pre></div>
+<blockquote>
+<p>Every <code>.brc</code> file starts with a package declaration, optional imports, block declarations, structs, and functions.</p>
+</blockquote>
+<h2>Packages</h2>
+<div class="code-block"><pre class="">package SPRITES                    ← declare package
+package SPRITES.EFFECTS            ← sub-package (hierarchy)
+using SPRITES                      ← import everything from package
+private int secret                 ← visible only within the package
+</pre></div>
+<blockquote>
+<p>Everything is <code>public</code> by default. Use <code>private</code> to hide.</p>
+</blockquote>
+<h2>Structs (with methods!)</h2>
+<div class="code-block"><pre class="">struct Player {
+    int hp                     ← field
+    String name                ← field
+
+    fn Player(int h, String n) {    ← CONSTRUCTOR (same name as struct)
+        hp = h
+        name = n
+    }
+
+    fn take_damage(int dmg) {       ← normal method
+        hp -= dmg
+    }
+
+    fn get_hp() -&gt; int {            ← method with return value
+        return hp
+    }
+}
+</pre></div>
+<blockquote>
+<p>Structs bundle data and methods together. The constructor has the same name as the struct.</p>
+</blockquote>
+<h3>Inheritance</h3>
+<div class="code-block"><pre class="">struct NPC extends Player {
+    int ai_type
+
+    fn NPC(int h, int ai) {
+        hp = h                    ← inherited field from Player
+        ai_type = ai
+    }
+}
+</pre></div>
+<blockquote>
+<p>A struct can extend another, inheriting its fields.</p>
+</blockquote>
+<h3>Interface</h3>
+<div class="code-block"><pre class="">interface Damageable {
+    fn take_damage(int d)
+}
+
+struct Enemy : Damageable {       ← or "extends" + "implements"
+    fn take_damage(int d) { }
+}
+</pre></div>
+<blockquote>
+<p>Interfaces define method contracts that structs must implement.</p>
+</blockquote>
+<h2>Memory Blocks</h2>
+<div class="code-block"><pre class="">block global = 256MB        ← declare block (KB, MB, GB)
+block temp   = 8KB
+
+int x = 5                   ← goes to global block (default)
+
+block game {                ← scope: everything here goes to block game
+    Player p = Player(100, "Felipe")
+    Enemy e = Enemy(50)
+}
+
+float f = 2.0 @temp        ← explicit inline allocation
+int hp = p.get_hp()
+
+game.reset()               ← clears EVERYTHING in block game (super fast)
+</pre></div>
+<blockquote>
+<p>Memory blocks are the heart of Brick. They are contiguous regions of memory. Allocating is just moving a pointer — super fast. Resetting a block clears everything at once.</p>
+</blockquote>
+<p>Rules:</p>
+<ul>
+<li><code>global</code> is the default block (must be declared in main)</li>
+<li><code>block name: { }</code> changes the default block within that scope</li>
+<li><code>@name</code> allocates a specific variable in a block</li>
+<li><code>block.reset()</code> clears the entire block (no individual free)</li>
+<li>If the block fills up: <code>error(&quot;block overflow&quot;)</code> — the program aborts</li>
+</ul>
+<h2>Types</h2>
+<h3>Fixed-Width Types</h3>
+<table>
+<thead>
+<tr><th>Brick</th><th>C Type</th><th>Size</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>`i8`</td><td>`int8_t`</td><td>8 bits</td><td>Signed integer</td></tr>
+<tr><td>`i16`</td><td>`int16_t`</td><td>16 bits</td><td>Signed integer</td></tr>
+<tr><td>`i32`</td><td>`int32_t`</td><td>32 bits</td><td>Signed integer</td></tr>
+<tr><td>`i64`</td><td>`int64_t`</td><td>64 bits</td><td>Signed integer</td></tr>
+<tr><td>`u8`</td><td>`uint8_t`</td><td>8 bits</td><td>Unsigned integer</td></tr>
+<tr><td>`u16`</td><td>`uint16_t`</td><td>16 bits</td><td>Unsigned integer</td></tr>
+<tr><td>`u32`</td><td>`uint32_t`</td><td>32 bits</td><td>Unsigned integer</td></tr>
+<tr><td>`u64`</td><td>`uint64_t`</td><td>64 bits</td><td>Unsigned integer</td></tr>
+<tr><td>`f32`</td><td>`float`</td><td>32 bits</td><td>Floating point</td></tr>
+<tr><td>`f64`</td><td>`double`</td><td>64 bits</td><td>Double precision</td></tr>
+<tr><td>`usize`</td><td>`size_t`</td><td>pointer</td><td>Unsigned pointer-size</td></tr>
+<tr><td>`isize`</td><td>`ptrdiff_t`</td><td>pointer</td><td>Signed pointer-size</td></tr>
+</tbody>
+</table>
+<blockquote>
+<p>Every number type has a fixed, predictable size — no guessing.</p>
+</blockquote>
+<h3>Aliases</h3>
+<table>
+<thead>
+<tr><th>Alias</th><th>Maps To</th><th>Notes</th></tr>
+</thead>
+<tbody>
+<tr><td>`int`</td><td>`i32`</td><td>Default integer</td></tr>
+<tr><td>`float`</td><td>`f32`</td><td>Default float</td></tr>
+<tr><td>`char`</td><td>`u8`</td><td>Character</td></tr>
+<tr><td>`byte`</td><td>`u8`</td><td>Same as char</td></tr>
+<tr><td>`short`</td><td>`i16`</td><td>Short integer</td></tr>
+<tr><td>`long`</td><td>`i64`</td><td>Long integer</td></tr>
+<tr><td>`double`</td><td>`f64`</td><td>Double precision</td></tr>
+</tbody>
+</table>
+<blockquote>
+<p>Friendly names for the most common types.</p>
+</blockquote>
+<h3>Other Types</h3>
+<table>
+<thead>
+<tr><th>Brick</th><th>C Type</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>`bool`</td><td>`uint8_t`</td><td>true/false</td></tr>
+<tr><td>`String`</td><td>`BrickString`</td><td>Built-in string (dynamic)</td></tr>
+<tr><td>`T[N]`</td><td>`T[]`</td><td>Fixed array of N elements</td></tr>
+<tr><td>`null`</td><td>`NULL`</td><td>Null pointer</td></tr>
+<tr><td>`void`</td><td>`void`</td><td>No return value (functions)</td></tr>
+</tbody>
+</table>
+<h3>Literal Suffixes</h3>
+<div class="code-block"><pre class="">42u8   42u16  42u32  42u64     ← unsigned integer types
+42i8   42i16  42i32  42i64     ← signed integer types
+3.14f32  3.14f64               ← float types
+42usz  42isize                 ← pointer-size types
+</pre></div>
+<blockquote>
+<p>Unsuffixed literals infer their type from context (fits target -&gt; allowed).
+Overflow on compile-time literal -&gt; error.</p>
+</blockquote>
+<h3>Type Rules</h3>
+<blockquote>
+<ul>
+<li><strong>Widening</strong> allowed: i8 -&gt; i16, u8 -&gt; u64, f32 -&gt; f64</li>
+<li><strong>Narrowing</strong> prohibited: i64 -&gt; i32 = error</li>
+<li><strong>Signed &lt;-&gt; Unsigned</strong> same rank prohibited: i32 &lt;-&gt; u32 = error</li>
+<li><strong>Int + Float</strong> -&gt; Float (int promotes to float)</li>
+<li><strong>Mixed expressions</strong>: promotion to type that fits both operands</li>
+</ul>
+</blockquote>
+<h2>Functions</h2>
+<div class="code-block"><pre class="">fn main() { }                          ← entry point (no return)
+
+fn add(int a, int b) -&gt; int {          ← function returning int
+    return a + b
+}
+
+fn log(String msg) {                   ← void function (no return)
+    // ...
+}
+</pre></div>
+<blockquote>
+<p>Parameters and return values go to the compiler's internal &quot;anonymous block&quot;.</p>
+</blockquote>
+<h2>Flow Control</h2>
+<div class="code-block"><pre class="">if cond { }
+else { }
+
+while cond { }
+
+for int i = 0; i &lt; 10; i++ { }
+
+return expr
+</pre></div>
+<blockquote>
+<p>Standard flow control: if/else, while, for, and return.</p>
+</blockquote>
+<h2>Operators</h2>
+<table>
+<thead>
+<tr><th>Operator</th><th>What it does</th></tr>
+</thead>
+<tbody>
+<tr><td>`+ - * /`</td><td>Basic math</td></tr>
+<tr><td>`== != < > <= >=`</td><td>Comparison</td></tr>
+<tr><td>`&& \</td><td>\</td><td>!`</td><td>Logic (and, or, not)</td></tr>
+<tr><td>`= `</td><td>Assignment</td></tr>
+<tr><td>`.`</td><td>Access field/method</td></tr>
+<tr><td>`()`</td><td>Function call</td></tr>
+<tr><td>`[]`</td><td>Array index</td></tr>
+<tr><td>`@`</td><td>Allocate in specific block</td></tr>
+<tr><td>`->`</td><td>Return type</td></tr>
+<tr><td>`& \</td><td>^ ~ << >>`</td><td>Bitwise operations</td></tr>
+</tbody>
+</table>
+<h2>Strings</h2>
+<div class="code-block"><pre class="">String s = "hello"                     ← creates string
+String nome = "Felipe" @game           ← string in a block
+String empty = ""                      ← empty string
+</pre></div>
+<blockquote>
+<p>String is a built-in type. It lives in blocks like any other struct.</p>
+</blockquote>
+<h2>Arrays</h2>
+<div class="code-block"><pre class="">int[10] arr                            ← fixed array of 10 integers
+int[5] vals = int[5] @game             ← array in a block
+</pre></div>
+<blockquote>
+<p>Fixed size defined at declaration.</p>
+</blockquote>
+<h2>Error Handling</h2>
+<div class="code-block"><pre class="">error("something went wrong")          ← prints message and aborts
+</pre></div>
+<blockquote>
+<p>No try/catch. If something goes wrong, the program prints the error and exits.</p>
+</blockquote>
+<h2>Visibility</h2>
+<div class="code-block"><pre class="">public int x                           ← visible everywhere (default)
+private int y                          ← visible only within own package
+</pre></div>
+<blockquote>
+<p><code>public</code> is the default. <code>private</code> restricts visibility to the package.</p>
+</blockquote>
+<h2>Comments</h2>
+<div class="code-block"><pre class="">// This is a comment  ← line comment only
+</pre></div>
+<blockquote>
+<p>Line comments only (<code>//</code>). Block comments (<code>/* */</code>) are not supported.</p>
+</blockquote>
+<h2>Macros</h2>
+<p>Macros generate code at compile time. You define a pattern once and the compiler stamps it out everywhere you call it.</p>
+<div class="code-block"><pre class="">macro swap(a, b) {
+    __tmp = $a
+    $a = $b
+    $b = __tmp
+}
+
+fn main() {
+    x = 10; y = 20
+    swap(x, y)            // expands to the swap body
+    print("{0} {1}", x, y) // → "20 10"
+}
+</pre></div>
+<h3>Declaration</h3>
+<div class="code-block"><pre class="">macro name(param1, param2, ...) { body }
+</pre></div>
+<ul>
+<li>Parameters are <strong>untyped</strong> — they hold expressions, not values</li>
+<li><code>$name</code> inserts the argument passed for <code>name</code></li>
+<li><code>$(expr)</code> evaluates <code>expr</code> at compile time and inserts the result</li>
+<li><code>__</code>-prefixed names get unique gensyms (no collision with user code)</li>
+</ul>
+<h3><code>build {}</code> — Compile-Time Computation</h3>
+<div class="code-block"><pre class="">build {
+    x = 42
+    emit { z = x }        // generates: z = 42
+}
+</pre></div>
+<p><code>build</code> runs at compile time. Variables inside <code>build</code> do not exist in the final binary. Use <code>emit</code> to produce actual code.</p>
+<h3><code>emit {}</code> — Code Generation</h3>
+<p>Everything inside <code>emit</code> is literal code with <code>$</code> interpolation. It is stamped into the output at the macro call site.</p>
+<div class="code-block"><pre class="">macro make_getter(name, field) {
+    emit {
+        fn get_$name() { return $field }
+    }
+}
+</pre></div>
+<h3>Hygiene</h3>
+<p>Variables starting with <code>__</code> inside a macro get unique names (e.g. <code>__tmp</code> → <code>__tmp__1</code>), preventing collisions with user code.</p>
+<h3>Type Reflection (inside <code>build</code>)</h3>
+<table>
+<thead>
+<tr><th>Expression</th><th>Returns</th><th>Example</th></tr>
+</thead>
+<tbody>
+<tr><td>`T.name`</td><td>Type name as string</td><td>`"i32"`</td></tr>
+<tr><td>`T.size`</td><td>Size in bytes</td><td>`4`</td></tr>
+<tr><td>`T.fields`</td><td>Field names as strings</td><td>`["x", "y"]`</td></tr>
+</tbody>
+</table>
+<h3>Error Handling</h3>
+<table>
+<thead>
+<tr><th>Situation</th><th>What happens</th></tr>
+</thead>
+<tbody>
+<tr><td>Wrong argument count</td><td>Compile error</td></tr>
+<tr><td>`$` outside macro/build</td><td>Compile error: "unexpected $"</td></tr>
+<tr><td>Recursive macro</td><td>Caught after 64 levels</td></tr>
+<tr><td>I/O inside `build`</td><td>Build blocks can't call print()</td></tr>
+</tbody>
+</table>
+<p>See <a href="MACROS.md">Macros</a> for full documentation with examples.</p>
+<h2>I/O (Package IO)</h2>
+<div class="code-block"><pre class="">using IO
+
+fn main() {
+    print(42)                    → "42"
+    print(3.14)                  → "3.140000"
+    print(true)                  → "true"
+    print("hello")               → "hello"
+    print()                      → (blank line)
+    print("x = {0}", 10)         → "x = 10"
+    print("{0} + {1} = {2}", 1, 2, 3)  → "1 + 2 = 3"
+}
+</pre></div>
+<blockquote>
+<p><code>using IO</code> is required to use <code>print()</code>. It always adds a newline at the end (println semantics).</p>
+<p><code>{0}</code>, <code>{1}</code> etc. refer to arguments positionally. Supported types: all numeric types, bool, char, String.</p>
+</blockquote>
+<h2>C Interop</h2>
+<h3>Include a C header and link a library</h3>
+<div class="code-block"><pre class="">include "math.h" and link m
+</pre></div>
+<p>Or separately:</p>
+<div class="code-block"><pre class="">include "SDL.h"
+link SDL2
+</pre></div>
+<h3>Declare external C functions</h3>
+<div class="code-block"><pre class="">extern fn sqrt(f64 x) -&gt; f64
+extern fn atoi(*u8 str) -&gt; i32
+extern fn puts(*u8 s) -&gt; i32
+extern fn sin(f64 x) -&gt; f64
+</pre></div>
+<blockquote>
+<p>Functions from always-included headers (stdio.h, stdlib.h, string.h) only need <code>extern fn</code> for the type checker — prototypes are already provided by the headers.</p>
+<p><code>String</code> → <code>*u8</code> conversion happens automatically when passing a String to a <code>*u8</code> parameter.</p>
+</blockquote>
+<h3>Pointer syntax</h3>
+<ul>
+<li><code>*u8</code> → <code>char*</code></li>
+<li><code>*void</code> → <code>void*</code></li>
+<li><code>*MyStruct</code> → <code>MyStruct*</code></li>
+</ul>
+<h3>Generate C bindings from a C header</h3>
+<div class="code-block"><pre class="">brick bind &lt;header.h&gt;    # generates .brc bindings
+</pre></div>
+<h2>Debugging</h2>
+<p>Brick generates <code>#line</code> directives in the C output so you debug in <code>.brc</code> code, not generated C:</p>
+<div class="code-block"><pre class="">brick input.brc -o output.c      # generate C with #line
+gcc -g -O0 output.c ...          # compile with debug info
+gdb ./a.out                      # GDB shows .brc source
+</pre></div>
+<p>GDB pretty-printers are in <code>debugger/</code> — they add custom commands:</p>
+<table>
+<thead>
+<tr><th>Command</th><th>What it does</th></tr>
+</thead>
+<tbody>
+<tr><td>`info blocks`</td><td>Lists all memory blocks and their usage</td></tr>
+<tr><td>`block <name>`</td><td>Shows detailed info about a block</td></tr>
+<tr><td>`block-watch`</td><td>Watches block allocations</td></tr>
+</tbody>
+</table>
+<p>Load them automatically with:</p>
+<div class="code-block"><pre class="">gdb -x debugger/.gdbinit ./program
+</pre></div>
+<h2>Complete Example</h2>
+<div class="code-block"><pre class="">package GAME
+
+using IO
+
+block global = 256MB
+block game   = 64MB
+
+interface Drawable {
+    fn draw()
+}
+
+struct Player {
+    i32 hp
+    String name
+    u8 active
+
+    fn Player(i32 h, String n) {
+        hp = h
+        name = n
+        active = 1u8
+    }
+
+    fn damage(i32 dmg) {
+        hp -= dmg
+        if hp &lt; 0 { hp = 0 }
+        print("{0} took {1} damage, hp={2}", name, dmg, hp)
+    }
+}
+
+fn main() {
+    Player p = Player(100, "Felipe") @game
+    p.damage(20)
+    game.reset()
+}
+</pre></div>
+<blockquote>
+<p>This example shows a complete Brick program with package, blocks, interface, struct, and main function.</p>
+</blockquote>
+
+  </div>
+</main>
+
+<footer>
+  <p>Brick — MIT License</p>
+  <p><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
+</footer>
+
+</body>
+</html>

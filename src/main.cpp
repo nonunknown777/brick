@@ -5,13 +5,9 @@
 #include <vector>
 #include <cstdlib>
 #include <cstdio>
-#include <unistd.h>
-#include <sys/stat.h>
 #include <cctype>
 #include <cstring>
 #include <algorithm>
-#include <sys/wait.h>
-#include <signal.h>
 #include "lexer/lexer.h"
 #include "parser/parser.h"
 #include "parser/package.h"
@@ -23,6 +19,30 @@
 #include "embedded_runtime.h"
 #ifdef BRICK_TRACK_BLOCKS
 #include "memvis.h"
+#endif
+
+#if defined(_WIN32)
+#  include <windows.h>
+#  include <direct.h>
+#  include <process.h>
+#  define getpid()       _getpid()
+#  define mkdir(p, m)    _mkdir(p)
+#  define WEXITSTATUS(s) ((int)((s) & 0xff))
+#  define PATH_SEP       '\\'
+#  define PATH_SEP_STR   "\\"
+#  define TMPDIR_BASE    (getenv("TEMP") ? getenv("TEMP") : "C:\\Temp")
+#  define TMPDIR_PREFIX  "brick-"
+#  define SHELL_CMD(c)   ("cmd /c \"" c "\"")
+#else
+#  include <unistd.h>
+#  include <sys/stat.h>
+#  include <sys/wait.h>
+#  include <signal.h>
+#  define PATH_SEP       '/'
+#  define PATH_SEP_STR   "/"
+#  define TMPDIR_BASE    "/tmp"
+#  define TMPDIR_PREFIX  "brick-"
+#  define SHELL_CMD(c)   (c)
 #endif
 
 void print_usage() {
@@ -63,30 +83,69 @@ static bool write_file(const std::string& path, const char* data, size_t len) {
 
 static void ensure_parent_dirs(const std::string& path) {
     size_t pos = 0;
-    while ((pos = path.find('/', pos)) != std::string::npos) {
+    while ((pos = path.find_first_of("/\\", pos)) != std::string::npos) {
         std::string sub = path.substr(0, pos);
         mkdir(sub.c_str(), 0755);
         pos++;
     }
 }
 
+static std::string get_prog_suffix() {
+    const char* target = brick::embedded::runtime_info.target;
+    if (strcmp(target, "windows") == 0) return ".exe";
+    return "";
+}
+
+static bool create_temp_dir(std::string& out_path, const char* prefix) {
+#if defined(_WIN32)
+    char temp_path[MAX_PATH];
+    DWORD ret = GetTempPathA(MAX_PATH, temp_path);
+    if (ret == 0 || ret > MAX_PATH) return false;
+
+    char dir_name[MAX_PATH];
+    // Use process ID + time-based unique name instead of mkdtemp
+    snprintf(dir_name, sizeof(dir_name), "%s%s%d-%ld",
+             temp_path, prefix, (int)GetCurrentProcessId(), (long)time(NULL));
+
+    if (!CreateDirectoryA(dir_name, NULL)) {
+        if (GetLastError() == ERROR_ALREADY_EXISTS) {
+            // Append a counter
+            for (int i = 0; i < 1000; i++) {
+                snprintf(dir_name, sizeof(dir_name), "%s%s%d-%ld-%d",
+                         temp_path, prefix, (int)GetCurrentProcessId(), (long)time(NULL), i);
+                if (CreateDirectoryA(dir_name, NULL)) break;
+                if (GetLastError() != ERROR_ALREADY_EXISTS) return false;
+            }
+        } else {
+            return false;
+        }
+    }
+    out_path = dir_name;
+    return true;
+#else
+    char tmpdir[] = "/tmp/brick-build-XXXXXX";
+    if (!mkdtemp(tmpdir)) return false;
+    out_path = tmpdir;
+    return true;
+#endif
+}
+
 static int cmd_build(const std::string& input, const std::string& output,
                      bool run_mode, bool release_mode) {
     // 1. Temp dir for build artifacts
     // 1. Diretorio temporario para artefatos de build
-    char tmpdir[] = "/tmp/brick-build-XXXXXX";
-    if (!mkdtemp(tmpdir)) {
+    std::string tmp;
+    if (!create_temp_dir(tmp, TMPDIR_PREFIX "build-")) {
         std::cerr << "error: could not create temp directory\n";
         return 1;
     }
-    std::string tmp = tmpdir;
 
     // 2. Extract embedded runtime files
     // 2. Extrai arquivos de runtime embutidos
     auto& info = brick::embedded::runtime_info;
     for (int i = 0; i < info.num_sources; i++) {
         auto& f = info.sources[i];
-        std::string fp = tmp + "/" + f.name;
+        std::string fp = tmp + PATH_SEP_STR + f.name;
         ensure_parent_dirs(fp);
         if (!write_file(fp, f.content, f.length)) {
             std::cerr << "error: could not write " << fp << "\n";
@@ -127,7 +186,7 @@ static int cmd_build(const std::string& input, const std::string& output,
         std::cerr << "error: " << e << "\n";
     if (!codegen_result.success) return 1;
 
-    std::string c_path = tmp + "/_gen.c";
+    std::string c_path = tmp + PATH_SEP_STR + "_gen.c";
     {
         std::ofstream out(c_path);
         if (!out.is_open()) {
@@ -144,7 +203,7 @@ static int cmd_build(const std::string& input, const std::string& output,
         std::string name = info.sources[i].name;
         size_t len = name.size();
         if (len >= 2 && name.substr(len - 2) == ".c")
-            srcs += " " + tmp + "/" + name;
+            srcs += " \"" + tmp + PATH_SEP_STR + name + "\"";
     }
 
     // 5. Collect link flags
@@ -157,14 +216,16 @@ static int cmd_build(const std::string& input, const std::string& output,
 
     // 6. Invoke C compiler
     // 6. Invoca compilador C
-    std::string bin = run_mode ? (tmp + "/_run") : output;
+    std::string bin = run_mode ? (tmp + PATH_SEP_STR + "_run" + get_prog_suffix()) : output;
     std::string track = release_mode ? "" : " -DBRICK_TRACK_BLOCKS";
-    std::string cmd = std::string(info.cc) + " -O3" + track + " -I" + tmp + " "
-        + c_path + srcs + " -o " + bin + flags;
+    std::string cmd = std::string(info.cc) + " -O3" + track + " -I\"" + tmp + "\""
+        + " \"" + c_path + "\"" + srcs + " -o \"" + bin + "\"" + flags;
 
     std::cerr << "[build] " << info.cc << " -O3 ... -o " << bin << "\n";
     int ret = system(cmd.c_str());
+#if !defined(_WIN32)
     ret = WEXITSTATUS(ret);
+#endif
 
     if (ret != 0) {
         std::cerr << "[build] failed (exit " << ret << ")\n";
@@ -177,13 +238,21 @@ static int cmd_build(const std::string& input, const std::string& output,
     // 7. Move binary to final location if built to temp
     // 7. Move binario para local final se construido em temp
     if (run_mode) {
-        std::string mv = "mv " + bin + " " + output;
+#if defined(_WIN32)
+        std::string mv = "move /Y \"" + bin + "\" \"" + output + "\"";
+#else
+        std::string mv = "mv \"" + bin + "\" \"" + output + "\"";
+#endif
         system(mv.c_str());
     }
 
     // 8. Cleanup temp
     // 8. Limpa diretorio temporario
-    std::string rm = "rm -rf " + tmp;
+#if defined(_WIN32)
+    std::string rm = "rmdir /S /Q \"" + tmp + "\"";
+#else
+    std::string rm = "rm -rf \"" + tmp + "\"";
+#endif
     system(rm.c_str());
 
     std::cerr << "[build] " << output << " ready\n";
@@ -368,16 +437,20 @@ static int cmd_bind(const std::string& header_path) {
 static int cmd_run(const std::string& input) {
     // Build to a temp binary
     // Compila para binario temporario
-    char tmpdir[] = "/tmp/brick-run-XXXXXX";
-    if (!mkdtemp(tmpdir)) {
+    std::string tmpdir;
+    if (!create_temp_dir(tmpdir, TMPDIR_PREFIX "run-")) {
         std::cerr << "error: could not create temp directory\n";
         return 1;
     }
-    std::string out = std::string(tmpdir) + "/prog";
+    std::string out = tmpdir + PATH_SEP_STR + "prog" + get_prog_suffix();
 
     int ret = cmd_build(input, out, false, false);
     if (ret != 0) {
-        std::string rm = "rm -rf " + std::string(tmpdir);
+#if defined(_WIN32)
+        std::string rm = "rmdir /S /Q \"" + tmpdir + "\"";
+#else
+        std::string rm = "rm -rf \"" + tmpdir + "\"";
+#endif
         system(rm.c_str());
         return ret;
     }
@@ -386,11 +459,17 @@ static int cmd_run(const std::string& input) {
     // Executa
     std::cerr << "[run] " << out << "\n";
     ret = system(out.c_str());
+#if !defined(_WIN32)
     ret = WEXITSTATUS(ret);
+#endif
 
     // Cleanup
     // Limpeza
-    std::string rm = "rm -rf " + std::string(tmpdir);
+#if defined(_WIN32)
+    std::string rm = "rmdir /S /Q \"" + tmpdir + "\"";
+#else
+    std::string rm = "rm -rf \"" + tmpdir + "\"";
+#endif
     system(rm.c_str());
 
     return ret;
@@ -479,43 +558,67 @@ int main(int argc, char** argv) {
 
         // Build to temp binary
         // Compila para binario temporario
-        char tmpdir[] = "/tmp/brick-viz-XXXXXX";
-        if (!mkdtemp(tmpdir)) {
+        std::string tmpdir;
+        if (!create_temp_dir(tmpdir, TMPDIR_PREFIX "viz-")) {
             std::cerr << "error: could not create temp directory\n";
             return 1;
         }
-        std::string bin = std::string(tmpdir) + "/prog";
+        std::string bin = tmpdir + PATH_SEP_STR + "prog" + prog_suffix;
         int ret = cmd_build(input_file, bin, false, false);
         if (ret != 0) {
-            std::string rm = "rm -rf " + std::string(tmpdir);
+#if defined(_WIN32)
+            std::string rm = "rmdir /S /Q \"" + tmpdir + "\"";
+#else
+            std::string rm = "rm -rf \"" + tmpdir + "\"";
+#endif
             system(rm.c_str());
             return ret;
         }
 
-        // Fork: child runs binary, parent attaches visualizer
-        // Fork: filho executa binario, pai anexa visualizador
-        pid_t pid = fork();
+#if defined(_WIN32)
+        // Windows: use CreateProcess instead of fork/exec
+        STARTUPINFOA si;
+        PROCESS_INFORMATION pi;
+        memset(&si, 0, sizeof(si));
+        memset(&pi, 0, sizeof(pi));
+        si.cb = sizeof(si);
+        char cmdline[2048];
+        snprintf(cmdline, sizeof(cmdline), "\"%s\"", bin.c_str());
+        if (!CreateProcessA(NULL, cmdline, NULL, NULL, FALSE, 0, NULL, NULL, &si, &pi)) {
+            std::cerr << "error: could not launch " << bin << "\n";
+            return 1;
+        }
+        int pid = (int)pi.dwProcessId;
+
+        Sleep(150); // 150ms wait for shm
+
+        MemVisConfig cfg = MEMVIS_DEFAULT_CONFIG;
+        std::cerr << "[viz] attached to PID " << pid << " ...\n";
+        memvis_attach(pid, cfg);
+
+        TerminateProcess(pi.hProcess, 0);
+        WaitForSingleObject(pi.hProcess, INFINITE);
+        CloseHandle(pi.hProcess);
+        CloseHandle(pi.hThread);
+        std::string rm_cmd = "rmdir /S /Q \"" + tmpdir + "\"";
+#else
+        int pid = fork();
         if (pid == 0) {
-            // Child: exec binary
-            // Filho: executa binario
             execl(bin.c_str(), bin.c_str(), nullptr);
             _exit(1);
         }
 
-        // Parent: wait briefly for shm to be created, then attach
-        // Pai: espera brevemente o shm ser criado, entao anexa
         usleep(150000); // 150ms
 
         MemVisConfig cfg = MEMVIS_DEFAULT_CONFIG;
         std::cerr << "[viz] attached to PID " << pid << " ...\n";
         memvis_attach(pid, cfg);
 
-        // When visualizer exits, kill child and cleanup
-        // Quando visualizador sair, mata filho e limpa
         kill(pid, SIGTERM);
         waitpid(pid, nullptr, 0);
-        std::string rm = "rm -rf " + std::string(tmpdir);
-        system(rm.c_str());
+        std::string rm_cmd = "rm -rf \"" + tmpdir + "\"";
+#endif
+        system(rm_cmd.c_str());
         return 0;
     }
 

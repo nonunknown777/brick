@@ -65,6 +65,8 @@ const keywordSet = new Set([
     'null', 'true', 'false',
     'include', 'link', 'extern', 'and',
     'macro', 'build', 'emit',
+    'not', 'break', 'continue', 'const', 'defer',
+    'enum', 'match', 'is', 'as',
 ]);
 
 const keywordCompletions: CompletionItem[] = [
@@ -113,6 +115,15 @@ const keywordCompletions: CompletionItem[] = [
     { label: 'macro', kind: CompletionItemKind.Keyword, detail: 'macro declaration', insertText: 'macro ${1:name}(${2:params}) {\n\t$0\n}', insertTextFormat: 2 },
     { label: 'build', kind: CompletionItemKind.Keyword, detail: 'compile-time computation block', insertText: 'build {\n\t$0\n}', insertTextFormat: 2 },
     { label: 'emit', kind: CompletionItemKind.Keyword, detail: 'code generation', insertText: 'emit {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'not', kind: CompletionItemKind.Keyword, detail: 'boolean negation operator' },
+    { label: 'break', kind: CompletionItemKind.Keyword, detail: 'exit loop or match arm' },
+    { label: 'continue', kind: CompletionItemKind.Keyword, detail: 'skip to next loop iteration' },
+    { label: 'const', kind: CompletionItemKind.Keyword, detail: 'compile-time constant declaration', insertText: 'const ${1:name} = ${2:value}', insertTextFormat: 2 },
+    { label: 'defer', kind: CompletionItemKind.Keyword, detail: 'defer statement to end of scope', insertText: 'defer {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'enum', kind: CompletionItemKind.Keyword, detail: 'enum type declaration', insertText: 'enum ${1:Name} {\n\t${0}\n}', insertTextFormat: 2 },
+    { label: 'match', kind: CompletionItemKind.Keyword, detail: 'pattern matching', insertText: 'match ${1:expr} {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'is', kind: CompletionItemKind.Keyword, detail: 'type check operator' },
+    { label: 'as', kind: CompletionItemKind.Keyword, detail: 'type cast operator' },
 ];
 
 const runtimeFunctionCompletions: CompletionItem[] = [
@@ -145,6 +156,11 @@ const snippetCompletions: CompletionItem[] = [
     { label: 'build', kind: CompletionItemKind.Snippet, detail: 'build block', insertText: 'build {\n\t$0\n}', insertTextFormat: 2 },
     { label: 'emit', kind: CompletionItemKind.Snippet, detail: 'emit code', insertText: 'emit {\n\t$0\n}', insertTextFormat: 2 },
     { label: 'emitcall', kind: CompletionItemKind.Snippet, detail: 'emit macro call', insertText: 'emit $1($2)', insertTextFormat: 2 },
+    { label: 'match', kind: CompletionItemKind.Snippet, detail: 'match statement', insertText: 'match ${1:expr} {\n\t${2:pattern} {\n\t\t$0\n\t}\n}', insertTextFormat: 2 },
+    { label: 'enum', kind: CompletionItemKind.Snippet, detail: 'enum declaration', insertText: 'enum ${1:Name} {\n\t${2:A}${3: = ${4:0}}${5:;\n\t${6:B}}\n}', insertTextFormat: 2 },
+    { label: 'defer', kind: CompletionItemKind.Snippet, detail: 'defer statement', insertText: 'defer {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'const', kind: CompletionItemKind.Snippet, detail: 'constant declaration', insertText: 'const ${1:name} = ${2:value}', insertTextFormat: 2 },
+    { label: 'forin', kind: CompletionItemKind.Snippet, detail: 'for-in range loop', insertText: 'for ${1:x} in ${2:N} {\n\t$0\n}', insertTextFormat: 2 },
 ];
 
 function getFilePath(uri: string): string {
@@ -394,6 +410,19 @@ connection.onCompletion((params: CompletionParams): CompletionItem[] => {
         }
         if (kw === 'package') {
             items.push({ label: 'PACKAGE_NAME', kind: CompletionItemKind.Module, detail: 'package name in UPPER case' });
+            return items;
+        }
+        if (kw === 'const') {
+            for (const t of ['int', 'float', 'bool', 'char', 'String', 'u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte']) {
+                items.push({ label: t, kind: CompletionItemKind.Keyword, detail: `const ${t}` });
+            }
+            return items;
+        }
+        if (kw === 'enum') {
+            items.push({ label: 'MyEnum', kind: CompletionItemKind.Class, detail: 'PascalCase enum name' });
+            return items;
+        }
+        if (kw === 'match') {
             return items;
         }
         if (kw === 'extern') {
@@ -811,6 +840,15 @@ connection.languages.semanticTokens.on((params: SemanticTokensParams): SemanticT
             case 'MACRO':
             case 'BUILD':
             case 'EMIT':
+            case 'NOT':
+            case 'BREAK':
+            case 'CONTINUE':
+            case 'CONST':
+            case 'DEFER':
+            case 'ENUM':
+            case 'MATCH':
+            case 'IS':
+            case 'AS':
                 pushToken(line, col, len, 0);
                 break;
             case 'TRUE':

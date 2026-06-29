@@ -15,7 +15,7 @@ embed_cmd = (
     f' --out-h {gen_h}'
     f' --out-cpp {gen_cpp}'
 )
-if target == 'linux' and has_x11:
+if has_x11:
     embed_cmd += ' --has-x11'
 
 # All runtime source files trigger regeneration
@@ -50,7 +50,10 @@ if has_visualizer:
     brick_libs.remove('brick_runtime')
     brick_libs.append('brick_visualizer')
     brick_libs.append('brick_runtime')
-    brick_libs.append('ncurses')
+    if target == 'windows':
+        brick_libs.append('pdcurses')
+    else:
+        brick_libs.append('ncurses')
 
 brick = env.Program('#build/brick', ['main.cpp'], LIBS=brick_libs)
 

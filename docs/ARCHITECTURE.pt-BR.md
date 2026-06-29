@@ -60,6 +60,9 @@ O núcleo que roda junto com seu programa:
 - Declare `block game = 64MB` e aloque objetos dentro dele
 - Limpe o bloco inteiro com `block.reset()` — sem free individual
 - Suporte a freeze/thaw para hot reload
+- Multiplataforma: `mmap` no Linux, `VirtualAlloc` no Windows (≥64KB), fallback `malloc`
+- Thread safety: `pthread_mutex` no Linux, `CRITICAL_SECTION` no Windows
+- TLS: `__thread` no GCC/Linux, `__declspec(thread)` no Windows/MinGW
 
 **io.c**:
 - Funções de print específicas por tipo: `io_print_i8`, `io_print_u32`, `io_print_f64`, etc.
@@ -68,9 +71,9 @@ O núcleo que roda junto com seu programa:
 
 **hot_reload.c**:
 - Troca código sem parar seu programa
-- Usa `dlopen` para carregar bibliotecas .so
-- Monitora arquivos com `inotify` (detecta mudanças)
-- Troca atômica de ponteiros de função
+- Abstração multiplataforma: `dlopen`+`dlsym`+`inotify` no Linux, `LoadLibrary`+`GetProcAddress`+`ReadDirectoryChangesW` no Windows
+- Troca atômica de ponteiros de função via `__atomic_store_n` (GCC) ou `InterlockedExchange` (MSVC/MinGW)
+- Monitora arquivos `.so`/`.dll` por modificações em thread separada
 
 ### visualizer/ — Os Olhos (TUI ncurses)
 

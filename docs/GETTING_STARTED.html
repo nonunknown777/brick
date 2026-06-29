@@ -1,0 +1,152 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Getting Started — Brick</title>
+<meta name="description" content="Brick getting started documentation">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<nav class="doc-nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">Brick</a>
+    <div class="nav-links">
+      <a href="LANGUAGE.html">Language</a>
+      <a href="MACROS.html">Macros</a>
+      <a href="ARCHITECTURE.html">Architecture</a>
+      <a href="GETTING_STARTED.html">Getting Started</a>
+      <a href="OPTIMIZATIONS.html">Optimizations</a>
+      <a href="hot-reload.html">Hot Reload</a>
+      <a href="index.html" class="nav-back">← Home</a>
+    </div>
+  </div>
+</nav>
+
+<main class="doc-main">
+  <div class="container doc-content">
+<h1>Getting Started with Brick</h1>
+<blockquote>
+<p>Quick guide for anyone who wants to use or contribute to the language.</p>
+</blockquote>
+<h2>What You Need</h2>
+<ul>
+<li><strong>Linux</strong> (any distro) — GCC &gt;= 11 or Clang &gt;= 14, ncurses (optional)</li>
+<li><strong>Windows</strong> — <a href="https://www.mingw-w64.org/">MinGW-w64</a> with GCC &gt;= 13, SCons (<code>pip install scons</code>)</li>
+<li><strong>SCons</strong> (<code>pip install scons</code>)</li>
+</ul>
+<h2>Build the Compiler</h2>
+<h3>Linux</h3>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>git<span style="color: #F8F8F2"> </span>clone<span style="color: #F8F8F2"> </span>https://github.com/nonunknown777/brick.git
+<span style="color: #F8F8F2">cd </span>brick
+scons<span style="color: #F8F8F2">                     </span><span style="color: #959077"># build release / release build</span>
+scons<span style="color: #F8F8F2"> profile</span><span style="color: #FF4689">=</span>debug<span style="color: #F8F8F2">       </span><span style="color: #959077"># build debug / debug build</span>
+</pre></div>
+</pre></div>
+<h3>Windows (PowerShell)</h3>
+<div class="code-block"><pre class="language-powershell"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span><span style="color: #F8F8F2">git</span> <span style="color: #F8F8F2">clone</span> <span style="color: #F8F8F2">https://github.com/nonunknown777/brick.git</span>
+<span style="color: #F8F8F2">cd brick</span>
+<span style="color: #F8F8F2">scons</span> <span style="color: #F8F8F2">target=windows</span> <span style="color: #F8F8F2">profile=release</span>
+<span style="color: #F8F8F2">scons</span> <span style="color: #F8F8F2">target=windows</span> <span style="color: #F8F8F2">profile=debug</span>
+</pre></div>
+</pre></div>
+<blockquote>
+<p>The <code>brick</code> (Linux) or <code>brick.exe</code> (Windows) binary will be at <code>build/</code>.</p>
+</blockquote>
+<blockquote>
+<p>On Windows, you can also use <code>.\build-release.ps1</code> for a full release build.</p>
+</blockquote>
+<h2>Compile and Run a Brick Program</h2>
+<h3>Quickest way</h3>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>brick<span style="color: #F8F8F2"> </span>run<span style="color: #F8F8F2"> </span>examples/hello.brc
+</pre></div>
+</pre></div>
+<blockquote>
+<p>This compiles <code>.brc</code> → C → binary and runs it in one step.</p>
+</blockquote>
+<h3>Build to binary</h3>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>brick<span style="color: #F8F8F2"> </span>build<span style="color: #F8F8F2"> </span>examples/hello.brc<span style="color: #F8F8F2"> </span>-o<span style="color: #F8F8F2"> </span>hello
+./hello
+</pre></div>
+</pre></div>
+<p>The <code>brick build</code> command handles the full pipeline:</p>
+<ol>
+<li>Compiles <code>.brc</code> to C</li>
+<li>Links the runtime (block memory allocator, I/O, hot reload)</li>
+<li>Runs <code>gcc -O3</code> to produce a standalone binary</li>
+</ol>
+<h3>Compile to C only</h3>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>brick<span style="color: #F8F8F2"> </span>examples/hello.brc<span style="color: #F8F8F2"> </span>-o<span style="color: #F8F8F2"> </span>hello.c
+</pre></div>
+</pre></div>
+<blockquote>
+<p>Useful if you want to inspect the generated C code.</p>
+</blockquote>
+<h3>Release mode (no tracking overhead)</h3>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>brick<span style="color: #F8F8F2"> </span>build<span style="color: #F8F8F2"> </span>examples/hello.brc<span style="color: #F8F8F2"> </span>--release<span style="color: #F8F8F2"> </span>-o<span style="color: #F8F8F2"> </span>hello
+./hello
+</pre></div>
+</pre></div>
+<blockquote>
+<p>Omit tracking overhead for maximum performance (no visualizer support).</p>
+</blockquote>
+<h2>Run Tests</h2>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>scons<span style="color: #F8F8F2"> test                </span><span style="color: #959077"># run unit tests</span>
+tests/test_integration.sh<span style="color: #F8F8F2"> </span><span style="color: #959077"># integration tests (compile .brc -&gt; run binary)</span>
+</pre></div>
+</pre></div>
+<h2>Visualize Memory</h2>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>brick<span style="color: #F8F8F2"> </span>--visualize<span style="color: #F8F8F2"> </span>examples/hello.brc<span style="color: #F8F8F2">   </span><span style="color: #959077"># compila, roda e mostra TUI ao vivo / compile, run, show live TUI</span>
+brick<span style="color: #F8F8F2"> </span>--attach<span style="color: #F8F8F2"> </span>&lt;pid&gt;<span style="color: #F8F8F2">                  </span><span style="color: #959077"># conecta visualizador a processo rodando / attach visualizer to running process</span>
+</pre></div>
+</pre></div>
+<h2>Core Concepts</h2>
+<ol>
+<li><strong>Everything in blocks</strong>: your memory lives in blocks you declare</li>
+<li><strong>No stack</strong>: zero variables on the C stack (everything goes to blocks)</li>
+<li><strong>Bump allocator</strong>: super fast allocation (just advances a pointer)</li>
+<li><strong>Reset, not free</strong>: clears the entire block, never individual objects</li>
+<li><strong>Hot reload</strong>: swap code without stopping the program</li>
+<li><strong>Fixed-width types</strong>: i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize</li>
+<li><strong>Compile-time macros</strong>: code generation via <code>macro</code>, <code>build {}</code>, and <code>emit {}</code></li>
+<li><strong>#line directives</strong>: debug in the original .brc code, not the generated C</li>
+</ol>
+<h2>Project Structure</h2>
+<table>
+<thead>
+<tr><th>Directory</th><th>Contents</th></tr>
+</thead>
+<tbody>
+<tr><td>`src/`</td><td>Compiler (Lexer, Parser, Codegen) in C++20</td></tr>
+<tr><td>`runtime/`</td><td>Block memory allocator + hot reload + IO (C)</td></tr>
+<tr><td>`visualizer/`</td><td>ncurses TUI for live memory visualization</td></tr>
+<tr><td>`debugger/`</td><td>GDB pretty-printers and custom commands (Python)</td></tr>
+<tr><td>`vscode-ext/`</td><td>VS Code extension (highlight, LSP, memory view)</td></tr>
+<tr><td>`tests/`</td><td>Unit and integration tests</td></tr>
+<tr><td>`examples/`</td><td>Example .brc programs</td></tr>
+<tr><td>`docs/`</td><td>GitHub Pages site</td></tr>
+<tr><td>`wiki/`</td><td>GitHub Wiki content</td></tr>
+<tr><td>`tasks/`</td><td>Development task breakdown (01-11)</td></tr>
+<tr><td>`benchmarks/`</td><td>Performance benchmarks</td></tr>
+</tbody>
+</table>
+<h2>Opening a Task (for contributors)</h2>
+<blockquote>
+<p>Each folder in <code>tasks/</code> has a <code>run.sh</code> that opens opencode focused on that task.</p>
+</blockquote>
+<blockquote>
+<p>Each task has <code>AGENTS.md</code> (instructions for the AI) and <code>STATE.md</code> (where it stopped).</p>
+</blockquote>
+
+  </div>
+</main>
+
+<footer>
+  <p>Brick — MIT License</p>
+  <p><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
+</footer>
+
+</body>
+</html>

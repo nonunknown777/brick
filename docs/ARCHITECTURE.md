@@ -60,6 +60,9 @@ The core that runs alongside your program:
 - Declare `block game = 64MB` and allocate objects inside it
 - Clear the entire block with `block.reset()` — no individual free
 - Freeze/thaw support for hot reload
+- Cross-platform: `mmap` on Linux, `VirtualAlloc` on Windows (≥64KB), `malloc` fallback
+- Thread safety: `pthread_mutex` on Linux, `CRITICAL_SECTION` on Windows
+- TLS: `__thread` on GCC/Linux, `__declspec(thread)` on Windows/MinGW
 
 **io.c**:
 - Type-specific print functions: `io_print_i8`, `io_print_u32`, `io_print_f64`, etc.
@@ -68,13 +71,13 @@ The core that runs alongside your program:
 
 **hot_reload.c**:
 - Swap code without stopping your program
-- Uses `dlopen` to load .so libraries
-- Monitors files with `inotify` (detects changes)
-- Atomic function pointer swap
+- Cross-platform abstraction: `dlopen`+`dlsym`+`inotify` on Linux, `LoadLibrary`+`GetProcAddress`+`ReadDirectoryChangesW` on Windows
+- Atomic function pointer swap via `__atomic_store_n` (GCC) or `InterlockedExchange` (MSVC/MinGW)
+- Watches `.so`/`.dll` files for modifications in a separate thread
 
-### visualizer/ — The Eyes (TUI ncurses)
+### visualizer/ — The Eyes (TUI ncurses / PDCurses)
 
-Shows memory blocks in real time in the terminal:
+Shows memory blocks in real time in the terminal (ncurses on Linux, PDCurses on Windows):
 
 ```
 global  256MB  ████████████░░░  67%

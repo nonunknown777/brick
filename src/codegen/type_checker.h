@@ -29,9 +29,10 @@ private:
     const PackageTable& packages;
     std::vector<std::string> errors;
 
-    // Global struct/interface definitions
-    // Definicoes globais de struct/interface
+    // Global struct/interface/union definitions
+    // Definicoes globais de struct/interface/union
     std::unordered_map<std::string, StructDecl*> struct_defs;
+    std::unordered_map<std::string, UnionDecl*> union_defs;
     std::unordered_map<std::string, InterfaceDecl*> interface_defs;
 
     // Scoped symbol tables
@@ -41,6 +42,12 @@ private:
     // Extern function declarations (for return type resolution)
     // Declaracoes de funcao externa (para resolucao de tipo de retorno)
     std::unordered_map<std::string, FuncDecl*> extern_func_defs;
+
+    // Type aliases (type X = Y)
+    std::unordered_map<std::string, std::string> type_aliases;
+
+    // Enum definitions
+    std::unordered_map<std::string, EnumDecl*> enum_defs;
 
     std::string current_package;
     std::string current_struct;
@@ -55,12 +62,15 @@ private:
     bool is_type_known(const std::string& type_name);
     bool is_struct_type(const std::string& type_name);
     bool is_interface_type(const std::string& type_name);
+    bool is_union_type(const std::string& type_name);
     bool can_assign(const std::string& from, const std::string& to);
     std::string promote_types(const std::string& a, const std::string& b);
 
     void check_program(ProgramNode* program);
     void check_struct(StructDecl* sd);
+    void check_union(UnionDecl* ud);
     void check_interface(InterfaceDecl* id);
+    void check_enum(EnumDecl* ed);
     void check_function(FuncDecl* fd, const std::string& struct_name);
     void declare_inherited_fields(StructDecl* sd);
     void check_block(BlockStmt* block, const std::string& return_type);

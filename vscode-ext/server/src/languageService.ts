@@ -52,6 +52,8 @@ const KEYWORDS = new Set([
     'null', 'true', 'false',
     'include', 'link', 'extern', 'and',
     'macro', 'build', 'emit',
+    'not', 'break', 'continue', 'const', 'defer',
+    'enum', 'match', 'is', 'as',
 ]);
 
 const KEYWORD_DOCS: Record<string, string> = {
@@ -100,6 +102,15 @@ const KEYWORD_DOCS: Record<string, string> = {
     macro: 'Declares a compile-time macro template. Usage:\n```brick\nmacro name(param1, param2, valores...) {\n    $param1 = $param2 + 1\n    emit { fn $param1() { } }\n}\n```\n- `$nome` inserts the argument\n- `$(expr)` evaluates expr at compile time\n- `valores...` captures rest args as an indexable list',
     build: 'Compile-time computation block. Supports arithmetic, for/while/if, assignment, strings.\n```brick\nbuild {\n    x = 42\n    emit { z = x + 10 }  // z = 52 in final code\n}\n```\n- `emit { }` generates code at the build site\n- `emit nome(args)` calls a macro',
     emit: 'Generates code at compile time:\n- `emit { /* any Brick code */ }` — inline code generation\n- `emit nome_macro(args)` — call a macro',
+    not: 'Boolean negation operator. Same as `!`. Example: `if not a { }`',
+    break: 'Exits the innermost loop or match arm. Usage: `break`',
+    continue: 'Skips to the next iteration of the innermost loop. Usage: `continue`',
+    const: 'Declares a compile-time constant. Examples:\n- `const MAX = 100` (type inferred)\n- `const int MIN = 0` (typed)',
+    defer: 'Schedules a statement to execute when the enclosing scope exits. Example: `defer { cleanup() }`',
+    enum: 'Declares an enumerated type with named constants. Example:\n```brick\nenum Color { Red = 0; Green; Blue }\n```',
+    match: 'Pattern matching on a value. Example:\n```brick\nmatch x {\n    1 { print("one") }\n    2,3 { print("two or three") }\n    _ { print("other") }\n}\n```',
+    'is': 'Type-check operator. Example: `if x is Player { }`',
+    'as': 'Type-cast operator. Example: `let p = x as Player`',
     PoolAllocator: 'Pool allocator type for fixed-size slot allocation. Created via `pool_create()`.',
     block_set_tls: 'Sets the thread-local storage block context. Used for per-thread memory blocks.',
     block_get_tls: 'Returns the thread-local storage block context.',
@@ -155,6 +166,39 @@ export function scanDocument(text: string): ScanResult {
                 break;
             }
 
+            // Block comment
+            if (ch === '/' && col + 1 < len && line[col + 1] === '*') {
+                let startLine = lineIdx;
+                let startCol = col;
+                let depth = 1;
+                col += 2;
+                let commentText = '/*';
+                while (depth > 0) {
+                    if (col >= len) {
+                        lineIdx++;
+                        if (lineIdx >= lines.length) break;
+                        line = lines[lineIdx];
+                        col = 0;
+                        commentText += '\n';
+                        continue;
+                    }
+                    if (line[col] === '/' && col + 1 < len && line[col + 1] === '*') {
+                        depth++;
+                        commentText += '/*';
+                        col += 2;
+                    } else if (line[col] === '*' && col + 1 < len && line[col + 1] === '/') {
+                        depth--;
+                        commentText += '*/';
+                        col += 2;
+                    } else {
+                        commentText += line[col];
+                        col++;
+                    }
+                }
+                tokens.push({ type: 'COMMENT', lexeme: commentText, line: startLine + 1, col: startCol + 1 });
+                continue;
+            }
+
             // Strings
             if (ch === '"') {
                 const start = col;
@@ -189,15 +233,33 @@ export function scanDocument(text: string): ScanResult {
                 continue;
             }
 
-            // Numbers (int & float)
+            // Numbers (int & float, hex/octal/binary)
             if (ch >= '0' && ch <= '9') {
                 const start = col;
                 let isFloat = false;
-                while (col < len && (line[col] >= '0' && line[col] <= '9')) col++;
-                if (col < len && line[col] === '.') {
-                    isFloat = true;
-                    col++;
-                    while (col < len && (line[col] >= '0' && line[col] <= '9')) col++;
+                // Hex 0x...
+                if (ch === '0' && col + 1 < len && (line[col + 1] === 'x' || line[col + 1] === 'X')) {
+                    col += 2;
+                    while (col < len && ((line[col] >= '0' && line[col] <= '9') || (line[col] >= 'a' && line[col] <= 'f') || (line[col] >= 'A' && line[col] <= 'F') || line[col] === '_')) col++;
+                }
+                // Binary 0b...
+                else if (ch === '0' && col + 1 < len && (line[col + 1] === 'b' || line[col + 1] === 'B')) {
+                    col += 2;
+                    while (col < len && ((line[col] >= '0' && line[col] <= '1') || line[col] === '_')) col++;
+                }
+                // Octal 0o...
+                else if (ch === '0' && col + 1 < len && (line[col + 1] === 'o' || line[col + 1] === 'O')) {
+                    col += 2;
+                    while (col < len && ((line[col] >= '0' && line[col] <= '7') || line[col] === '_')) col++;
+                }
+                // Decimal
+                else {
+                    while (col < len && ((line[col] >= '0' && line[col] <= '9') || line[col] === '_')) col++;
+                    if (col < len && line[col] === '.') {
+                        isFloat = true;
+                        col++;
+                        while (col < len && ((line[col] >= '0' && line[col] <= '9') || line[col] === '_')) col++;
+                    }
                 }
                 const lexeme = line.slice(start, col);
                 tokens.push({ type: isFloat ? 'FLOAT_LITERAL' : 'INT_LITERAL', lexeme, line: lineIdx + 1, col: start + 1 });
@@ -929,7 +991,7 @@ export function getCompletionContext(text: string, line: number, col: number, tr
     const colonMatch = prefix.match(/:([a-zA-Z0-9_]*)$/);
 
     // Check if we're after a keyword
-    const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for|extern|include|link|macro|build|emit)\s+([a-zA-Z0-9_]*)$/);
+    const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for|extern|include|link|macro|build|emit|enum|const|match)\s+([a-zA-Z0-9_]*)$/);
 
     // Check if we're after a type
     const typeMatch = prefix.match(/\b(u(?:8|16|32|64)|i(?:8|16|32|64)|f(?:32|64)|usize|isize|byte|int|float|bool|char|String|void)\s+([a-zA-Z0-9_]*)$/);

@@ -11,13 +11,13 @@ explicit block-based memory management, and native hot reload.
 - Compilador: C++20
 - Runtime: C (ABI externa pra hot reload)
 - Build: SCons
-- Visualizador: ncurses (TUI)
-- Hot Reload: dlopen + inotify
+- Visualizador: ncurses (Linux) / PDCurses (Windows)
+- Hot Reload: dlopen+inotify (Linux) / LoadLibrary+ReadDirectoryChangesW (Windows)
 - Compiler: C++20
 - Runtime: C (external ABI for hot reload)
 - Build: SCons
-- Visualizer: ncurses (TUI)
-- Hot Reload: dlopen + inotify
+- Visualizer: ncurses (Linux) / PDCurses (Windows)
+- Hot Reload: dlopen+inotify (Linux) / LoadLibrary+ReadDirectoryChangesW (Windows)
 
 ## Estrutura
 ## Structure
@@ -26,7 +26,7 @@ src/           → compilador (C++20) / compiler (C++20)
 runtime/       → block memory allocator + hot reload (C)
 visualizer/    → TUI ncurses (C++)
 debugger/      → GDB pretty-printers + .gdbinit (Python)
-tasks/         → 10 tasks, cada uma com AGENTS.md + estado / each with AGENTS.md + state
+tasks/         → 11 tasks, cada uma com AGENTS.md + estado / each with AGENTS.md + state
 examples/      → código .brc de exemplo / example .brc code
 tests/         → testes unitários / unit tests
 vscode-ext/    → extensão VS Code (highlight + LSP + debug webview) / VS Code extension
@@ -48,7 +48,7 @@ Always read STATE.md and NEXT.md when starting a session.
 07-builder    SCons build
 08-vscoder    VS Code extension (highlight + LSP + debug webview)
 09-debugger   GDB pretty-printers + #line directives + VS Code Memory View
-10-tester     Test runner + optimizer + documentation + coordinator
+10-tester     Test runner + optimizer + documentation + coordinator (Windows CI)
 11-libs       Official libraries (window, input, audio, file, net, math)
 ```
 

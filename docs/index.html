@@ -4,40 +4,56 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Brick — A Language That Compiles to C</title>
-<meta name="description" content="Brick: OOP language that compiles to C. Maximum performance, explicit block-based memory management, native hot reload.">
+<meta name="description" content="Brick: OOP language that compiles to C. Maximum performance, explicit block-based memory management, compile-time macros, native hot reload.">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
 <!-- Hero -->
 <section class="hero">
-  <div class="lang-toggle"><a href="https://github.com/nonunknown777/brick/blob/main/README.pt-BR.md">🇧🇷 Português</a></div>
-  <h1>Brick</h1>
-  <p class="tagline">A programming language that compiles to C.<br>Maximum performance. Explicit memory. Native hot reload.</p>
+  <div class="lang-toggle">
+    <a href="https://github.com/nonunknown777/brick/blob/main/README.pt-BR.md">🇧🇷 Português</a>
+    <a href="index.html" style="margin-left:8px;">🇺🇸 English</a>
+  </div>
+  <h1>Brick v0.6.0</h1>
+  <p class="tagline">A programming language that compiles to C.<br>Maximum performance. Explicit memory. Native hot reload. Compile-time macros. Windows native.</p>
   <a href="#start" class="btn">Get Started</a>
+  <a href="GETTING_STARTED.html" class="btn" style="margin-left:12px;background:var(--accent2);">Read the Docs</a>
 </section>
 
 <!-- What is Brick -->
 <section>
   <div class="container">
     <h2 class="section-title fade-in">What is Brick?</h2>
-    <p class="section-sub fade-in">An OOP language with clean syntax that compiles directly to C. Designed for games, real-time systems, and any domain where performance and memory control matter.</p>
+    <p class="section-sub fade-in">An OOP language with GDScript-inspired syntax that compiles directly to C. Designed for games, real-time systems, and any domain where performance and memory control matter.</p>
     <div class="philosophy-grid">
       <div class="phil-item fade-in">
         <h3>Compiles to C</h3>
-        <p>Your .brc code becomes readable C — then gcc turns it into a native binary. No VM, no interpreter, no overhead.</p>
+        <p>Your .brc code becomes readable C — then gcc turns it into a native binary. No VM, no interpreter, no overhead. Full C interop with <code>include</code>, <code>link</code>, and <code>extern fn</code>.</p>
       </div>
       <div class="phil-item fade-in">
-        <h3>Explicit Memory</h3>
-        <p>No garbage collector, no stack for user data. Everything lives in named blocks you control. Reset a block — all allocations go with it.</p>
+        <h3>Block Memory</h3>
+        <p>No garbage collector, no stack for user data. Everything lives in named blocks you control. Declare <code>block game = 64MB</code>, allocate with <code>@game</code>, reset everything with <code>game.reset()</code>.</p>
       </div>
       <div class="phil-item fade-in">
         <h3>Hot Reload</h3>
-        <p>Swap code without stopping your program. Powered by dlopen + inotify. Edit, save, see results instantly.</p>
+        <p>Swap code without stopping your program. Powered by dlopen + inotify. Edit, save, see results instantly. Double-buffered — zero visible stutter.</p>
+      </div>
+      <div class="phil-item fade-in">
+        <h3>Compile-Time Macros</h3>
+        <p>Generate code with <code>macro</code>, compute at compile time with <code>build</code>, stamp output with <code>emit</code>. Zero runtime cost — macros expand before type-checking.</p>
+      </div>
+      <div class="phil-item fade-in">
+        <h3>Windows Native Port</h3>
+        <p>Full Windows support via MinGW-w64. <code>VirtualAlloc</code>/<code>CRITICAL_SECTION</code>, <code>LoadLibrary</code>/<code>ReadDirectoryChangesW</code>, and a Win32 window library. All 159 codegen tests pass on Windows. CI pipeline included.</p>
       </div>
       <div class="phil-item fade-in">
         <h3>Fixed-Width Types</h3>
-        <p>i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize. Compile-time overflow checking, literal suffixes, and type promotion rules.</p>
+        <p>i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize. Compile-time overflow checking, literal suffixes (<code>42u8</code>, <code>3.14f64</code>), and strict type promotion rules.</p>
+      </div>
+      <div class="phil-item fade-in">
+        <h3>C Interop</h3>
+        <p>Call any C library directly: <code>include "math.h"</code>, <code>extern fn sqrt(f64) -> f64</code>. Generate bindings from headers with <code>brick bind</code>.</p>
       </div>
     </div>
   </div>
@@ -47,20 +63,27 @@
 <section>
   <div class="container">
     <h2 class="section-title fade-in">Code Example</h2>
-    <p class="section-sub fade-in">Interfaces, fixed-width types, blocks — all working together.</p>
+    <p class="section-sub fade-in">Interfaces, blocks, macros, and fixed-width types — all working together.</p>
     <div class="code-block fade-in">
       <span class="lang-label">Brick (.brc)</span>
-<pre><span class="kw">package</span> DEMO
+<pre><span class="kw">package</span> <span class="type">DEMO</span>
 
-<span class="kw">using</span> IO
+<span class="kw">using</span> <span class="type">IO</span>
 
 <span class="kw">block</span> <span class="type">global</span> = <span class="num">256MB</span>
+<span class="kw">block</span> <span class="type">temp</span>   = <span class="num">8KB</span>
+
+<span class="kw">macro</span> <span class="fn">assert</span>(condition, msg) {
+    <span class="kw">if</span> !($condition) {
+        <span class="fn">print</span>(<span class="str">"ASSERT: {0}"</span>, $msg)
+    }
+}
 
 <span class="kw">interface</span> <span class="type">Drawable</span> {
     <span class="kw">fn</span> <span class="fn">draw</span>()
 }
 
-<span class="type">struct</span> <span class="type">Circle</span> {
+<span class="kw">struct</span> <span class="type">Circle</span> {
     <span class="type">u32</span> id
     <span class="type">String</span> name
     <span class="type">f32</span> radius
@@ -77,11 +100,73 @@
 }
 
 <span class="kw">fn</span> <span class="fn">main</span>() {
-    <span class="type">Circle</span> c = <span class="fn">Circle</span>(<span class="num">1u32</span>, <span class="str">"Small"</span>, <span class="num">5.0f32</span>) <span class="op">@global</span>
+    <span class="fn">assert</span>(<span class="num">1</span> + <span class="num">1</span> == <span class="num">2</span>, <span class="str">"math is broken"</span>)
+    <span class="type">Circle</span> c = <span class="fn">Circle</span>(<span class="num">1u32</span>, <span class="str">"Small"</span>, <span class="num">5.0f32</span>) <span class="op">@</span>global
     c.<span class="fn">draw</span>()
 }
 </pre>
     </div>
+  </div>
+</section>
+
+<!-- Macro Example -->
+<section>
+  <div class="container">
+    <h2 class="section-title fade-in">Macros: Code That Writes Code</h2>
+    <p class="section-sub fade-in">Macros expand before type-checking — zero runtime cost. Use <code>macro</code> for templates, <code>build</code> for compile-time computation, and <code>emit</code> to generate output.</p>
+
+    <div class="features-grid">
+      <div class="feature-card fade-in">
+        <h3>Swap Macro</h3>
+        <div class="code-block" style="margin-top:12px;"><pre><span class="kw">macro</span> <span class="fn">swap</span>(a, b) {
+    __tmp = $a
+    $a = $b
+    $b = __tmp
+}
+
+<span class="fn">swap</span>(x, y)  <span class="cmt">// expands inline</span></pre></div>
+        <p style="margin-top:8px;">Parameters are untyped — they hold expressions. <code>$</code> inserts the argument. <code>__</code> vars get unique names (gensym).</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>Build + Emit</h3>
+        <div class="code-block" style="margin-top:12px;"><pre><span class="kw">build</span> {
+    dmg = [<span class="num">10</span>, <span class="num">25</span>, <span class="num">50</span>, <span class="num">100</span>]
+    <span class="kw">for</span> i = <span class="num">0</span>; i &lt; <span class="num">4</span>; i++ {
+        <span class="kw">emit</span> {
+            <span class="kw">if</span> weapon == i {
+                hp -= dmg[i]
+            }
+        }
+    }
+}</pre></div>
+        <p style="margin-top:8px;">All <code>for</code> loops unroll at compile time. Only the <code>emit</code> blocks become real code.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>Type Reflection</h3>
+        <div class="code-block" style="margin-top:12px;"><pre><span class="kw">build</span> {
+    v = <span class="type">Vec2</span>
+    name   = v.name     <span class="cmt">// "Vec2"</span>
+    size   = v.size     <span class="cmt">// 8</span>
+    fields = v.fields   <span class="cmt">// ["x","y"]</span>
+}</pre></div>
+        <p style="margin-top:8px;">Inspect type names, sizes, and field lists at compile time. Generate serializers and debug printers automatically.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>Hygiene</h3>
+        <div class="code-block" style="margin-top:12px;"><pre><span class="cmt">// Macro __i becomes __i__1</span>
+<span class="cmt">// No collision with user code</span>
+<span class="kw">macro</span> <span class="fn">twice</span>(body) {
+    __i = <span class="num">0</span>
+    <span class="kw">while</span> __i &lt; <span class="num">2</span> { $body; __i++ }
+}
+
+__i = <span class="num">100</span>     <span class="cmt">// different variable</span>
+<span class="fn">twice</span>(<span class="fn">print</span>(<span class="str">"hi"</span>))
+<span class="fn">print</span>(__i)  <span class="cmt">// still 100</span></pre></div>
+        <p style="margin-top:8px;">Automatic name uniquing. Max 64 recursion levels. <code>$</code> outside macro/build is a compile error.</p>
+      </div>
+    </div>
+    <p style="text-align:center;margin-top:2rem;"><a href="MACROS.html" class="btn">Full Macro Documentation →</a></p>
   </div>
 </section>
 
@@ -92,49 +177,56 @@
     <p class="section-sub fade-in">Everything you need for high-performance systems programming — nothing you don't.</p>
     <div class="features-grid">
       <div class="feature-card fade-in">
-        <span class="icon">⚡</span>
         <h3>OOP with Structs</h3>
-        <p>Structs with methods, constructors, inheritance, and interface support. Clean GDScript-inspired syntax that compiles to C.</p>
+        <p>Structs with methods, constructors, inheritance (<code>extends</code>), and interfaces. No <code>this</code>, no name shadowing. Clean GDScript-inspired syntax.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">🔧</span>
         <h3>Compile-Time Macros</h3>
-        <p><code>macro</code> templates, <code>build</code> comptime evaluation, <code>emit</code> code generation. Swap variables, generate enums, serialize structs — all at compile time with zero runtime cost.</p>
+        <p><code>macro</code> templates, <code>build</code> comptime evaluation, <code>emit</code> code generation. Swap variables, generate enums, serialize structs — all at compile time.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">🧱</span>
         <h3>Block Memory</h3>
-        <p>Declare named memory blocks (8KB – 256MB+). All allocations go into blocks. No malloc/free per object — just <code>block.reset()</code>.</p>
+        <p>Declare named memory blocks (8KB – 256MB+). All allocations go into blocks. No malloc/free per object — just <code>block.reset()</code> clears everything.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">🔄</span>
         <h3>Hot Reload</h3>
-        <p>Edit code while it runs. dlopen + inotify detect changes, reload .so files, remap functions. Zero downtime iteration.</p>
+        <p>Edit code while it runs. dlopen + inotify detect changes, reload .so files, remap functions atomically. Zero downtime iteration.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">📏</span>
         <h3>Fixed-Width Types</h3>
-        <p>i8..i64, u8..u64, f32/f64, usize/isize. Full compile-time overflow checking, widening rules, and literal suffixes.</p>
+        <p>i8..i64, u8..u64, f32/f64, usize/isize. Compile-time overflow checking, widening rules, literal suffixes. Predictable sizes on every platform.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">🐛</span>
+        <h3>C Interop</h3>
+        <p><code>include "sdl2.h"</code>, <code>extern fn</code>, <code>*T</code> pointers. Call any C library. <code>brick bind</code> generates .brc bindings from headers.</p>
+      </div>
+      <div class="feature-card fade-in">
         <h3>GDB Integration</h3>
-        <p>Step through your original .brc code, not the generated C. <code>#line</code> directives map every line back.</p>
+        <p><code>#line</code> directives map every line back to .brc. Pretty-printers show blocks. Custom commands: <code>info blocks</code>, <code>block &lt;name&gt;</code>.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">📊</span>
         <h3>TUI Visualizer</h3>
-        <p>Ncurses dashboard showing block memory usage and allocations in real time. <code>brick --visualize file.brc</code>.</p>
+        <p>Ncurses dashboard showing block memory usage and allocations in real time. <code>brick --visualize file.brc</code> or <code>--attach &lt;pid&gt;</code>.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">🔌</span>
         <h3>VS Code Extension</h3>
-        <p>Syntax highlighting, LSP, and a memory-view panel that plots block allocations. Debug your memory layout visually.</p>
+        <p>Syntax highlighting, LSP (completions, hover, diagnostics), and memory-view panel that plots block allocations during debug.</p>
       </div>
       <div class="feature-card fade-in">
-        <span class="icon">🌍</span>
-        <h3>Cross-platform</h3>
-        <p>Write once, compile anywhere C goes — Linux, macOS, Windows. Pure C runtime with POSIX dlopen.</p>
+        <h3>Packages</h3>
+        <p>Hierarchical <code>package NAME.SUB</code>, <code>using</code> import, <code>private</code>/<code>public</code> visibility. Each package can be a separate .so for hot reload.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>Pool Allocator</h3>
+        <p>Types ≤ 64 bytes automatically use a pool allocator (O(1) free). Larger types use the bump allocator (~3 ns). Both live inside blocks.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>TLS Blocks</h3>
+        <p>Thread-local current block via <code>__thread</code> (GCC) / <code>__declspec(thread)</code> (MinGW). Zero-contention allocations across threads — no locks, no atomics, no cache-line bouncing.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>Windows Native</h3>
+        <p><code>VirtualAlloc</code> blocks, <code>CRITICAL_SECTION</code> thread safety, <code>LoadLibrary</code> hot reload, <code>ReadDirectoryChangesW</code> file watching, <code>CreateWindow</code> Win32 window library, <code>brc-run.bat</code> helper. Full CI pipeline.</p>
       </div>
     </div>
   </div>
@@ -144,29 +236,29 @@
 <section>
   <div class="container">
     <h2 class="section-title fade-in">Performance</h2>
-    <p class="section-sub fade-in">Block memory isn't just safe — it's brutally fast.</p>
+    <p class="section-sub fade-in">Block memory isn't just safe — it's brutally fast. 7 optimization techniques applied.</p>
     <div class="perf-grid">
       <div class="perf-card fade-in">
         <h3>Allocation Speed</h3>
         <div class="perf-bar-track">
           <div class="perf-bar accent" style="width:100%">bump allocator</div>
         </div>
-        <div class="perf-label"><span>~3 ns</span><span>19× faster</span></div>
+        <div class="perf-label"><span>~3 ns</span><span>27× faster</span></div>
         <div class="perf-bar-track">
           <div class="perf-bar teal" style="width:33%">malloc</div>
         </div>
         <div class="perf-label"><span>~80 ns</span><span>baseline</span></div>
       </div>
       <div class="perf-card fade-in">
-        <h3>Free / Reset Speed</h3>
+        <h3>Reset Speed</h3>
         <div class="perf-bar-track">
           <div class="perf-bar accent" style="width:100%">block.reset()</div>
         </div>
-        <div class="perf-label"><span>~5 ns</span><span>2000× faster</span></div>
+        <div class="perf-label"><span>~1 ns</span><span>2000× faster</span></div>
         <div class="perf-bar-track">
           <div class="perf-bar teal" style="width:0.1%">free() per object</div>
         </div>
-        <div class="perf-label"><span>~1 ms (1000 objects)</span><span>baseline</span></div>
+        <div class="perf-label"><span>~2 ms (1000 objs)</span><span>baseline</span></div>
       </div>
       <div class="perf-card fade-in">
         <h3>Cache Locality</h3>
@@ -180,6 +272,84 @@
         <div class="perf-label"><span>scattered access</span><span>fragmented</span></div>
       </div>
     </div>
+  </div>
+</section>
+
+<!-- Architecture -->
+<section>
+  <div class="container">
+    <h2 class="section-title fade-in">Architecture</h2>
+    <p class="section-sub fade-in">From source to binary — the compilation pipeline.</p>
+
+    <div class="pipeline fade-in">
+      <div class="pipe-row">
+        <div class="pipe-step"><div class="label">.brc Source</div><div class="sub">your code</div></div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-step"><div class="label">Lexer</div><div class="sub">src/lexer</div></div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-step"><div class="label">Parser</div><div class="sub">src/parser</div></div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-step" style="border-color:var(--accent);background:var(--bg-card);">
+          <div class="label">Macro System</div>
+          <div class="sub">collect → build → expand</div>
+        </div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-step"><div class="label">Codegen</div><div class="sub">type check + C emit</div></div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-step"><div class="label">C Code</div><div class="sub">with #line</div></div>
+        <span class="pipe-arrow">→</span>
+        <div class="pipe-step"><div class="label">gcc -O3</div><div class="sub">native binary</div></div>
+      </div>
+    </div>
+
+    <div class="pipe-extra fade-in">
+      <div class="pipe-step"><div class="label">Runtime</div><div class="sub">block alloc + IO</div></div>
+      <div class="pipe-step"><div class="label">Hot Reload</div><div class="sub">dlopen + inotify</div></div>
+      <div class="pipe-step"><div class="label">Visualizer</div><div class="sub">ncurses TUI</div></div>
+      <div class="pipe-step"><div class="label">Debugger</div><div class="sub">GDB + .gdbinit</div></div>
+      <div class="pipe-step"><div class="label">VS Code</div><div class="sub">ext + memory view</div></div>
+      <div class="pipe-step"><div class="label">PGO Builds</div><div class="sub">scons profile=pgo</div></div>
+      <div class="pipe-step"><div class="label">Windows CI</div><div class="sub">MinGW-w64 + MSYS2</div></div>
+    </div>
+  </div>
+</section>
+
+<!-- Optimizations -->
+<section>
+  <div class="container">
+    <h2 class="section-title fade-in">Optimizations</h2>
+    <p class="section-sub fade-in">7 techniques applied — from compile-time math to thread-local blocks.</p>
+    <div class="features-grid">
+      <div class="feature-card fade-in">
+        <h3>🔧 Constant Folding</h3>
+        <p>Pre-computes constant expressions (<code>60 * 1000</code> → <code>60000</code>) so the CPU never has to.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>⚡ Inline Hints</h3>
+        <p>Every non-main function gets <code>always_inline</code>. Zero call overhead for methods and small functions.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>📏 SIMD Alignment</h3>
+        <p>Float/f64 fields get <code>aligned(16/32)</code> so GCC emits aligned SSE/AVX moves — up to 2× faster math.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>📦 Pool Allocator</h3>
+        <p>Types ≤ 64 bytes use O(1) pool_alloc. Larger types use the bump allocator. Both inside blocks.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>🧵 TLS Blocks</h3>
+        <p>Thread-local current block via <code>__thread</code>. Each thread allocates without locks — zero contention.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>🔄 Double-Buffer</h3>
+        <p>Hot reload with zero pause. Block double-buffering swaps atomically — no frame skip, no stutter.</p>
+      </div>
+      <div class="feature-card fade-in">
+        <h3>📊 PGO Builds</h3>
+        <p>Profile-guided optimization: instrument, run benchmarks, rebuild. Up to 15% faster code.</p>
+      </div>
+    </div>
+    <p style="text-align:center;margin-top:2rem;"><a href="OPTIMIZATIONS.html" class="btn">View Full Details →</a></p>
   </div>
 </section>
 
@@ -203,14 +373,15 @@ cd brick</pre></div>
         <div class="step-body">
           <h3>Build</h3>
           <p>Brick uses SCons. Build the compiler and runtime in one command.</p>
-          <div class="code-block"><pre>scons</pre></div>
+          <div class="code-block"><pre>scons                    # Linux
+scons target=windows     # Windows (MinGW-w64)</pre></div>
         </div>
       </div>
       <div class="step fade-in">
         <div class="step-num">3</div>
         <div class="step-body">
           <h3>Write</h3>
-          <p>Create a <code>.brc</code> file with structs, methods, and blocks.</p>
+          <p>Create a <code>.brc</code> file with structs, methods, macros, and blocks.</p>
           <div class="code-block"><pre>touch game.brc</pre></div>
         </div>
       </div>
@@ -226,126 +397,59 @@ cd brick</pre></div>
   </div>
 </section>
 
-<!-- Architecture -->
-<section>
-  <div class="container">
-    <h2 class="section-title fade-in">Architecture</h2>
-    <p class="section-sub fade-in">From source to binary — the compilation pipeline.</p>
-
-    <div class="pipeline fade-in">
-      <div class="pipe-row">
-        <div class="pipe-step"><div class="label">.brc Source</div><div class="sub">your code</div></div>
-        <span class="pipe-arrow">→</span>
-        <div class="pipe-step"><div class="label">Lexer</div><div class="sub">src/lexer</div></div>
-        <span class="pipe-arrow">→</span>
-        <div class="pipe-step"><div class="label">Parser</div><div class="sub">src/parser</div></div>
-        <span class="pipe-arrow">→</span>
-        <div class="pipe-step"><div class="label">Macros</div><div class="sub">collect + expand + build</div></div>
-        <span class="pipe-arrow">→</span>
-        <div class="pipe-step"><div class="label">Codegen</div><div class="sub">src/codegen</div></div>
-        <span class="pipe-arrow">→</span>
-        <div class="pipe-step"><div class="label">C Code</div><div class="sub">with #line</div></div>
-        <span class="pipe-arrow">→</span>
-        <div class="pipe-step"><div class="label">gcc</div><div class="sub">-O3</div></div>
-        <span class="pipe-arrow">→</span>
-        <div class="pipe-step"><div class="label">Binary</div><div class="sub">native</div></div>
-      </div>
-    </div>
-
-    <div class="pipe-extra fade-in">
-      <div class="pipe-step"><div class="label">Runtime</div><div class="sub">C (block alloc)</div></div>
-      <div class="pipe-step"><div class="label">Hot Reload</div><div class="sub">dlopen + inotify</div></div>
-      <div class="pipe-step"><div class="label">Visualizer</div><div class="sub">ncurses TUI</div></div>
-      <div class="pipe-step"><div class="label">Debugger</div><div class="sub">GDB + .gdbinit</div></div>
-      <div class="pipe-step"><div class="label">VS Code</div><div class="sub">ext + memory view</div></div>
-    </div>
-  </div>
-</section>
-
-<!-- Optimizations -->
-<section>
-  <div class="container">
-    <h2 class="section-title fade-in">Optimizations</h2>
-    <p class="section-sub fade-in">7 techniques applied — from compile-time math to thread-local blocks.</p>
-    <div class="features-grid">
-      <div class="feature-card fade-in">
-        <span class="icon">🔧</span>
-        <h3>Compile-Time Macros</h3>
-        <p>Generate code with <code>macro</code>, compute at compile time with <code>build</code> + <code>emit</code>. Supports <code>$</code> interpolation, varargs, hygiene, and type reflection.</p>
-      </div>
-      <div class="feature-card fade-in">
-        <span class="icon">🧮</span>
-        <h3>Constant Folding</h3>
-        <p>The compiler pre-computes constant expressions (<code>60 * 1000</code> → <code>60000</code>) so the CPU never has to.</p>
-      </div>
-      <div class="feature-card fade-in">
-        <span class="icon">⚡</span>
-        <h3>Inline Hints</h3>
-        <p>Every non-main function gets <code>__attribute__((always_inline))</code>. Zero call overhead for methods and small functions.</p>
-      </div>
-      <div class="feature-card fade-in">
-        <span class="icon">📏</span>
-        <h3>SIMD Alignment</h3>
-        <p>Float/f64 fields are <code>aligned(16)</code> or <code>aligned(32)</code> so GCC uses aligned SSE/AVX moves — up to 2× faster math.</p>
-      </div>
-      <div class="feature-card fade-in">
-        <span class="icon">📦</span>
-        <h3>Pool Allocator</h3>
-        <p>Every block gets a pool for types ≤ 64 bytes. Small allocations use O(1) pool_alloc instead of the bump allocator, freeing memory individually.</p>
-      </div>
-      <div class="feature-card fade-in">
-        <span class="icon">🧵</span>
-        <h3>TLS Blocks</h3>
-        <p>Thread-local current block via <code>__thread</code>. Each thread allocates without locks — zero contention, zero cache-line bouncing.</p>
-      </div>
-      <div class="feature-card fade-in">
-        <span class="icon">🔄</span>
-        <h3>Double-Buffer</h3>
-        <p>Hot reload with zero pause. Block double-buffering swaps atomically — no frame skip, no visible stutter.</p>
-      </div>
-      <div class="feature-card fade-in">
-        <span class="icon">📊</span>
-        <h3>PGO Builds</h3>
-        <p>Profile-guided optimization: compile with <code>profile=pgo-gen</code>, run benchmarks, rebuild with <code>profile=pgo-use</code>. Up to 15% faster code.</p>
-      </div>
-    </div>
-    <p style="text-align:center;margin-top:2rem;"><a href="OPTIMIZATIONS.md" class="btn">View Full Details →</a></p>
-  </div>
-</section>
-
-<!-- Documentation -->
+<!-- Documentation Links -->
 <section>
   <div class="container">
     <h2 class="section-title fade-in">Documentation</h2>
     <p class="section-sub fade-in">Learn the language, the runtime, and the toolchain.</p>
     <div class="docs-links">
-      <a href="LANGUAGE.md" class="doc-link fade-in">
+      <a href="LANGUAGE.html" class="doc-link fade-in">
         <h4>Language Spec</h4>
-        <p>Complete syntax, types, packages, and memory model reference.</p>
+        <p>Complete syntax, types, packages, memory model, and operators reference.</p>
       </a>
-      <a href="GETTING_STARTED.md" class="doc-link fade-in">
-        <h4>Getting Started</h4>
-        <p>Installation, first project, and common patterns explained simply.</p>
-      </a>
-      <a href="ARCHITECTURE.md" class="doc-link fade-in">
-        <h4>Architecture</h4>
-        <p>How the compiler, runtime, and tools fit together.</p>
-      </a>
-      <a href="MACROS.md" class="doc-link fade-in">
+      <a href="MACROS.html" class="doc-link fade-in">
         <h4>Macros</h4>
-        <p>Compile-time code generation — <code>macro</code>, <code>build</code>, <code>emit</code>, and interpolation.</p>
+        <p>Compile-time code generation — <code>macro</code>, <code>build</code>, <code>emit</code>. With 6 real-world examples.</p>
       </a>
-      <a href="OPTIMIZATIONS.md" class="doc-link fade-in">
+      <a href="GETTING_STARTED.html" class="doc-link fade-in">
+        <h4>Getting Started</h4>
+        <p>Installation, first project, CLI usage, and common patterns explained simply.</p>
+      </a>
+      <a href="ARCHITECTURE.html" class="doc-link fade-in">
+        <h4>Architecture</h4>
+        <p>How the compiler, runtime, and tools fit together. Pipeline from .brc to binary.</p>
+      </a>
+      <a href="OPTIMIZATIONS.html" class="doc-link fade-in">
         <h4>Optimizations</h4>
-        <p>Bump allocator tuning, SIMD, alignment, and benchmarks.</p>
+        <p>Bump allocator tuning, SIMD alignment, pool allocator, TLS, double-buffer, PGO.</p>
       </a>
-      <a href="hot-reload.md" class="doc-link fade-in">
+      <a href="hot-reload.html" class="doc-link fade-in">
         <h4>Hot Reload</h4>
-        <p>Live code swapping architecture and usage.</p>
+        <p>Live code swapping via dlopen + inotify. Atomic function swap, double-buffered blocks.</p>
       </a>
-      <a href="LANGUAGE.pt-BR.md" class="doc-link pt-link fade-in">
+      <a href="LANGUAGE.pt-BR.html" class="doc-link pt-link fade-in">
         <h4>🇧🇷 Referência</h4>
-        <p>Documentação completa em português.</p>
+        <p>Documentação completa da linguagem em português.</p>
+      </a>
+      <a href="MACROS.pt-BR.html" class="doc-link pt-link fade-in">
+        <h4>🇧🇷 Macros</h4>
+        <p>Sistema de macros em português — <code>macro</code>, <code>build</code>, <code>emit</code>.</p>
+      </a>
+      <a href="ARCHITECTURE.pt-BR.html" class="doc-link pt-link fade-in">
+        <h4>🇧🇷 Arquitetura</h4>
+        <p>Como o compilador e runtime funcionam em português.</p>
+      </a>
+      <a href="GETTING_STARTED.pt-BR.html" class="doc-link pt-link fade-in">
+        <h4>🇧🇷 Primeiros Passos</h4>
+        <p>Instalação e primeiro projeto em português.</p>
+      </a>
+      <a href="OPTIMIZATIONS.pt-BR.html" class="doc-link pt-link fade-in">
+        <h4>🇧🇷 Otimizações</h4>
+        <p> guia de otimizações em português.</p>
+      </a>
+      <a href="hot-reload.pt-BR.html" class="doc-link pt-link fade-in">
+        <h4>🇧🇷 Hot Reload</h4>
+        <p>Recarga ao vivo de código em português.</p>
       </a>
     </div>
   </div>
@@ -354,7 +458,7 @@ cd brick</pre></div>
 <!-- Footer -->
 <footer>
   <p>Brick — MIT License</p>
-  <p class="ai-note"><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
+  <p><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
 </footer>
 
 <script src="script.js"></script>

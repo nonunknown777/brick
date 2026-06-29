@@ -7,27 +7,26 @@
 Hot reload lets you edit your `.brc` code, save, and see the result **without restarting** the program. Useful for game jams, live editors, and any situation where downtime is unacceptable.
 
 ```
-Edit .brc   →  save   →  compile to .so   →  dlopen loads   →  function swapped atomically
+Edit .brc   →  save   →  compile to .so/.dll   →  load   →  function swapped atomically
 ```
 
 ## How It Works
 
 ### Architecture
 
-Hot reload uses 3 Linux primitives:
+Hot reload is cross-platform, using OS-specific primitives:
 
-| Primitive | Role |
-|---|---|
-| `dlopen` + `dlsym` | Loads new .so version and extracts symbols |
-| `inotify` | Watches the .so file for modifications |
-| `__atomic_store` | Swaps function pointers atomically |
+| Platform | Dynamic Loading | File Watching | Atomic Swap |
+|---|---|---|---|
+| **Linux** | `dlopen` + `dlsym` | `inotify` | `__atomic_store_n` |
+| **Windows** | `LoadLibraryA` + `GetProcAddress` | `ReadDirectoryChangesW` (overlapped I/O) | `InterlockedExchange` |
 
-The hot reload engine runs in a **separate thread**, watching the .so directory. When it detects a change (`IN_CLOSE_WRITE`), it:
+The hot reload engine runs in a **separate thread** (`pthread` on Linux, `CreateThread` on Windows), watching the `.so`/`.dll` directory. When it detects a change, it:
 
-1. **Copies** the .so to a temp file (dlopen caches by path; a copy bypasses the cache)
-2. **dlopen** the new .so
-3. **Atomic swap**: updates all registered function pointers with `__atomic_store`
-4. **Closes** the old .so with `dlclose`
+1. **Copies** the shared library to a temp file (dlopen caches by path; a copy bypasses the cache)
+2. **Loads** the new library via `dlopen` (Linux) or `LoadLibraryA` (Windows)
+3. **Atomic swap**: updates all registered function pointers atomically
+4. **Closes** the old library with `dlclose` (Linux) or `FreeLibrary` (Windows)
 5. Fires the **callback** notification
 
 ### States
@@ -153,8 +152,7 @@ A 50ms `nanosleep` between change detection and reload ensures the .so file writ
 
 | Limitation | Reason | Workaround |
 |---|---|---|
-| Linux only | dlopen + inotify are POSIX | Windows support planned |
-| .so per package | Each package becomes a separate .so | Organize packages by module |
+| .so/.dll per package | Each package becomes a separate shared library | Organize packages by module |
 | Data doesn't reload | Only code (functions) is swapped | Use stable structs |
 | ABI must be compatible | Function pointers expect the same signature | Freeze the public interface |
 

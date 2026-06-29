@@ -14,11 +14,13 @@
 <div align="center">
 
 [![Build](https://img.shields.io/badge/build-passing-brightgreen)]()
+[![CI Windows](https://img.shields.io/badge/CI-Windows%20%7C%20MinGW--w64-blue)]()
 [![C++20](https://img.shields.io/badge/C%2B%2B-20-blue)]()
 [![C11](https://img.shields.io/badge/C-11-blue)]()
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)]()
-[![Platform: Linux](https://img.shields.io/badge/Platform-Linux-orange)]()
+[![Platform: Linux | Windows](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-orange)]()
 [![SCons](https://img.shields.io/badge/Build-SCons-ff69b4)]()
+[![Version](https://img.shields.io/badge/Version-0.6.0-green)]()
 
 </div>
 
@@ -83,14 +85,15 @@ No manual `gcc` invocation needed — `brick build` and `brick run` handle every
 ## ✨ Features
 
 - **OOP with Braces** — Class-like `struct` with constructors, methods, `extends`, and `interface`. Syntax inspired by GDScript.
-- **Compiles to Pure C** — Readable C code with `#line` directives for debugging. No VM, no interpreter — just native machine code via `gcc -O3`.
+- **Compiles to Pure C** — Readable C code with `#line` directives for debugging. No VM, no interpreter — just native machine code via `gcc -O3` / `gcc -O3` (MinGW-w64).
 - **Block-Based Memory** — No `malloc`/`free`, no GC. Declare memory blocks (`block name = 64MB`) and let the bump allocator do the rest. Allocation takes ~3 CPU cycles. Reset an entire block in ~5 ns.
 - **No Stack for User Data** — Everything lives in managed blocks. No stack overflow, no lifetime puzzles. Reset a block to reclaim everything instantly.
-- **Native Hot Reload** — Swap code at runtime via `dlopen` + `inotify`. Function pointer swap is atomic — update game logic without restarting.
-- **TUI Memory Visualizer** — ncurses dashboard showing live block state: capacity, usage, peak, allocation count.
+- **Native Hot Reload** — Swap code at runtime via `dlopen`+`inotify` (Linux) or `LoadLibrary`+`ReadDirectoryChangesW` (Windows). Function pointer swap is atomic — update game logic without restarting.
+- **TUI Memory Visualizer** — ncurses dashboard (Linux) or PDCurses (Windows) showing live block state: capacity, usage, peak, allocation count.
 - **GDB Integration** — `#line` directives map back to `.brc` source. Custom commands (`info blocks`, `block <name>`) and Python pretty-printers.
 - **VS Code Extension** — Syntax highlighting, LSP, and a memory webview panel.
-- **Cross-Platform** — Linux primary. Windows via `mingw-w64`.
+- **Cross-Platform** — Linux primary. Windows natively supported via MinGW-w64 with full CI pipeline.
+- **Windows Native Port** — `VirtualAlloc`/`VirtualFree`, `CRITICAL_SECTION`, `LoadLibrary`/`ReadDirectoryChangesW`, Win32 window library (`CreateWindow`). All 159 codegen tests pass on Windows.
 - **Fixed-Width Types** — `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `usize`/`isize`. Full compile-time overflow checking, widening rules, and literal suffixes (`42u8`, `3.14f64`).
 
 ---
@@ -99,13 +102,13 @@ No manual `gcc` invocation needed — `brick build` and `brick run` handle every
 
 ### Prerequisites
 
-- Linux (or Windows with mingw-w64)
-- C++20 compiler (GCC ≥ 11 or Clang ≥ 14)
+- **Linux**: C++20 compiler (GCC ≥ 11 or Clang ≥ 14), ncurses (optional)
+- **Windows**: [MinGW-w64](https://www.mingw-w64.org/) (GCC ≥ 13), SCons (`pip install scons`)
 - SCons (`pip install scons`)
-- ncurses (optional, for visualizer)
 
 ### Build the Compiler
 
+**Linux:**
 ```bash
 git clone https://github.com/nonunknown777/brick.git
 cd brick
@@ -114,7 +117,16 @@ scons                        # release build (-O3)
 ./build-release.sh           # full release + VS Code extension package
 ```
 
-The `brick` binary will be in `build/`.
+**Windows (PowerShell):**
+```powershell
+git clone https://github.com/nonunknown777/brick.git
+cd brick
+scons target=windows profile=release
+# or
+.\build-release.ps1          # full release build
+```
+
+The `brick.exe` (or `brick`) binary will be in `build/`.
 
 ### Run a Demo
 
@@ -127,11 +139,15 @@ brick build examples/hello.brc -o hello
 ./hello
 ```
 
+> On Windows, use `.\hello.exe` instead of `./hello`.
+
 ### Run Tests
 
 ```bash
 scons test                   # builds and runs all unit tests
 ```
+
+> On Windows, pass `target=windows` if SCons doesn't detect it automatically.
 
 ### Visualize Memory
 
@@ -335,6 +351,12 @@ Join the discussion — open an issue or PR at [github.com/nonunknown777/brick](
 3. **BR** na frente — **Brasil**, a origem do projeto
 
 > *BriCk — the brazilian C.*
+
+---
+
+## 🙏 Acknowledgments
+
+Special thanks to **the penguim** from Discord, whose suggestion led to changing Token lexemes from `std::string` to `std::string_view`, eliminating per-token heap allocations and improving compilation performance.
 
 ---
 

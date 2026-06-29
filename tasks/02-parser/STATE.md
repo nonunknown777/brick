@@ -20,6 +20,10 @@ Parser completo. Todos os 6 testes unitários passam. Consegue parsear todos os 
 - `private` modifier
 - Literal suffixes preservados
 
+## Mudanças recentes
+- **Bug fix**: triple `advance()` call em `block_decl_or_scope()` (linha 1178) — `std::from_chars` recebia 3 tokens diferentes em vez de 1, resultando em `block_create_bytes(0)`
+- Escape processing adicionado: `process_string_escapes(sv)` e `process_char_escape(sv)` — chamados ao construir nós literais (STRING_LITERAL, CHAR_LITERAL, ERROR message)
+
 ## Arquivos
 - `src/parser/ast.h` - Todos os AST nodes (~304 linhas)
 - `src/parser/parser.h` - API pública

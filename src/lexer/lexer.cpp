@@ -5,12 +5,13 @@
 
 namespace brick {
 
-static const std::unordered_map<std::string, TokenType> keywords = {
+static const std::unordered_map<std::string_view, TokenType> keywords = {
     {"package", TokenType::PACKAGE},
     {"using",   TokenType::USING},
     {"private", TokenType::PRIVATE},
     {"public",  TokenType::PUBLIC},
     {"struct",  TokenType::STRUCT},
+    {"union",   TokenType::UNION},
     {"extends", TokenType::EXTENDS},
     {"interface", TokenType::INTERFACE},
     {"fn",      TokenType::FN},
@@ -50,6 +51,18 @@ static const std::unordered_map<std::string, TokenType> keywords = {
     {"macro",   TokenType::MACRO},
     {"build",   TokenType::BUILD},
     {"emit",    TokenType::EMIT},
+    {"type",    TokenType::TYPE},
+    {"and",     TokenType::AND},
+    {"or",      TokenType::OR},
+    {"not",     TokenType::NOT},
+    {"break",   TokenType::BREAK},
+    {"continue",TokenType::CONTINUE},
+    {"const",   TokenType::CONST},
+    {"defer",   TokenType::DEFER},
+    {"enum",    TokenType::ENUM},
+    {"match",   TokenType::MATCH},
+    {"is",      TokenType::IS},
+    {"as",      TokenType::AS},
 };
 
 class Lexer {
@@ -95,9 +108,29 @@ private:
 
     void skip_whitespace_and_comments() {
         while (pos < source.size()) {
+            // Multi-line comment /* ... */ (with nesting)
+            if (peek() == '/' && pos + 1 < source.size() && source[pos + 1] == '*') {
+                advance(); advance(); // consume /*
+                int depth = 1;
+                while (depth > 0 && pos < source.size()) {
+                    if (peek() == '*' && pos + 1 < source.size() && source[pos + 1] == '/') {
+                        advance(); advance();
+                        depth--;
+                    } else if (peek() == '/' && pos + 1 < source.size() && source[pos + 1] == '*') {
+                        advance(); advance();
+                        depth++;
+                    } else {
+                        advance();
+                    }
+                }
+                continue;
+            }
+            // Single-line comment //
             if (peek() == '/' && pos + 1 < source.size() && source[pos + 1] == '/') {
                 while (pos < source.size() && source[pos] != '\n') advance();
-            } else if (std::isspace(peek())) {
+                continue;
+            }
+            if (std::isspace(peek())) {
                 advance();
             } else {
                 break;
@@ -118,6 +151,7 @@ private:
             case ']': return {TokenType::RBRACKET, "]", loc};
             case ';': return {TokenType::SEMICOLON, ";", loc};
             case ',': return {TokenType::COMMA, ",", loc};
+            case ':': return {TokenType::COLON, ":", loc};
             case '@': return {TokenType::AT, "@", loc};
             case '.': {
                 if (pos + 1 < source.size() && source[pos] == '.' && source[pos + 1] == '.') {
@@ -135,13 +169,13 @@ private:
 
         if (c == '+') {
             if (peek() == '=') { advance(); return {TokenType::PLUS_ASSIGN, "+=", loc}; }
-            if (peek() == '+') { advance(); return {TokenType::PLUS, "++", loc}; }
+            if (peek() == '+') { advance(); return {TokenType::PLUS_PLUS, "++", loc}; }
             return {TokenType::PLUS, "+", loc};
         }
         if (c == '-') {
             if (peek() == '>') { advance(); return {TokenType::ARROW, "->", loc}; }
             if (peek() == '=') { advance(); return {TokenType::MINUS_ASSIGN, "-=", loc}; }
-            if (peek() == '-') { advance(); return {TokenType::MINUS, "--", loc}; }
+            if (peek() == '-') { advance(); return {TokenType::MINUS_MINUS, "--", loc}; }
             return {TokenType::MINUS, "-", loc};
         }
         if (c == '*') {
@@ -197,65 +231,96 @@ private:
     }
 
     Token string_literal(SourceLocation loc) {
-        std::string value;
+        size_t start = pos;
         while (pos < source.size() && peek() != '"') {
             if (peek() == '\\') {
                 advance();
-                switch (advance()) {
-                    case 'n': value += '\n'; break;
-                    case 't': value += '\t'; break;
-                    case '\\': value += '\\'; break;
-                    case '"': value += '"'; break;
-                    default: throw std::runtime_error("invalid escape sequence");
-                }
+                if (pos < source.size()) advance();
             } else {
-                value += advance();
+                advance();
             }
         }
         if (pos >= source.size()) throw std::runtime_error("unterminated string literal");
+        std::string_view raw(source.data() + start, pos - start);
         advance();
-        return {TokenType::STRING_LITERAL, value, loc};
+        return {TokenType::STRING_LITERAL, raw, loc};
     }
 
     Token char_literal(SourceLocation loc) {
-        char c;
+        size_t start = pos;
         if (peek() == '\\') {
             advance();
-            switch (advance()) {
-                case 'n': c = '\n'; break;
-                case 't': c = '\t'; break;
-                case '\\': c = '\\'; break;
-                case '\'': c = '\''; break;
-                default: throw std::runtime_error("invalid escape sequence");
-            }
+            if (pos < source.size()) advance();
         } else {
-            c = advance();
+            advance();
         }
+        std::string_view raw(source.data() + start, pos - start);
         if (advance() != '\'') throw std::runtime_error("unterminated char literal");
-        return {TokenType::CHAR_LITERAL, std::string(1, c), loc};
+        return {TokenType::CHAR_LITERAL, raw, loc};
     }
 
     Token number_literal(char first, SourceLocation loc) {
-        std::string value(1, first);
+        size_t start = pos - 1;
         bool is_float = false;
-        while (pos < source.size() && (std::isdigit(peek()) || peek() == '.')) {
+        
+        // Hex literal: 0x...
+        if (first == '0' && (peek() == 'x' || peek() == 'X')) {
+            advance();
+            while (pos < source.size() && 
+                   (std::isdigit(peek()) || (peek() >= 'a' && peek() <= 'f') || (peek() >= 'A' && peek() <= 'F') || peek() == '_')) {
+                if (peek() == '_') { advance(); continue; }
+                advance();
+            }
+            std::string_view value(source.data() + start, pos - start);
+            return {TokenType::INT_LITERAL, value, loc};
+        }
+        // Binary literal: 0b...
+        if (first == '0' && (peek() == 'b' || peek() == 'B')) {
+            advance();
+            while (pos < source.size() && (peek() == '0' || peek() == '1' || peek() == '_')) {
+                if (peek() == '_') { advance(); continue; }
+                advance();
+            }
+            std::string_view value(source.data() + start, pos - start);
+            return {TokenType::INT_LITERAL, value, loc};
+        }
+        // Octal literal: 0o...
+        if (first == '0' && (peek() == 'o' || peek() == 'O')) {
+            advance();
+            while (pos < source.size() && ((peek() >= '0' && peek() <= '7') || peek() == '_')) {
+                if (peek() == '_') { advance(); continue; }
+                advance();
+            }
+            std::string_view value(source.data() + start, pos - start);
+            return {TokenType::INT_LITERAL, value, loc};
+        }
+        // Decimal literal (with underscore support)
+        while (pos < source.size() && (std::isdigit(peek()) || peek() == '.' || peek() == '_')) {
+            if (peek() == '_') { advance(); continue; }
             if (peek() == '.') {
                 if (is_float) break;
                 is_float = true;
             }
-            value += advance();
+            advance();
         }
+        std::string_view value(source.data() + start, pos - start);
         return {is_float ? TokenType::FLOAT_LITERAL : TokenType::INT_LITERAL, value, loc};
     }
 
     Token identifier_or_keyword(char first, SourceLocation loc) {
-        std::string value(1, first);
+        size_t start = pos - 1;
         while (pos < source.size() && (std::isalnum(peek()) || peek() == '_')) {
-            value += advance();
+            advance();
         }
+        std::string_view value(source.data() + start, pos - start);
         auto it = keywords.find(value);
         if (it != keywords.end()) {
             return {it->second, value, loc};
+        }
+        // Bitfield types: u1, u4, u24, i1, i7, etc.
+        if (value.size() >= 2 && (value[0] == 'u' || value[0] == 'i') &&
+            value.find_first_not_of("0123456789", 1) == std::string_view::npos) {
+            return {TokenType::BITFIELD_TYPE, value, loc};
         }
         return {TokenType::IDENTIFIER, value, loc};
     }

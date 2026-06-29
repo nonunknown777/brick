@@ -1,0 +1,29 @@
+package TEST_UNION
+
+using IO
+
+union Data {
+    int i
+    float f
+    bool b
+}
+
+struct Packet {
+    int id
+    union {
+        int x
+        float y
+    }
+}
+
+fn main() {
+    Data d
+    d.i = 42
+    print("Data.i = {0}", d.i)
+
+    Packet p
+    p.id = 1
+    p.x = 99
+    print("Packet.x = {0}", p.x)
+    print("Packet.id = {0}", p.id)
+}

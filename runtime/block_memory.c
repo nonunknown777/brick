@@ -1,11 +1,15 @@
-#define _GNU_SOURCE
+#ifndef _WIN32
+#  define _GNU_SOURCE
+#  include <sys/mman.h>
+#else
+#  include <windows.h>
+#endif
 #include "block_memory.h"
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <stdint.h>
 #include <stdatomic.h>
-#include <sys/mman.h>
 
 #define DEFAULT_ALIGNMENT 8
 
@@ -25,7 +29,7 @@ static atomic_int block_frozen_flag = 0;
 
 // Thread-local current block
 // Bloco atual thread-local
-__thread BlockCtx* _tls_current_block = NULL;
+BRICK_TLS BlockCtx* _tls_current_block = NULL;
 
 // Double-buffer support
 // Suporte a double-buffer
@@ -47,11 +51,15 @@ typedef struct {
 // ─── Registro Global de Blocos ────────────────────────────────
 #ifdef BRICK_TRACK_BLOCKS
 
-#include <pthread.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/stat.h>
-#include <sys/time.h>
+#if defined(_WIN32)
+#  include <windows.h>
+#else
+#  include <pthread.h>
+#  include <unistd.h>
+#  include <fcntl.h>
+#  include <sys/stat.h>
+#  include <sys/time.h>
+#endif
 
 #define REGISTRY_MAX BRICK_MAX_BLOCKS
 
@@ -63,18 +71,37 @@ typedef struct {
 
 static RegistryEntry     registry[REGISTRY_MAX];
 static int               registry_initialized = 0;
+#if defined(_WIN32)
+static CRITICAL_SECTION registry_cs;
+static int              registry_cs_initialized = 0;
+#else
 static pthread_mutex_t   registry_mutex = PTHREAD_MUTEX_INITIALIZER;
+#endif
+
+#if defined(_WIN32)
+#  define REGISTRY_LOCK()   EnterCriticalSection(&registry_cs)
+#  define REGISTRY_UNLOCK() LeaveCriticalSection(&registry_cs)
+#else
+#  define REGISTRY_LOCK()   pthread_mutex_lock(&registry_mutex)
+#  define REGISTRY_UNLOCK() pthread_mutex_unlock(&registry_mutex)
+#endif
 
 static void registry_init(void) {
     if (!registry_initialized) {
         memset(registry, 0, sizeof(registry));
         registry_initialized = 1;
+#if defined(_WIN32)
+        if (!registry_cs_initialized) {
+            InitializeCriticalSection(&registry_cs);
+            registry_cs_initialized = 1;
+        }
+#endif
     }
 }
 
 void block_register(BlockCtx* ctx, const char* name) {
     registry_init();
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     int slot = -1;
     for (int i = 0; i < REGISTRY_MAX; i++) {
@@ -88,12 +115,12 @@ void block_register(BlockCtx* ctx, const char* name) {
         registry[slot].active = 1;
     }
 
-    pthread_mutex_unlock(&registry_mutex);
+    REGISTRY_UNLOCK();
 }
 
 void block_unregister(BlockCtx* ctx) {
     registry_init();
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     for (int i = 0; i < REGISTRY_MAX; i++) {
         if (registry[i].active && registry[i].ctx == ctx) {
@@ -102,12 +129,12 @@ void block_unregister(BlockCtx* ctx) {
         }
     }
 
-    pthread_mutex_unlock(&registry_mutex);
+    REGISTRY_UNLOCK();
 }
 
 BlockCtx* block_find(const char* name) {
     registry_init();
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     BlockCtx* found = NULL;
     for (int i = 0; i < REGISTRY_MAX; i++) {
@@ -117,13 +144,13 @@ BlockCtx* block_find(const char* name) {
         }
     }
 
-    pthread_mutex_unlock(&registry_mutex);
+    REGISTRY_UNLOCK();
     return found;
 }
 
 size_t block_snapshot(BlockInfo* out, size_t max_count) {
     registry_init();
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     size_t written = 0;
     for (int i = 0; i < REGISTRY_MAX && written < max_count; i++) {
@@ -138,7 +165,7 @@ size_t block_snapshot(BlockInfo* out, size_t max_count) {
         }
     }
 
-    pthread_mutex_unlock(&registry_mutex);
+    REGISTRY_UNLOCK();
     return written;
 }
 
@@ -146,7 +173,11 @@ size_t block_snapshot(BlockInfo* out, size_t max_count) {
 // ─── Exportacao de Memoria Compartilhada ──────────────────────
 
 static void shm_path(char* buf, size_t bufsize) {
+#if defined(_WIN32)
+    snprintf(buf, bufsize, "%s\\brick-mem-%d.bin", getenv("TEMP") ? getenv("TEMP") : "C:\\Temp", (int)GetCurrentProcessId());
+#else
     snprintf(buf, bufsize, "/tmp/brick-mem-%d.bin", (int)getpid());
+#endif
 }
 
 int block_shm_export(void) {
@@ -155,7 +186,7 @@ int block_shm_export(void) {
     char path[256];
     shm_path(path, sizeof(path));
 
-    pthread_mutex_lock(&registry_mutex);
+    REGISTRY_LOCK();
 
     int count = 0;
     for (int i = 0; i < REGISTRY_MAX; i++)
@@ -163,22 +194,39 @@ int block_shm_export(void) {
 
     size_t file_size = sizeof(BrickShmHeader) + (size_t)count * sizeof(BlockInfo);
 
+#if defined(_WIN32)
+    HANDLE fd = CreateFileA(path, GENERIC_WRITE, 0, NULL,
+                            CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+    if (fd == INVALID_HANDLE_VALUE) { REGISTRY_UNLOCK(); return -1; }
+    SetFilePointer(fd, (LONG)file_size, NULL, FILE_BEGIN);
+    SetEndOfFile(fd);
+    SetFilePointer(fd, 0, NULL, FILE_BEGIN);
+#else
     int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC, 0644);
-    if (fd < 0) { pthread_mutex_unlock(&registry_mutex); return -1; }
-
+    if (fd < 0) { REGISTRY_UNLOCK(); return -1; }
     ftruncate(fd, (off_t)file_size);
+#endif
 
     BrickShmHeader header;
     header.magic   = BRICK_SHM_MAGIC;
     header.version = 1;
+#if defined(_WIN32)
+    header.pid     = (int32_t)GetCurrentProcessId();
+    header.timestamp_us = (uint64_t)GetTickCount64() * 1000ULL;
+#else
     header.pid     = (int32_t)getpid();
-    header.block_count = (uint32_t)count;
-
     struct timeval tv;
     gettimeofday(&tv, NULL);
     header.timestamp_us = (uint64_t)tv.tv_sec * 1000000ULL + (uint64_t)tv.tv_usec;
+#endif
+    header.block_count = (uint32_t)count;
 
+#if defined(_WIN32)
+    DWORD written_bytes;
+    WriteFile(fd, &header, sizeof(header), &written_bytes, NULL);
+#else
     write(fd, &header, sizeof(header));
+#endif
 
     int written = 0;
     for (int i = 0; i < REGISTRY_MAX && written < count; i++) {
@@ -190,13 +238,21 @@ int block_shm_export(void) {
             info.used            = registry[i].ctx->used;
             info.peak_used       = registry[i].ctx->peak_used;
             info.allocation_count = registry[i].ctx->allocation_count;
+#if defined(_WIN32)
+            WriteFile(fd, &info, sizeof(info), &written_bytes, NULL);
+#else
             write(fd, &info, sizeof(info));
+#endif
             written++;
         }
     }
 
+#if defined(_WIN32)
+    CloseHandle(fd);
+#else
     close(fd);
-    pthread_mutex_unlock(&registry_mutex);
+#endif
+    REGISTRY_UNLOCK();
     return 0;
 }
 
@@ -216,11 +272,18 @@ BlockCtx* block_create_bytes(size_t bytes) {
     BlockCtx* ctx = (BlockCtx*)malloc(sizeof(BlockCtx));
     if (!ctx) error("out of memory");
 
-    // Use mmap for large allocations (>= 64KB) — better for huge pages,
-    // shared memory export, and cleaner deallocation
-    // Usa mmap para alocacoes grandes (>= 64KB) — melhor para huge pages,
-    // exportacao de memoria compartilhada e desalocacao mais limpa
+    // Use mmap / VirtualAlloc for large allocations (>= 64KB)
+    // Usa mmap / VirtualAlloc para alocacoes grandes (>= 64KB)
     if (bytes >= 65536) {
+#if defined(_WIN32)
+        ctx->data = (uint8_t*)VirtualAlloc(NULL, bytes,
+                                           MEM_RESERVE | MEM_COMMIT,
+                                           PAGE_READWRITE);
+        if (!ctx->data) {
+            free(ctx);
+            error("out of memory (VirtualAlloc failed)");
+        }
+#else
         ctx->data = (uint8_t*)mmap(NULL, bytes, PROT_READ | PROT_WRITE,
                                    MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
                                    -1, 0);
@@ -228,6 +291,7 @@ BlockCtx* block_create_bytes(size_t bytes) {
             free(ctx);
             error("out of memory (mmap failed)");
         }
+#endif
     } else {
         ctx->data = (uint8_t*)malloc(bytes);
         if (!ctx->data) {
@@ -256,7 +320,11 @@ void* block_alloc_aligned(BlockCtx* ctx, size_t size, size_t alignment) {
     while (atomic_load_explicit(&block_frozen_flag, memory_order_acquire)) {
         // spin — will be very brief (nanoseconds)
         // giro — sera muito breve (nanossegundos)
+#if defined(_WIN32) && !defined(__GNUC__)
+        YieldProcessor();
+#else
         __asm__ volatile("pause");
+#endif
     }
 
     // Align current position
@@ -303,7 +371,11 @@ void block_reset(BlockCtx* ctx) {
 void block_destroy(BlockCtx* ctx) {
     if (ctx) {
         if (ctx->capacity >= 65536) {
+#if defined(_WIN32)
+            VirtualFree(ctx->data, 0, MEM_RELEASE);
+#else
             munmap(ctx->data, ctx->capacity);
+#endif
         } else {
             free(ctx->data);
         }
@@ -373,11 +445,18 @@ int block_enable_double_buffer(BlockCtx* ctx) {
     ext->db.active_buffer = 0;
 
     if (ctx->capacity >= 65536) {
+#if defined(_WIN32)
+        ext->db.shadow_data = (uint8_t*)VirtualAlloc(NULL, ctx->capacity,
+                                                     MEM_RESERVE | MEM_COMMIT,
+                                                     PAGE_READWRITE);
+        if (!ext->db.shadow_data) { free(ext); return -1; }
+#else
         ext->db.shadow_data = (uint8_t*)mmap(NULL, ctx->capacity,
                                              PROT_READ | PROT_WRITE,
                                              MAP_PRIVATE | MAP_ANONYMOUS | MAP_POPULATE,
                                              -1, 0);
         if (ext->db.shadow_data == MAP_FAILED) { free(ext); return -1; }
+#endif
     } else {
         ext->db.shadow_data = (uint8_t*)malloc(ctx->capacity);
         if (!ext->db.shadow_data) { free(ext); return -1; }

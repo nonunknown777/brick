@@ -49,8 +49,17 @@ public:
                 auto* fd = static_cast<FuncDecl*>(decl.get());
                 if (fd->is_extern)
                     extern_funcs[fd->name] = fd;
+                else
+                    func_defs[fd->name] = fd;
                 break;
             }
+            case ASTNodeType::TYPE_ALIAS: {
+                auto* ta = static_cast<TypeAliasDecl*>(decl.get());
+                type_aliases_[ta->alias_name] = ta->underlying_type;
+                break;
+            }
+            case ASTNodeType::ENUM_DECL:
+            case ASTNodeType::CONST_DECL:
             case ASTNodeType::MACRO_DECL:
             case ASTNodeType::BUILD_BLOCK:
             case ASTNodeType::EMIT_STMT:
@@ -83,6 +92,10 @@ public:
                         auto* sd = static_cast<StructDecl*>(decl.get());
                         out << "typedef struct " << sd->name << " " << sd->name << ";\n";
                     }
+                    if (decl->type == ASTNodeType::UNION_DECL) {
+                        auto* ud = static_cast<UnionDecl*>(decl.get());
+                        out << "typedef union " << ud->name << " " << ud->name << ";\n";
+                    }
                 }
             }
             out << "\n";
@@ -94,6 +107,12 @@ public:
                 for (const auto& decl : ast->declarations) {
                     if (decl->type == ASTNodeType::STRUCT_DECL) {
                         gen_struct(static_cast<StructDecl*>(decl.get()));
+                    }
+                    if (decl->type == ASTNodeType::UNION_DECL) {
+                        gen_union(static_cast<UnionDecl*>(decl.get()));
+                    }
+                    if (decl->type == ASTNodeType::ENUM_DECL) {
+                        gen_enum(static_cast<EnumDecl*>(decl.get()));
                     }
                 }
             }
@@ -118,6 +137,13 @@ public:
                         if (!fd->is_extern)
                             gen_function(fd, "");
                     }
+                    if (decl->type == ASTNodeType::CONST_DECL) {
+                        auto* cd = static_cast<ConstDecl*>(decl.get());
+                        std::string const_type = cd->type_name.empty() ? "int" : map_type(cd->type_name);
+                        indent(); out << "static const " << const_type << " " << cd->name << " = ";
+                        gen_expression(cd->value.get());
+                        out << ";\n";
+                    }
                 }
             }
 
@@ -140,11 +166,13 @@ private:
 
     std::unordered_map<std::string, StructDecl*> struct_map;
     std::unordered_map<std::string, FuncDecl*> extern_funcs;
+    std::unordered_map<std::string, FuncDecl*> func_defs;
     std::unordered_set<std::string> declared_vars;
     std::unordered_map<std::string, bool> pointer_vars;
     bool has_blocks_ = false;
     bool has_pool_ = false;
     std::unordered_set<std::string> pool_blocks_;
+    std::unordered_map<std::string, std::string> type_aliases_;
     int scope_depth = 0;
 
     std::string current_struct_name;
@@ -157,7 +185,10 @@ private:
     void emit_line(SourceLocation loc) {
         if (loc.line != current_line || loc.file != current_file) {
             if (!loc.file.empty() && loc.file != "<input>") {
-                out << "#line " << loc.line << " \"" << loc.file << "\"\n";
+                // Normalize path separators for cross-platform #line directives
+                std::string f = loc.file;
+                for (auto& c : f) if (c == '\\') c = '/';
+                out << "#line " << loc.line << " \"" << f << "\"\n";
             }
             current_line = loc.line;
             current_file = loc.file;
@@ -215,6 +246,27 @@ private:
         return 8;
     }
 
+    // Resolve a type alias to its underlying type
+    std::string resolve_type_alias(const std::string& t) const {
+        auto it = type_aliases_.find(t);
+        if (it != type_aliases_.end()) return it->second;
+        return t;
+    }
+
+    // Map bitfield type (uN/iN) to smallest C type that fits
+    static std::string map_bitfield_c_type(const std::string& bit_type) {
+        int w = 0;
+        if (bit_type.size() >= 2 && (bit_type[0] == 'u' || bit_type[0] == 'i')) {
+            w = std::stoi(bit_type.substr(1));
+        }
+        if (w <= 0 || w > 64) return bit_type;
+        bool is_signed = (bit_type[0] == 'i');
+        if (w <= 8)  return is_signed ? "int8_t" : "uint8_t";
+        if (w <= 16) return is_signed ? "int16_t" : "uint16_t";
+        if (w <= 32) return is_signed ? "int32_t" : "uint32_t";
+        return is_signed ? "int64_t" : "uint64_t";
+    }
+
     // Estimate byte size of a Brick type for pool allocator decision
     // Estima tamanho em bytes de um tipo Brick para decisao do pool
     int type_size_estimate(const std::string& type_name) {
@@ -237,6 +289,11 @@ private:
             return 8; // pointer is 8 bytes on 64-bit
         }
         std::string n = normalize_type_name(type_name);
+        // Bitfield type: stored in smallest fitting C type
+        if (n.size() >= 2 && (n[0] == 'u' || n[0] == 'i') && n.find_first_not_of("0123456789", 1) == std::string::npos) {
+            int w = std::stoi(n.substr(1));
+            if (w >= 1 && w <= 64) return (w <= 8) ? 1 : (w <= 16) ? 2 : (w <= 32) ? 4 : 8;
+        }
         if (n == "u8" || n == "i8" || n == "bool" || n == "char") return 1;
         if (n == "u16" || n == "i16") return 2;
         if (n == "u32" || n == "i32" || n == "f32") return 4;
@@ -268,6 +325,54 @@ private:
         return type_size_estimate(type_name) <= POOL_SIZE_THRESHOLD;
     }
 
+    // Check if a type name is a bitfield type (uN/iN)
+    static bool is_bitfield_type(const std::string& t) {
+        if (t.size() < 2) return false;
+        if (t[0] != 'u' && t[0] != 'i') return false;
+        for (size_t i = 1; i < t.size(); i++)
+            if (!std::isdigit(t[i])) return false;
+        int w = std::stoi(t.substr(1));
+        return w >= 1 && w <= 64;
+    }
+
+    void gen_union_fields(const std::vector<std::unique_ptr<ASTNode>>& fields) {
+        for (const auto& uf : fields) {
+            if (uf->type == ASTNodeType::FIELD_DECL) {
+                auto* fd = static_cast<FieldDecl*>(uf.get());
+                std::string actual_type = resolve_type_alias(fd->type_name);
+                bool is_fnptr = actual_type.rfind("fn(", 0) == 0;
+                if (is_fnptr) {
+                    indent(); gen_fnptr_decl(actual_type, fd->name);
+                } else {
+                    std::string ctype = map_type(actual_type);
+                    if (is_bitfield_type(actual_type)) {
+                        ctype = map_bitfield_c_type(actual_type);
+                    }
+                    indent(); out << ctype << " " << fd->name;
+                    if (fd->bit_width > 0) out << " : " << fd->bit_width;
+                }
+                out << ";\n";
+            }
+            // Anonymous struct inside union
+            if (uf->type == ASTNodeType::STRUCT_DECL) {
+                auto* inner_sd = static_cast<StructDecl*>(uf.get());
+                for (const auto& inner_f : inner_sd->fields) {
+                    if (inner_f->type == ASTNodeType::FIELD_DECL) {
+                        auto* inner_fd = static_cast<FieldDecl*>(inner_f.get());
+                        std::string actual_type = resolve_type_alias(inner_fd->type_name);
+                        std::string ctype = map_type(actual_type);
+                        if (is_bitfield_type(actual_type)) {
+                            ctype = map_bitfield_c_type(actual_type);
+                        }
+                        indent(); out << ctype << " " << inner_fd->name;
+                        if (inner_fd->bit_width > 0) out << " : " << inner_fd->bit_width;
+                        out << ";\n";
+                    }
+                }
+            }
+        }
+    }
+
     void gen_struct(StructDecl* sd) {
         emit_line(sd->location);
         indent(); out << "typedef struct " << sd->name << " {\n";
@@ -280,19 +385,78 @@ private:
         for (const auto& field : sd->fields) {
             if (field->type == ASTNodeType::FIELD_DECL) {
                 auto* fd = static_cast<FieldDecl*>(field.get());
-                // [OPTIMIZATION] SIMD alignment for float types
-                // Add alignment attribute to float/f64 fields and float arrays
-                // Adiciona atributo de alinhamento para campos float/f64 e arrays float
-                if (is_float_type_for_simd(fd->type_name) || is_float_array(fd->type_name)) {
+                std::string actual_type = resolve_type_alias(fd->type_name);
+                if (is_float_type_for_simd(actual_type) || is_float_array(actual_type)) {
                     indent(); out << "__attribute__((aligned("
-                                  << get_simd_alignment(fd->type_name) << ")))\n";
+                                  << get_simd_alignment(actual_type) << ")))\n";
                 }
-                indent(); out << map_type(fd->type_name) << " " << fd->name << ";\n";
+                bool is_fnptr = actual_type.rfind("fn(", 0) == 0;
+                if (is_fnptr) {
+                    indent(); gen_fnptr_decl(actual_type, fd->name);
+                } else {
+                    std::string ctype = map_type(actual_type);
+                    // Bitfield types: use the mapped C type + :width
+                    if (is_bitfield_type(actual_type)) {
+                        ctype = map_bitfield_c_type(actual_type);
+                    }
+                    indent(); out << ctype << " " << fd->name;
+                    if (fd->bit_width > 0) {
+                        out << " : " << fd->bit_width;
+                    }
+                }
+                out << ";\n";
+            }
+            // Anonymous union inside struct
+            if (field->type == ASTNodeType::UNION_DECL) {
+                auto* ud = static_cast<UnionDecl*>(field.get());
+                indent(); out << "union {\n";
+                indent_level++;
+                gen_union_fields(ud->fields);
+                indent_level--;
+                indent(); out << "};\n";
+            }
+            // Anonymous struct inside union inside struct
+            if (field->type == ASTNodeType::STRUCT_DECL) {
+                auto* inner_sd = static_cast<StructDecl*>(field.get());
+                // Emit as anonymous struct fields directly
+                for (const auto& inner_f : inner_sd->fields) {
+                    if (inner_f->type == ASTNodeType::FIELD_DECL) {
+                        auto* fd = static_cast<FieldDecl*>(inner_f.get());
+                        std::string actual_type = resolve_type_alias(fd->type_name);
+                        bool is_fnptr = actual_type.rfind("fn(", 0) == 0;
+                        if (is_fnptr) {
+                            indent(); gen_fnptr_decl(actual_type, fd->name);
+                        } else {
+                            indent(); out << map_type(actual_type) << " " << fd->name;
+                            if (fd->bit_width > 0) out << " : " << fd->bit_width;
+                        }
+                        out << ";\n";
+                    }
+                }
             }
         }
 
         indent_level--;
         indent(); out << "} " << sd->name << ";\n\n";
+    }
+
+    void gen_union(UnionDecl* ud) {
+        if (ud->is_anonymous) return;
+        emit_line(ud->location);
+        indent(); out << "typedef union " << ud->name << " {\n";
+        indent_level++;
+        gen_union_fields(ud->fields);
+        indent_level--;
+        indent(); out << "} " << ud->name << ";\n\n";
+    }
+
+    void gen_enum(EnumDecl* ed) {
+        emit_line(ed->location);
+        indent(); out << "typedef int " << ed->name << ";\n";
+        for (auto& variant : ed->variants) {
+            indent(); out << "#define " << variant.name << " " << variant.value << "\n";
+        }
+        out << "\n";
     }
 
     void gen_block_vars(const std::vector<std::unique_ptr<ProgramNode>>& asts) {
@@ -539,14 +703,85 @@ private:
                 indent_level++;
                 scope_depth++;
                 indent(); out << "BlockCtx* _old" << scope_depth << " = _current_block;\n";
-                indent(); out << "_current_block = " << bs->block_name << ";\n";
+                if (!bs->block_name.empty()) {
+                    indent(); out << "_current_block = " << bs->block_name << ";\n";
+                }
                 for (const auto& s : bs->body) {
                     gen_statement(s.get());
                 }
-                indent(); out << "_current_block = _old" << scope_depth << ";\n";
+                if (!bs->block_name.empty()) {
+                    indent(); out << "_current_block = _old" << scope_depth << ";\n";
+                }
                 indent_level--;
                 scope_depth--;
                 indent(); out << "}\n";
+                break;
+            }
+            case ASTNodeType::BREAK_STMT: {
+                indent(); out << "break;\n";
+                break;
+            }
+            case ASTNodeType::CONTINUE_STMT: {
+                indent(); out << "continue;\n";
+                break;
+            }
+            case ASTNodeType::DEFER_STMT: {
+                break;
+            }
+            case ASTNodeType::MATCH_STMT: {
+                auto* ms = static_cast<MatchStmt*>(node);
+                // Generate C switch statement
+                // Gera switch em C
+                indent(); out << "switch(";
+                gen_expression(ms->value.get());
+                out << ") {\n";
+                indent_level++;
+                for (auto& arm : ms->arms) {
+                    for (size_t pi = 0; pi < arm.patterns.size(); pi++) {
+                        auto* pat = arm.patterns[pi].get();
+                        // Wildcard pattern "_" -> default
+                        if (pat->type == ASTNodeType::IDENT_EXPR) {
+                            auto* ident = static_cast<IdentExpr*>(pat);
+                            if (ident->name == "_") {
+                                indent(); out << "default:\n";
+                                indent_level++;
+                                if (arm.body) gen_statement(arm.body.get());
+                                indent(); out << "break;\n";
+                                indent_level--;
+                                continue;
+                            }
+                        }
+                        // Integer literal pattern: case X:
+                        indent(); out << "case ";
+                        gen_expression(pat);
+                        out << ":\n";
+                    }
+                    indent_level++;
+                    if (arm.guard) {
+                        indent(); out << "if(";
+                        gen_expression(arm.guard.get());
+                        out << ") {\n";
+                        indent_level++;
+                        if (arm.body) gen_statement(arm.body.get());
+                        indent(); out << "break;\n";
+                        indent_level--;
+                        indent(); out << "}\n";
+                    } else {
+                        if (arm.body) gen_statement(arm.body.get());
+                        indent(); out << "break;\n";
+                    }
+                    indent_level--;
+                }
+                indent_level--;
+                indent(); out << "}\n";
+                break;
+            }
+            case ASTNodeType::CONST_DECL: {
+                auto* cd = static_cast<ConstDecl*>(node);
+                std::string const_type = cd->type_name.empty() ? "int" : map_type(cd->type_name);
+                indent(); out << "const " << const_type << " " << cd->name << " = ";
+                gen_expression(cd->value.get());
+                out << ";\n";
                 break;
             }
             case ASTNodeType::EXPR_STMT: {
@@ -573,7 +808,33 @@ private:
         return false;
     }
 
+    void gen_var_declaration(const std::string& var_name, const std::string& brick_type) {
+        std::string var_key = std::to_string(scope_depth) + ":" + var_name;
+        declared_vars.insert(var_key);
+        indent();
+        if (brick_type.rfind("fn(", 0) == 0) {
+            gen_fnptr_decl(brick_type, var_name);
+            out << ";\n";
+        } else {
+            out << map_type(brick_type) << " " << var_name << ";\n";
+        }
+    }
+
     void gen_expr_stmt(ASTNode* expr) {
+        // Variable declaration without initializer: Type name
+        // Declaracao de variavel sem inicializador: Tipo nome
+        if (expr->type == ASTNodeType::IDENT_EXPR) {
+            auto* ident = static_cast<IdentExpr*>(expr);
+            if (!ident->declared_type.empty()) {
+                std::string var_key = std::to_string(scope_depth) + ":" + ident->name;
+                if (declared_vars.find(var_key) == declared_vars.end()) {
+                    std::string brick_type = ident->resolved_type.empty()
+                        ? ident->declared_type : ident->resolved_type;
+                    gen_var_declaration(ident->name, brick_type);
+                    return;
+                }
+            }
+        }
         if (expr->type == ASTNodeType::ASSIGNMENT) {
             auto* assign = static_cast<Assignment*>(expr);
             if (assign->target->type == ASTNodeType::IDENT_EXPR) {
@@ -596,8 +857,10 @@ private:
                 std::string var_key = std::to_string(scope_depth) + ":" + ident->name;
                 if (declared_vars.find(var_key) == declared_vars.end()) {
                     declared_vars.insert(var_key);
-                    std::string c_type = map_type(ident->resolved_type.empty()
-                        ? "int" : ident->resolved_type);
+                    std::string brick_type = ident->resolved_type.empty()
+                        ? "int" : ident->resolved_type;
+                    bool is_fnptr = brick_type.rfind("fn(", 0) == 0;
+                    std::string c_type = is_fnptr ? "" : map_type(brick_type);
                     bool is_block_alloc = has_alloc_inline(assign->value.get());
 
                     // Track pointer variables for . vs -> later
@@ -610,12 +873,24 @@ private:
                     // Literal null: variavel e um ponteiro inicializado como NULL
                     if (assign->value->type == ASTNodeType::NULL_LITERAL) {
                         indent();
-                        out << c_type << "* " << ident->name << " = NULL;\n";
+                        bool already_ptr = is_fnptr || (!ident->resolved_type.empty() && ident->resolved_type[0] == '*');
+                        if (already_ptr) {
+                            out << c_type << " " << ident->name << " = NULL;\n";
+                        } else {
+                            out << c_type << "* " << ident->name << " = NULL;\n";
+                        }
                         pointer_vars[ident->name] = true;
                         return;
                     }
 
                     indent();
+                    if (is_fnptr) {
+                        gen_fnptr_decl(brick_type, ident->name);
+                        out << " = ";
+                        gen_expression(assign->value.get());
+                        out << ";\n";
+                        return;
+                    }
                     if (is_block_alloc) {
                         out << c_type << "* " << ident->name;
                     } else {
@@ -953,6 +1228,27 @@ private:
                         out << ")";
                         break;
                     }
+                    // Internal function call with default params
+                    // Chamada de funcao interna com parametros padrao
+                    if (call->callee->type == ASTNodeType::IDENT_EXPR) {
+                        auto* callee_ident = static_cast<IdentExpr*>(call->callee.get());
+                        auto func_it = func_defs.find(callee_ident->name);
+                        if (func_it != func_defs.end()) {
+                            auto* target_fd = func_it->second;
+                            out << target_fd->name << "(";
+                            for (size_t i = 0; i < target_fd->params.size(); i++) {
+                                if (i > 0) out << ", ";
+                                if (i < call->arguments.size()) {
+                                    gen_expression(call->arguments[i].get());
+                                } else {
+                                    auto* pd = static_cast<ParamDecl*>(target_fd->params[i].get());
+                                    gen_expression(pd->default_value.get());
+                                }
+                            }
+                            out << ")";
+                            break;
+                        }
+                    }
                 }
 
                 gen_expression(call->callee.get());
@@ -1034,7 +1330,36 @@ private:
         }
     }
 
+    void gen_fnptr_decl(const std::string& mc_type, const std::string& var_name) {
+        // Function pointer declaration: fn(p1,p2)->ret name -> ret (*name)(ct1,ct2)
+        // Declaracao de ponteiro de funcao: fn(p1,p2)->ret nome -> ret (*nome)(ct1,ct2)
+        auto paren = mc_type.find('(', 2);
+        auto close = mc_type.find(')', paren + 1);
+        std::string params_str = mc_type.substr(paren + 1, close - paren - 1);
+        std::string arrow_part = mc_type.substr(close + 1);
+        std::string ret = arrow_part.substr(2);
+        out << map_type(ret) << " (*" << var_name << ")(";
+        if (!params_str.empty()) {
+            size_t start = 0, comma;
+            bool first = true;
+            while ((comma = params_str.find(',', start)) != std::string::npos) {
+                if (!first) out << ",";
+                first = false;
+                out << map_type(params_str.substr(start, comma - start));
+                start = comma + 1;
+            }
+            if (!first) out << ",";
+            out << map_type(params_str.substr(start));
+        }
+        out << ")";
+    }
+
     std::string map_type(const std::string& mc_type) {
+        // Bitfield types (uN/iN) — handled by caller, but fallback here
+        if (is_bitfield_type(mc_type)) {
+            return map_bitfield_c_type(mc_type);
+        }
+
         // Pointer type: *T -> mapped_base_type*
         // *u8 -> char* (C string convention, matches BrickString.data)
         if (!mc_type.empty() && mc_type[0] == '*') {
@@ -1081,11 +1406,13 @@ private:
         if (t == "long") return "i64";
         if (t == "float") return "f32";
         if (t == "double") return "f64";
+        if (is_bitfield_type(t)) return t;
         return t;
     }
 
     bool is_integer_type(const std::string& t) {
         std::string n = normalize_type_name(t);
+        if (is_bitfield_type(n)) return true;
         return n == "u8" || n == "u16" || n == "u32" || n == "u64" ||
                n == "i8" || n == "i16" || n == "i32" || n == "i64" ||
                n == "usize" || n == "isize" || n == "bool";
@@ -1310,11 +1637,15 @@ private:
             case TokenType::AND: return "&&";
             case TokenType::OR: return "||";
             case TokenType::NOT: return "!";
+            case TokenType::BIT_AND: return "&";
             case TokenType::ASSIGN: return "=";
             case TokenType::PLUS_ASSIGN: return "+=";
             case TokenType::MINUS_ASSIGN: return "-=";
             case TokenType::STAR_ASSIGN: return "*=";
             case TokenType::SLASH_ASSIGN: return "/=";
+            case TokenType::COLON: return ":";
+            case TokenType::PLUS_PLUS: return "++";
+            case TokenType::MINUS_MINUS: return "--";
             default: return "/*op*/";
         }
     }

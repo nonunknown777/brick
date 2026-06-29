@@ -78,9 +78,10 @@ runSuite('Fixed-width type keywords', () => {
 // Test 3: Standard keywords
 // ──────────────────────────────────────────
 runSuite('Standard keywords', () => {
-    const r = scanDocument('package using private public struct extends interface fn return block reset if else while for error int float bool char String void null true false');
+    const r = scanDocument('package using private public struct extends interface fn return block reset if else while for error include link extern and macro build emit int float bool char String void null true false include and');
     const expected = ['package','using','private','public','struct','extends','interface','fn','return',
         'block','reset','if','else','while','for','error',
+        'include','link','extern','and','macro','build','emit',
         'int','float','bool','char','String','void','null','true','false'];
     for (const kw of expected) {
         const tok = r.tokens.find(t => t.lexeme === kw);
@@ -443,6 +444,46 @@ runSuite('Dollar sigil edge cases', () => {
     // Standalone $
     const r2 = scanDocument('$');
     assert(r2.tokens.some(t => t.type === 'DOLLAR' && t.lexeme === '$'), 'standalone $ token found');
+});
+
+// ──────────────────────────────────────────
+// Test 23: New keywords (break, continue, const, defer, enum, match, not, is, as)
+// ──────────────────────────────────────────
+runSuite('New keywords', () => {
+    const r = scanDocument('not break continue const defer enum match is as');
+    const expected = ['not','break','continue','const','defer','enum','match','is','as'];
+    for (const kw of expected) {
+        const tok = r.tokens.find(t => t.lexeme === kw);
+        assert(tok !== undefined, `token for '${kw}' exists`);
+        assert(tok!.type !== 'IDENTIFIER', `'${kw}' should be keyword, not IDENTIFIER`);
+        assert(tok!.type === kw.toUpperCase(), `'${kw}' type is ${tok!.type} (expected ${kw.toUpperCase()})`);
+    }
+});
+
+// ──────────────────────────────────────────
+// Test 24: Block comments /* */
+// ──────────────────────────────────────────
+runSuite('Block comments', () => {
+    const r = scanDocument('/* hello */ 42 /* nested /* deep */ end */');
+    const comments = r.tokens.filter(t => t.type === 'COMMENT');
+    assert(comments.length >= 2, `at least 2 comments found (got ${comments.length})`);
+    assert(comments[0].lexeme.includes('/*'), 'first comment starts with /*');
+    assert(comments[1].lexeme.includes('end'), 'second comment includes "end"');
+});
+
+// ──────────────────────────────────────────
+// Test 25: Hex, octal, binary number literals
+// ──────────────────────────────────────────
+runSuite('Hex/octal/binary literals', () => {
+    const r = scanDocument('0xFF 0b1010 0o77 1_000_000');
+    const hexTok = r.tokens.find(t => t.lexeme === '0xFF');
+    const binTok = r.tokens.find(t => t.lexeme === '0b1010');
+    const octTok = r.tokens.find(t => t.lexeme === '0o77');
+    const undTok = r.tokens.find(t => t.lexeme === '1_000_000');
+    assert(hexTok?.type === 'INT_LITERAL', '0xFF is INT_LITERAL');
+    assert(binTok?.type === 'INT_LITERAL', '0b1010 is INT_LITERAL');
+    assert(octTok?.type === 'INT_LITERAL', '0o77 is INT_LITERAL');
+    assert(undTok?.type === 'INT_LITERAL', '1_000_000 is INT_LITERAL');
 });
 
 // ──────────────────────────────────────────

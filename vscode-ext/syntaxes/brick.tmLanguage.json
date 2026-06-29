@@ -21,6 +21,11 @@
                 {
                     "match": "//.*$",
                     "name": "comment.line.double-slash.brc"
+                },
+                {
+                    "begin": "/\\*",
+                    "end": "\\*/",
+                    "name": "comment.block.brc"
                 }
             ]
         },
@@ -53,11 +58,23 @@
         "numbers": {
             "patterns": [
                 {
-                    "match": "\\b[0-9]+\\.[0-9]+\\b",
+                    "match": "\\b[0-9][0-9_]*\\.[0-9_]+\\b",
                     "name": "constant.numeric.float.brc"
                 },
                 {
-                    "match": "\\b[0-9]+\\b",
+                    "match": "\\b0[xX][0-9a-fA-F][0-9a-fA-F_]*\\b",
+                    "name": "constant.numeric.integer.hex.brc"
+                },
+                {
+                    "match": "\\b0[bB][01][01_]*\\b",
+                    "name": "constant.numeric.integer.binary.brc"
+                },
+                {
+                    "match": "\\b0[oO][0-7][0-7_]*\\b",
+                    "name": "constant.numeric.integer.octal.brc"
+                },
+                {
+                    "match": "\\b[0-9][0-9_]*\\b",
                     "name": "constant.numeric.integer.brc"
                 }
             ]
@@ -87,6 +104,34 @@
                 {
                     "name": "keyword.control.macro.brc",
                     "match": "\\b(macro|build|emit)\\b"
+                },
+                {
+                    "name": "keyword.control.const.brc",
+                    "match": "\\b(const)\\b"
+                },
+                {
+                    "name": "keyword.control.defer.brc",
+                    "match": "\\b(defer)\\b"
+                },
+                {
+                    "name": "keyword.control.enum.brc",
+                    "match": "\\b(enum)\\b"
+                },
+                {
+                    "name": "keyword.control.match.brc",
+                    "match": "\\b(match)\\b"
+                },
+                {
+                    "name": "keyword.control.loop.brc",
+                    "match": "\\b(break|continue)\\b"
+                },
+                {
+                    "name": "keyword.operator.typecheck.brc",
+                    "match": "\\b(is|as)\\b"
+                },
+                {
+                    "name": "keyword.operator.logical.brc",
+                    "match": "\\b(not)\\b"
                 },
                 {
                     "name": "constant.language.brc",

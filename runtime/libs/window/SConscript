@@ -1,22 +1,35 @@
-# Build: brick_lib_window (X11) — static + shared for hot reload
-Import('env', 'has_x11')
+# Build: brick_lib_window — platform-specific static + shared for hot reload
+Import('env', 'has_x11', 'target')
 
 if not has_x11:
     Return('env_win')
 
 env_win = env.Clone()
-env_win.ParseConfig('pkg-config --cflags --libs x11')
+
+if target == 'windows':
+    # Win32 backend
+    win_src = ['window_win32.c']
+    env_win.Append(LIBS=['user32', 'gdi32'])
+else:
+    # X11 backend
+    win_src = ['window_linux.c']
+    env_win.ParseConfig('pkg-config --cflags --libs x11')
 
 # ─── Static library ─────────────────────────────────────────
-lib_window = env_win.Library('#build/brick_lib_window',
-    ['window_linux.c'])
+lib_window = env_win.Library('#build/brick_lib_window', win_src)
 
 # ─── Shared library (hot reload) ────────────────────────────
-env_win_so = env_win.Clone()
-env_win_so.Append(LINKFLAGS=['-Wl,--allow-shlib-undefined'])
-lib_window_so = env_win_so.SharedLibrary('#build/brick_lib_window',
-    ['window_linux.c'],
-    SHLIBPREFIX='',
-    SHLIBSUFFIX='.so')
+if target == 'windows':
+    lib_window_so = env_win.SharedLibrary('#build/brick_lib_window_shared',
+        win_src,
+        SHLIBPREFIX='',
+        SHLIBSUFFIX='.dll')
+else:
+    env_win_so = env_win.Clone()
+    env_win_so.Append(LINKFLAGS=['-Wl,--allow-shlib-undefined'])
+    lib_window_so = env_win_so.SharedLibrary('#build/brick_lib_window_shared',
+        win_src,
+        SHLIBPREFIX='',
+        SHLIBSUFFIX='.so')
 
 Return('env_win')

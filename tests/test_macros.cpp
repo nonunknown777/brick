@@ -30,14 +30,17 @@ static int tests_passed = 0;
     } \
 } while(0)
 
-
-
-
+static ParseResult parse_tokens(const std::string& s, const std::string& fn = "test") {
+    std::string src = s;
+    auto tokens = tokenize(src, fn);
+    return parse(tokens);
+}
 
 // ─── Tests ───
 
 void test_lex_macro_keywords() {
-    auto tokens = tokenize("macro hello(a, b) { x = a }\nbuild { }\nemit { x = 1 }", "test");
+    std::string src = "macro hello(a, b) { x = a }\nbuild { }\nemit { x = 1 }";
+    auto tokens = tokenize(src, "test");
     bool has_macro = false, has_build = false, has_emit = false;
     for (auto& t : tokens) {
         if (t.type == TokenType::MACRO) has_macro = true;
@@ -50,7 +53,8 @@ void test_lex_macro_keywords() {
 }
 
 void test_lex_dollar_ellipsis() {
-    auto tokens = tokenize("$name $(expr) values...", "test");
+    std::string src = "$name $(expr) values...";
+    auto tokens = tokenize(src, "test");
     bool has_dollar = false, has_ellipsis = false;
     for (auto& t : tokens) {
         if (t.type == TokenType::DOLLAR) has_dollar = true;
@@ -61,7 +65,7 @@ void test_lex_dollar_ellipsis() {
 }
 
 void test_parse_macro_simple() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro swap(a, b) {\n"
         "    tmp = $a\n"
         "    $a = $b\n"
@@ -71,68 +75,56 @@ void test_parse_macro_simple() {
         "    x = 1\n"
         "    y = 2\n"
         "    swap(x, y)\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
     assert(result.errors.empty());
 }
 
 void test_parse_macro_varargs() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro my_print(fmt, values...) {\n"
         "    // varargs test\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
     assert(result.errors.empty());
 }
 
 void test_parse_build_block() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "build {\n"
         "    x = 42\n"
         "    print(\"hello\")\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
     assert(result.errors.empty());
 }
 
 void test_parse_emit_stmt() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro gen() {\n"
         "    emit { x = 1 }\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
     assert(result.errors.empty());
 }
 
 void test_parse_emit_macro_call() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro gen() {\n"
         "    emit other_macro()\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
     assert(result.errors.empty());
 }
 
 void test_collect_macros() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro swap(a, b) {\n"
         "    tmp = $a\n"
         "    $a = $b\n"
         "    $b = tmp\n"
         "}\n"
-        "fn main() {}\n",
-    "test");
-    auto result = parse(tokens);
+        "fn main() {}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -144,12 +136,10 @@ void test_collect_macros() {
 }
 
 void test_collect_multiple_macros() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro a() { x = 1 }\n"
         "macro b() { x = 2 }\n"
-        "macro c() { x = 3 }\n",
-    "test");
-    auto result = parse(tokens);
+        "macro c() { x = 3 }\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -160,7 +150,7 @@ void test_collect_multiple_macros() {
 }
 
 void test_expand_simple_macro() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro swap(a, b) {\n"
         "    tmp = $a\n"
         "    $a = $b\n"
@@ -170,9 +160,7 @@ void test_expand_simple_macro() {
         "    x = 1\n"
         "    y = 2\n"
         "    swap(x, y)\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -186,12 +174,10 @@ void test_expand_simple_macro() {
 }
 
 void test_expand_macro_undefined_error() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "fn main() {\n"
         "    undefined_macro(1, 2)\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -206,12 +192,10 @@ void test_expand_macro_undefined_error() {
 }
 
 void test_build_eval_basic() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "fn main() {\n"
         "    x = 1\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -222,15 +206,13 @@ void test_build_eval_basic() {
 }
 
 void test_build_eval_with_literals() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "build {\n"
         "    x = 42\n"
         "    y = x + 10\n"
         "    emit { z = y }\n"
         "}\n"
-        "fn main() {}\n",
-    "test");
-    auto result = parse(tokens);
+        "fn main() {}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -241,15 +223,13 @@ void test_build_eval_with_literals() {
 }
 
 void test_macro_with_emit() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro gen_val(n) {\n"
         "    emit { x = $n }\n"
         "}\n"
         "fn main() {\n"
         "    gen_val(42)\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -263,8 +243,7 @@ void test_macro_with_emit() {
 }
 
 void test_empty_build() {
-    auto tokens = tokenize("build {}\nfn main() {}\n", "test");
-    auto result = parse(tokens);
+    auto result = parse_tokens("build {}\nfn main() {}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -275,16 +254,14 @@ void test_empty_build() {
 }
 
 void test_dollar_in_macro() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro id(x) { $x }\n"
-        "fn main() {}\n",
-    "test");
-    auto result = parse(tokens);
+        "fn main() {}\n");
     assert(result.ast != nullptr);
 }
 
 void test_full_integration_swap() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro swap(a, b) {\n"
         "    tmp = $a\n"
         "    $a = $b\n"
@@ -294,9 +271,7 @@ void test_full_integration_swap() {
         "    x = 1\n"
         "    y = 2\n"
         "    swap(x, y)\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
     assert(result.errors.empty());
 
@@ -320,15 +295,13 @@ void test_full_integration_swap() {
 }
 
 void test_macro_no_params() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro constant() {\n"
         "    emit { x = 42 }\n"
         "}\n"
         "fn main() {\n"
         "    constant()\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -341,15 +314,13 @@ void test_macro_no_params() {
 }
 
 void test_macro_wrong_arg_count() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro two(a, b) {\n"
         "    x = $a + $b\n"
         "}\n"
         "fn main() {\n"
         "    two(1)\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -364,15 +335,13 @@ void test_macro_wrong_arg_count() {
 }
 
 void test_macro_deep_recursion() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro recurse() {\n"
         "    recurse()\n"
         "}\n"
         "fn main() {\n"
         "    recurse()\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -396,8 +365,7 @@ void test_clone_ast() {
 }
 
 void test_clone_ast_block() {
-    auto tokens = tokenize("fn main() { x = 1; y = 2 }\n", "test");
-    auto result = parse(tokens);
+    auto result = parse_tokens("fn main() { x = 1; y = 2 }\n");
     assert(result.ast != nullptr);
 
     auto cloned = clone_ast(result.ast.get());
@@ -408,16 +376,14 @@ void test_clone_ast_block() {
 void test_gensym_basic() {
     // Gensym: __var → var__1, var__2
     // We test this indirectly through macro expansion with __ variables
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro with_gensym() {\n"
         "    __tmp = 42\n"
         "    print(__tmp)\n"
         "}\n"
         "fn main() {\n"
         "    with_gensym()\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -430,26 +396,22 @@ void test_gensym_basic() {
 }
 
 void test_parse_enum_in_macro() {
-    // Enum-style pattern: define multiple constants from a single call
-    auto tokens = tokenize(
-        "macro enum(name, values...) {}\n"
-        "fn main() {}\n",
-    "test");
-    auto result = parse(tokens);
+    // Variadic macro pattern: define multiple constants from a single call
+    auto result = parse_tokens(
+        "macro colors(name, values...) {}\n"
+        "fn main() {}\n");
     assert(result.ast != nullptr);
     assert(result.errors.empty());
 }
 
 void test_macro_call_as_stmt() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro say_hello() {\n"
         "    emit { print(\"hello\") }\n"
         "}\n"
         "fn main() {\n"
         "    say_hello()\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;
@@ -462,7 +424,7 @@ void test_macro_call_as_stmt() {
 }
 
 void test_macro_nested() {
-    auto tokens = tokenize(
+    auto result = parse_tokens(
         "macro inner(x) { $x = $x + 1 }\n"
         "macro outer(y) {\n"
         "    inner($y)\n"
@@ -470,9 +432,7 @@ void test_macro_nested() {
         "fn main() {\n"
         "    v = 1\n"
         "    outer(v)\n"
-        "}\n",
-    "test");
-    auto result = parse(tokens);
+        "}\n");
     assert(result.ast != nullptr);
 
     std::vector<std::unique_ptr<ProgramNode>> asts;

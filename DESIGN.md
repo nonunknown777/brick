@@ -11,7 +11,7 @@
 - **Compilador:** C++20, gera C puro
 - **Runtime:** C (block allocator + hot reload)
 - **Build:** SCons
-- **Plataforma:** Linux (Arch)
+- **Plataforma:** Linux (Arch), Windows (MinGW-w64)
 
 ## Linguagem
 - Visibilidade: `public` (padrão) | `private`
@@ -52,8 +52,8 @@
 - VS Code webview com blocos visuais durante debug
 
 ## Ferramentas
-- **Hot Reload:** dlopen + inotify, swap de .so por package
-- **Visualizador:** TUI ncurses (blocos em tempo real)
+- **Hot Reload:** dlopen + inotify (Linux) / LoadLibrary + ReadDirectoryChangesW (Windows), swap de .so/.dll por package
+- **Visualizador:** TUI ncurses (Linux) / PDCurses (Windows) (blocos em tempo real)
 - **VS Code:** Syntax highlight + snippets + LSP + Memory Webview (debug)
 - **Testes:** Unitários + integração (.brc → binário)
 - **Debugger:** GDB + VS Code integrados com suporte a blocos

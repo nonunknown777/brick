@@ -1,11 +1,19 @@
-# Build: brick_visualizer — ncurses memory visualizer
-Import('env', 'has_visualizer')
+# Build: brick_visualizer — ncurses / PDCurses memory visualizer
+Import('env', 'has_visualizer', 'has_ncurses', 'has_pdcurses', 'target')
 
 if not has_visualizer:
     Return('lib_viz')
 
 env_viz = env.Clone()
-env_viz.ParseConfig('pkg-config --cflags --libs ncurses')
+
+if has_ncurses:
+    env_viz.ParseConfig('pkg-config --cflags --libs ncurses')
+elif has_pdcurses:
+    env_viz.ParseConfig('pkg-config --cflags --libs pdcurses')
+    env_viz.Append(CFLAGS=['-DPDCURSES'], CXXFLAGS=['-DPDCURSES'])
+else:
+    # No visualizer backend available on this platform
+    Return('lib_viz')
 
 lib_viz = env_viz.Library('#build/brick_visualizer', ['memvis.cpp'])
 

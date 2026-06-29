@@ -1,6 +1,7 @@
 #include "../src/lexer/lexer.h"
 #include <cassert>
 #include <iostream>
+#include <memory>
 #include <stdexcept>
 
 using namespace brick;
@@ -11,8 +12,21 @@ static int failed = 0;
 #define TEST(name) void name()
 #define RUN(name) do { try { name(); std::cout << "[PASS] " << #name << "\n"; passed++; } catch (const std::exception& e) { std::cout << "[FAIL] " << #name << ": " << e.what() << "\n"; failed++; } } while(0)
 
+// Token returns string_view into source, so source must outlive the tokens.
+// We use shared_ptr<string> to keep source alive even after moves/copies.
+struct TokenTest {
+    std::shared_ptr<std::string> src;
+    std::vector<Token> tokens;
+};
+static TokenTest tk(const std::string& s, const std::string& f = "<test>") {
+    TokenTest tt;
+    tt.src = std::make_shared<std::string>(s);
+    tt.tokens = tokenize(*tt.src, f);
+    return tt;
+}
+
 TEST(test_basic_tokens) {
-    auto tokens = tokenize("int x = 5");
+    auto [src, tokens] = tk("int x = 5");
     assert(tokens.size() >= 4);
     assert(tokens[0].type == TokenType::INT);
     assert(tokens[1].type == TokenType::IDENTIFIER);
@@ -21,44 +35,47 @@ TEST(test_basic_tokens) {
 }
 
 TEST(test_string_literal) {
-    auto tokens = tokenize("\"hello\"");
+    auto [src, tokens] = tk("\"hello\"");
     assert(tokens[0].type == TokenType::STRING_LITERAL);
     assert(tokens[0].lexeme == "hello");
 }
 
 TEST(test_string_escapes) {
-    auto tokens = tokenize("\"a\\nb\\tc\\\\d\\\"\"");
+    auto [src, tokens] = tk("\"a\\nb\\tc\\\\d\\\"\"");
     assert(tokens[0].type == TokenType::STRING_LITERAL);
-    assert(tokens[0].lexeme == "a\nb\tc\\d\"");
+    // lexeme is raw source content between quotes (escape processing moved to parser)
+    assert(tokens[0].lexeme == "a\\nb\\tc\\\\d\\\"");
 }
 
 TEST(test_char_literal) {
-    auto tokens = tokenize("'x'");
+    auto [src, tokens] = tk("'x'");
     assert(tokens[0].type == TokenType::CHAR_LITERAL);
     assert(tokens[0].lexeme == "x");
 }
 
 TEST(test_char_escape) {
-    auto tokens = tokenize("'\\n'");
+    auto [src, tokens] = tk("'\\n'");
     assert(tokens[0].type == TokenType::CHAR_LITERAL);
-    assert(tokens[0].lexeme == "\n");
+    // lexeme is raw source content (escape processing moved to parser)
+    assert(tokens[0].lexeme == "\\n");
 }
 
 TEST(test_char_escape_quote) {
-    auto tokens = tokenize("'\\''");
+    auto [src, tokens] = tk("'\\''");
     assert(tokens[0].type == TokenType::CHAR_LITERAL);
-    assert(tokens[0].lexeme == "'");
+    // lexeme is raw source content (escape processing moved to parser)
+    assert(tokens[0].lexeme == "\\'");
 }
 
 TEST(test_comments) {
-    auto tokens = tokenize("int x // comment\n= 5");
+    auto [src, tokens] = tk("int x // comment\n= 5");
     assert(tokens.size() >= 4);
     assert(tokens[0].type == TokenType::INT);
     assert(tokens[2].type == TokenType::ASSIGN);
 }
 
 TEST(test_package_using_dot) {
-    auto tokens = tokenize("package SPRITES\nusing SPRITES.EFFECTS");
+    auto [src, tokens] = tk("package SPRITES\nusing SPRITES.EFFECTS");
     assert(tokens[0].type == TokenType::PACKAGE);
     assert(tokens[1].type == TokenType::IDENTIFIER);
     assert(tokens[2].type == TokenType::USING);
@@ -68,25 +85,25 @@ TEST(test_package_using_dot) {
 }
 
 TEST(test_float_literal) {
-    auto tokens = tokenize("3.14");
+    auto [src, tokens] = tk("3.14");
     assert(tokens[0].type == TokenType::FLOAT_LITERAL);
     assert(tokens[0].lexeme == "3.14");
 }
 
 TEST(test_int_literal) {
-    auto tokens = tokenize("42");
+    auto [src, tokens] = tk("42");
     assert(tokens[0].type == TokenType::INT_LITERAL);
     assert(tokens[0].lexeme == "42");
 }
 
 TEST(test_operators_eq_neq) {
-    auto tokens = tokenize("== !=");
+    auto [src, tokens] = tk("== !=");
     assert(tokens[0].type == TokenType::EQ);
     assert(tokens[1].type == TokenType::NEQ);
 }
 
 TEST(test_operators_comparison) {
-    auto tokens = tokenize("< > <= >=");
+    auto [src, tokens] = tk("< > <= >=");
     assert(tokens[0].type == TokenType::LT);
     assert(tokens[1].type == TokenType::GT);
     assert(tokens[2].type == TokenType::LEQ);
@@ -94,14 +111,14 @@ TEST(test_operators_comparison) {
 }
 
 TEST(test_operators_logical) {
-    auto tokens = tokenize("&& || !");
+    auto [src, tokens] = tk("&& || !");
     assert(tokens[0].type == TokenType::AND);
     assert(tokens[1].type == TokenType::OR);
     assert(tokens[2].type == TokenType::NOT);
 }
 
 TEST(test_operators_bitwise) {
-    auto tokens = tokenize("& | ^ ~ << >>");
+    auto [src, tokens] = tk("& | ^ ~ << >>");
     assert(tokens[0].type == TokenType::BIT_AND);
     assert(tokens[1].type == TokenType::BIT_OR);
     assert(tokens[2].type == TokenType::BIT_XOR);
@@ -111,19 +128,19 @@ TEST(test_operators_bitwise) {
 }
 
 TEST(test_arrow) {
-    auto tokens = tokenize("->");
+    auto [src, tokens] = tk("->");
     assert(tokens[0].type == TokenType::ARROW);
     assert(tokens[0].lexeme == "->");
 }
 
 TEST(test_at_pipe) {
-    auto tokens = tokenize("@ |");
+    auto [src, tokens] = tk("@ |");
     assert(tokens[0].type == TokenType::AT);
     assert(tokens[1].type == TokenType::BIT_OR);
 }
 
 TEST(test_delimiters) {
-    auto tokens = tokenize("{ } ( ) [ ] ; ,");
+    auto [src, tokens] = tk("{ } ( ) [ ] ; ,");
     assert(tokens[0].type == TokenType::LBRACE);
     assert(tokens[1].type == TokenType::RBRACE);
     assert(tokens[2].type == TokenType::LPAREN);
@@ -135,7 +152,7 @@ TEST(test_delimiters) {
 }
 
 TEST(test_keywords) {
-    auto tokens = tokenize("struct extends interface fn return if else while for block private public true false null");
+    auto [src, tokens] = tk("struct extends interface fn return if else while for block private public true false null");
     assert(tokens[0].type == TokenType::STRUCT);
     assert(tokens[1].type == TokenType::EXTENDS);
     assert(tokens[2].type == TokenType::INTERFACE);
@@ -154,7 +171,7 @@ TEST(test_keywords) {
 }
 
 TEST(test_types) {
-    auto tokens = tokenize("int float bool char String void");
+    auto [src, tokens] = tk("int float bool char String void");
     assert(tokens[0].type == TokenType::INT);
     assert(tokens[1].type == TokenType::FLOAT);
     assert(tokens[2].type == TokenType::BOOL);
@@ -164,7 +181,7 @@ TEST(test_types) {
 }
 
 TEST(test_identifier) {
-    auto tokens = tokenize("my_var _private camelCase");
+    auto [src, tokens] = tk("my_var _private camelCase");
     assert(tokens[0].type == TokenType::IDENTIFIER);
     assert(tokens[0].lexeme == "my_var");
     assert(tokens[1].type == TokenType::IDENTIFIER);
@@ -174,19 +191,19 @@ TEST(test_identifier) {
 }
 
 TEST(test_empty_input) {
-    auto tokens = tokenize("");
+    auto [src, tokens] = tk("");
     assert(tokens.size() == 1);
     assert(tokens[0].type == TokenType::EOF_);
 }
 
 TEST(test_only_comment) {
-    auto tokens = tokenize("// just a comment\n");
+    auto [src, tokens] = tk("// just a comment\n");
     assert(tokens.size() == 1);
     assert(tokens[0].type == TokenType::EOF_);
 }
 
 TEST(test_arithmetic) {
-    auto tokens = tokenize("+ - * /");
+    auto [src, tokens] = tk("+ - * /");
     assert(tokens[0].type == TokenType::PLUS);
     assert(tokens[1].type == TokenType::MINUS);
     assert(tokens[2].type == TokenType::STAR);
@@ -195,7 +212,8 @@ TEST(test_arithmetic) {
 
 TEST(test_unterminated_string) {
     try {
-        tokenize("\"unterminated");
+        std::string src = "\"unterminated";
+        tokenize(src, "<test>");
         assert(false && "expected exception");
     } catch (const std::runtime_error&) {
         // expected
@@ -205,7 +223,8 @@ TEST(test_unterminated_string) {
 
 TEST(test_unterminated_char) {
     try {
-        tokenize("'x");
+        std::string src = "'x";
+        tokenize(src, "<test>");
         assert(false && "expected exception");
     } catch (const std::runtime_error&) {
         // expected
@@ -214,28 +233,25 @@ TEST(test_unterminated_char) {
 }
 
 TEST(test_invalid_escape_string) {
-    try {
-        tokenize("\"\\q\"");
-        assert(false && "expected exception");
-    } catch (const std::runtime_error&) {
-        // expected
-        // esperado
-    }
+    // Escape validation moved to parser; lexer stores raw content
+    std::string src = "\"\\q\"";
+    auto tokens = tokenize(src, "<test>");
+    assert(tokens[0].type == TokenType::STRING_LITERAL);
+    assert(tokens[0].lexeme == "\\q");
 }
 
 TEST(test_invalid_escape_char) {
-    try {
-        tokenize("'\\q'");
-        assert(false && "expected exception");
-    } catch (const std::runtime_error&) {
-        // expected
-        // esperado
-    }
+    // Escape validation moved to parser; lexer stores raw content
+    std::string src = "'\\q'";
+    auto tokens = tokenize(src, "<test>");
+    assert(tokens[0].type == TokenType::CHAR_LITERAL);
+    assert(tokens[0].lexeme == "\\q");
 }
 
 TEST(test_unexpected_char) {
     try {
-        tokenize("#");
+        std::string src = "#";
+        tokenize(src, "<test>");
         assert(false && "expected exception");
     } catch (const std::runtime_error&) {
         // expected
@@ -244,19 +260,19 @@ TEST(test_unexpected_char) {
 }
 
 TEST(test_dollar_token) {
-    auto tokens = tokenize("$");
+    auto [src, tokens] = tk("$");
     assert(tokens.size() >= 2);
     assert(tokens[0].type == TokenType::DOLLAR);
 }
 
 TEST(test_ellipsis_token) {
-    auto tokens = tokenize("...");
+    auto [src, tokens] = tk("...");
     assert(tokens.size() >= 2);
     assert(tokens[0].type == TokenType::ELLIPSIS);
 }
 
 TEST(test_source_locations) {
-    auto tokens = tokenize("int x = 5\nfloat y", "test.brc");
+    auto [src, tokens] = tk("int x = 5\nfloat y", "test.brc");
     assert(tokens[0].location.line == 1);
     assert(tokens[0].location.col == 1);
     assert(tokens[0].location.file == "test.brc");

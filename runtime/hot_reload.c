@@ -1,20 +1,54 @@
-#define _GNU_SOURCE
-#define _POSIX_C_SOURCE 200112L
 #include "hot_reload.h"
 #include "block_memory.h"
 #include <time.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <dlfcn.h>
-#include <pthread.h>
-#include <unistd.h>
-#include <sys/inotify.h>
 #include <errno.h>
 #include <stdatomic.h>
 
+#if defined(_WIN32)
+#  include <windows.h>
+#  define HR_DLOPEN(path)        ((void*)LoadLibraryA(path))
+#  define HR_DLSYM(handle, name) ((void*)GetProcAddress((HMODULE)(handle), (name)))
+#  define HR_DLCLOSE(handle)     (void)(FreeLibrary((HMODULE)(handle)) ? 0 : 1)
+#  define HR_DLERROR()           ("GetLastError")
+#  define HR_THREAD_T            HANDLE
+#  define HR_MUTEX_T             CRITICAL_SECTION
+#  define HR_MUTEX_INIT(m)       InitializeCriticalSection((m))
+#  define HR_MUTEX_LOCK(m)       EnterCriticalSection((m))
+#  define HR_MUTEX_UNLOCK(m)     LeaveCriticalSection((m))
+#  define HR_MUTEX_DESTROY(m)    DeleteCriticalSection((m))
+#  define HR_THREAD_CREATE(t, f, a) ((*(t) = CreateThread(NULL, 0, (f), (a), 0, NULL)) != NULL)
+#  define HR_THREAD_JOIN(t)      WaitForSingleObject((t), INFINITE); CloseHandle(t)
+#  define HR_SLEEP(ms)           Sleep(ms)
+#  define HR_ATOMIC_STORE(p, v)  InterlockedExchange((long*)(p), (long)(v))
+#  define HR_PATH_SEP            '\\'
+#  define HR_SO_EXT              ".dll"
+#else
+#  include <dlfcn.h>
+#  include <pthread.h>
+#  include <unistd.h>
+#  include <sys/inotify.h>
+#  define HR_DLOPEN(path)        dlopen(path, RTLD_NOW | RTLD_LOCAL)
+#  define HR_DLSYM(handle, name) dlsym(handle, name)
+#  define HR_DLCLOSE(handle)     dlclose(handle)
+#  define HR_DLERROR()           dlerror()
+#  define HR_THREAD_T            pthread_t
+#  define HR_MUTEX_T             pthread_mutex_t
+#  define HR_MUTEX_INIT(m)       pthread_mutex_init((m), NULL)
+#  define HR_MUTEX_LOCK(m)       pthread_mutex_lock((m))
+#  define HR_MUTEX_UNLOCK(m)     pthread_mutex_unlock((m))
+#  define HR_MUTEX_DESTROY(m)    pthread_mutex_destroy((m))
+#  define HR_THREAD_CREATE(t, f, a) (pthread_create(&(t), NULL, (f), (a)) == 0)
+#  define HR_THREAD_JOIN(t)      pthread_join((t), NULL)
+#  define HR_SLEEP(ms)           usleep((ms) * 1000)
+#  define HR_ATOMIC_STORE(p, v)  __atomic_store_n((p), (v), __ATOMIC_SEQ_CST)
+#  define HR_PATH_SEP            '/'
+#  define HR_SO_EXT              ".so"
+#endif
+
 #define MAX_SYMBOLS 256
-#define EVENT_BUF_LEN 4096
 
 typedef struct {
     char  name[128];
@@ -22,21 +56,24 @@ typedef struct {
 } SymbolEntry;
 
 struct HotReloadEngine {
-    char          so_path[1024];
-    char          so_basename[256];
-    char          so_path_tmp[1024];  // path + ".new" for atomic swap
-                                       // path + ".new" para troca atomica
+    char          dll_path[1024];
+    char          dll_basename[256];
     void*         handle_current;
-    void*         handle_new;
     SymbolEntry   symbols[MAX_SYMBOLS];
     int           symbol_count;
     atomic_int    state;
-    pthread_t     watch_thread;
-    int           inotify_fd;
-    int           watch_fd;
+    HR_THREAD_T   watch_thread;
     volatile int  running;
     hr_callback_t callback;
-    pthread_mutex_t mutex;
+    HR_MUTEX_T    mutex;
+#if defined(_WIN32)
+    char          watch_dir[1024];
+    HANDLE        watch_handle;
+    HANDLE        watch_event;
+#else
+    int           inotify_fd;
+    int           watch_fd;
+#endif
 };
 
 static void error(const char* msg) {
@@ -44,46 +81,65 @@ static void error(const char* msg) {
     exit(1);
 }
 
-HotReloadEngine* hr_create(const char* so_path) {
+HotReloadEngine* hr_create(const char* dll_path) {
     HotReloadEngine* hr = (HotReloadEngine*)calloc(1, sizeof(HotReloadEngine));
     if (!hr) error("out of memory");
 
-    strncpy(hr->so_path, so_path, sizeof(hr->so_path) - 1);
+    strncpy(hr->dll_path, dll_path, sizeof(hr->dll_path) - 1);
 
     // Extract basename
-    // Extrai o nome base
-    const char* slash = strrchr(so_path, '/');
-    strncpy(hr->so_basename, slash ? slash + 1 : so_path, sizeof(hr->so_basename) - 1);
+    const char* sep = strrchr(dll_path, '/');
+#if defined(_WIN32)
+    {
+        const char* sep2 = strrchr(dll_path, '\\');
+        if (sep2 && (!sep || sep2 > sep)) sep = sep2;
+    }
+#endif
+    strncpy(hr->dll_basename, sep ? sep + 1 : dll_path, sizeof(hr->dll_basename) - 1);
 
-    snprintf(hr->so_path_tmp, sizeof(hr->so_path_tmp), "%s.new", so_path);
+    // Extract watch directory
+    if (sep) {
+        size_t dirlen = (size_t)(sep - dll_path);
+        memcpy(hr->watch_dir, dll_path, dirlen);
+        hr->watch_dir[dirlen] = '\0';
+    } else {
+#if defined(_WIN32)
+        GetCurrentDirectoryA(sizeof(hr->watch_dir), hr->watch_dir);
+#else
+        strcpy(hr->watch_dir, ".");
+#endif
+    }
 
     hr->state = HR_WAITING;
     hr->running = 0;
     hr->callback = NULL;
+#if defined(_WIN32)
+    hr->watch_handle = INVALID_HANDLE_VALUE;
+    hr->watch_event = NULL;
+#else
     hr->inotify_fd = -1;
     hr->watch_fd = -1;
-    pthread_mutex_init(&hr->mutex, NULL);
+#endif
+    HR_MUTEX_INIT(&hr->mutex);
 
     return hr;
 }
 
 int hr_load_initial(HotReloadEngine* hr) {
-    pthread_mutex_lock(&hr->mutex);
+    HR_MUTEX_LOCK(&hr->mutex);
 
-    hr->handle_current = dlopen(hr->so_path, RTLD_NOW | RTLD_LOCAL);
+    hr->handle_current = HR_DLOPEN(hr->dll_path);
     if (!hr->handle_current) {
-        fprintf(stderr, "hr: dlopen failed: %s\n", dlerror());
+        fprintf(stderr, "hr: dlopen/LoadLibrary failed: %s\n", HR_DLERROR());
         hr->state = HR_ERROR;
-        pthread_mutex_unlock(&hr->mutex);
+        HR_MUTEX_UNLOCK(&hr->mutex);
         return -1;
     }
 
     hr->state = HR_OK;
 
-    // Resolve registered symbols
-    // Resolve simbolos registrados
     for (int i = 0; i < hr->symbol_count; i++) {
-        void* sym = dlsym(hr->handle_current, hr->symbols[i].name);
+        void* sym = HR_DLSYM(hr->handle_current, hr->symbols[i].name);
         if (sym) {
             *(hr->symbols[i].func_ptr) = sym;
         } else {
@@ -91,7 +147,7 @@ int hr_load_initial(HotReloadEngine* hr) {
         }
     }
 
-    pthread_mutex_unlock(&hr->mutex);
+    HR_MUTEX_UNLOCK(&hr->mutex);
     return 0;
 }
 
@@ -106,21 +162,16 @@ int hr_register_func(HotReloadEngine* hr, const char* name, void** func_ptr) {
 }
 
 int hr_reload(HotReloadEngine* hr) {
-    pthread_mutex_lock(&hr->mutex);
+    HR_MUTEX_LOCK(&hr->mutex);
     hr->state = HR_LOADING;
 
-    // Freeze block allocations during swap
-    // Congela alocacoes de bloco durante a troca
     block_freeze();
 
-    // Copy the .so to a temp path so dlopen gets a fresh load
-    // Copia o .so para um caminho temporario para dlopen obter carga fresca
-    // (dlopen caches by path; a copy bypasses the cache)
-    // (dlopen armazena em cache por caminho; uma copia contorna o cache)
+    // Copy the library to a temp path so LoadLibrary/dlopen gets a fresh load
     char tmp_path[1088];
-    snprintf(tmp_path, sizeof(tmp_path), "%s.%d", hr->so_path, (int)time(NULL));
+    snprintf(tmp_path, sizeof(tmp_path), "%s.%d", hr->dll_path, (int)time(NULL));
 
-    FILE* src = fopen(hr->so_path, "rb");
+    FILE* src = fopen(hr->dll_path, "rb");
     void* new_handle = NULL;
     if (src) {
         FILE* dst = fopen(tmp_path, "wb");
@@ -131,57 +182,131 @@ int hr_reload(HotReloadEngine* hr) {
                 fwrite(buf, 1, n, dst);
             fclose(dst);
 
-            new_handle = dlopen(tmp_path, RTLD_NOW | RTLD_LOCAL);
-            unlink(tmp_path);
+            new_handle = HR_DLOPEN(tmp_path);
+            remove(tmp_path);
         }
         fclose(src);
     }
 
     if (!new_handle) {
-        const char* err = dlerror();
-        fprintf(stderr, "hr: reload failed: %s\n", err ? err : "cannot open .so file");
-        // Rollback: keep old handle, function pointers untouched
-        // Rollback: mantem handle antigo, ponteiros de funcao intocados
+        fprintf(stderr, "hr: reload failed\n");
         hr->state = hr->handle_current ? HR_OK : HR_ERROR;
         block_thaw();
-        if (hr->callback) hr->callback(hr->so_path);
-        pthread_mutex_unlock(&hr->mutex);
+        if (hr->callback) hr->callback(hr->dll_path);
+        HR_MUTEX_UNLOCK(&hr->mutex);
         return -1;
     }
 
     // Swap function pointers atomically
-    // Troca ponteiros de funcao atomicamente
     for (int i = 0; i < hr->symbol_count; i++) {
-        void* sym = dlsym(new_handle, hr->symbols[i].name);
+        void* sym = HR_DLSYM(new_handle, hr->symbols[i].name);
         if (sym) {
-            __atomic_store(hr->symbols[i].func_ptr, &sym, __ATOMIC_SEQ_CST);
+            HR_ATOMIC_STORE(hr->symbols[i].func_ptr, sym);
         } else {
-            fprintf(stderr, "hr: symbol '%s' not found in new .so\n",
+            fprintf(stderr, "hr: symbol '%s' not found in new library\n",
                     hr->symbols[i].name);
         }
     }
 
     // Close old handle
-    // Fecha handle antigo
     if (hr->handle_current) {
-        dlclose(hr->handle_current);
+        HR_DLCLOSE(hr->handle_current);
     }
     hr->handle_current = new_handle;
     hr->state = HR_OK;
 
     block_thaw();
-    if (hr->callback) hr->callback(hr->so_path);
+    if (hr->callback) hr->callback(hr->dll_path);
 
-    pthread_mutex_unlock(&hr->mutex);
+    HR_MUTEX_UNLOCK(&hr->mutex);
     return 0;
 }
 
-// Watch thread function
-// Funcao da thread de monitoramento
+#if defined(_WIN32)
+
+static DWORD WINAPI watch_thread_fn_win32(LPVOID arg) {
+    HotReloadEngine* hr = (HotReloadEngine*)arg;
+
+    char dir_path[1024];
+    strcpy(dir_path, hr->watch_dir);
+
+    HANDLE hDir = CreateFileA(
+        dir_path,
+        FILE_LIST_DIRECTORY,
+        FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+        NULL,
+        OPEN_EXISTING,
+        FILE_FLAG_BACKUP_SEMANTICS | FILE_FLAG_OVERLAPPED,
+        NULL
+    );
+
+    if (hDir == INVALID_HANDLE_VALUE) {
+        return 1;
+    }
+
+    hr->watch_handle = hDir;
+
+    char notify_buf[4096];
+    OVERLAPPED overlapped;
+    memset(&overlapped, 0, sizeof(overlapped));
+    hr->watch_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+    overlapped.hEvent = hr->watch_event;
+
+    // Start first overlapped read
+    DWORD bytes_returned;
+    ReadDirectoryChangesW(
+        hDir, notify_buf, sizeof(notify_buf), FALSE,
+        FILE_NOTIFY_CHANGE_LAST_WRITE,
+        &bytes_returned, &overlapped, NULL
+    );
+
+    while (hr->running) {
+        DWORD wait = WaitForSingleObject(hr->watch_event, 500);
+        if (wait == WAIT_OBJECT_0) {
+            DWORD bytes;
+            if (GetOverlappedResult(hDir, &overlapped, &bytes, FALSE)) {
+                FILE_NOTIFY_INFORMATION* event = (FILE_NOTIFY_INFORMATION*)notify_buf;
+                if (event->Action == FILE_ACTION_MODIFIED) {
+                    // Check if this is our DLL
+                    int dll_len = (int)strlen(hr->dll_basename);
+                    int name_len = (int)(event->FileNameLength / sizeof(wchar_t));
+                    if (name_len == dll_len) {
+                        // Compare wide char basename with our DLL name
+                        // Convert our DLL name to wide for comparison
+                        wchar_t wname[256];
+                        MultiByteToWideChar(CP_UTF8, 0, hr->dll_basename, -1, wname, 256);
+                        if (_wcsnicmp(event->FileName, wname, dll_len) == 0) {
+                            HR_SLEEP(50);
+                            hr_reload(hr);
+                        }
+                    }
+                }
+
+                // Reset for next read
+                memset(&overlapped, 0, sizeof(overlapped));
+                overlapped.hEvent = hr->watch_event;
+                ReadDirectoryChangesW(
+                    hDir, notify_buf, sizeof(notify_buf), FALSE,
+                    FILE_NOTIFY_CHANGE_LAST_WRITE,
+                    &bytes_returned, &overlapped, NULL
+                );
+            }
+            ResetEvent(hr->watch_event);
+        }
+    }
+
+    CancelIo(hDir);
+    CloseHandle(hDir);
+    hr->watch_handle = INVALID_HANDLE_VALUE;
+    return 0;
+}
+
+#else // Linux
+
 static void* watch_thread_fn(void* arg) {
     HotReloadEngine* hr = (HotReloadEngine*)arg;
 
-    char buf[EVENT_BUF_LEN] __attribute__((aligned(8)));
+    char buf[4096] BRICK_ALIGNED(8);
 
     while (hr->running) {
         ssize_t len = read(hr->inotify_fd, buf, sizeof(buf));
@@ -193,9 +318,7 @@ static void* watch_thread_fn(void* arg) {
 
             if ((event->mask & IN_CLOSE_WRITE) &&
                 event->len > 0 &&
-                strcmp(event->name, hr->so_basename) == 0) {
-                // Small delay to let file writes complete
-                // Pequeno atraso para permitir que escritas no arquivo terminem
+                strcmp(event->name, hr->dll_basename) == 0) {
                 struct timespec ts = {0, 50000000};
                 nanosleep(&ts, NULL);
                 hr_reload(hr);
@@ -207,39 +330,39 @@ static void* watch_thread_fn(void* arg) {
 
     return NULL;
 }
+#endif
 
 int hr_start_watching(HotReloadEngine* hr) {
+#if defined(_WIN32)
+    // Windows: watch thread is created during hr_create
+    hr->running = 1;
+    if (!HR_THREAD_CREATE(&hr->watch_thread, watch_thread_fn_win32, hr)) {
+        hr->running = 0;
+        return -1;
+    }
+    return 0;
+#else
     hr->inotify_fd = inotify_init1(IN_NONBLOCK);
     if (hr->inotify_fd < 0) {
         perror("inotify_init");
         return -1;
     }
 
-    // Watch directory of the .so file
-    // Monitora diretorio do arquivo .so
-    char dir_path[1024];
-    size_t path_len = strlen(hr->so_path);
-    if (path_len >= sizeof(dir_path)) path_len = sizeof(dir_path) - 1;
-    memcpy(dir_path, hr->so_path, path_len);
-    dir_path[path_len] = '\0';
-    char* last_slash = strrchr(dir_path, '/');
-    if (last_slash) *last_slash = '\0';
-    else strcpy(dir_path, ".");
-
-    hr->watch_fd = inotify_add_watch(hr->inotify_fd, dir_path, IN_CLOSE_WRITE);
+    hr->watch_fd = inotify_add_watch(hr->inotify_fd, hr->watch_dir, IN_CLOSE_WRITE);
     if (hr->watch_fd < 0) {
         perror("inotify_add_watch");
         return -1;
     }
 
     hr->running = 1;
-    if (pthread_create(&hr->watch_thread, NULL, watch_thread_fn, hr) != 0) {
+    if (!HR_THREAD_CREATE(&hr->watch_thread, watch_thread_fn, hr)) {
         perror("pthread_create");
         hr->running = 0;
         return -1;
     }
 
     return 0;
+#endif
 }
 
 HotReloadState hr_state(HotReloadEngine* hr) {
@@ -253,13 +376,20 @@ void hr_set_callback(HotReloadEngine* hr, hr_callback_t cb) {
 void hr_destroy(HotReloadEngine* hr) {
     if (hr->running) {
         hr->running = 0;
-        pthread_join(hr->watch_thread, NULL);
+        HR_THREAD_JOIN(hr->watch_thread);
     }
 
+#if defined(_WIN32)
+    if (hr->watch_handle != INVALID_HANDLE_VALUE) {
+        CancelIo(hr->watch_handle);
+        CloseHandle(hr->watch_handle);
+    }
+    if (hr->watch_event) CloseHandle(hr->watch_event);
+#else
     if (hr->inotify_fd >= 0) close(hr->inotify_fd);
-    if (hr->handle_current) dlclose(hr->handle_current);
-    if (hr->handle_new) dlclose(hr->handle_new);
+#endif
+    if (hr->handle_current) HR_DLCLOSE(hr->handle_current);
 
-    pthread_mutex_destroy(&hr->mutex);
+    HR_MUTEX_DESTROY(&hr->mutex);
     free(hr);
 }

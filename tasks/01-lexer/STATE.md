@@ -18,6 +18,13 @@ O lexer está completo e funcionando. Todos os 29 testes unitários passam.
 - `src/lexer/lexer.cpp` - Implementação (~305 linhas)
 - `tests/test_lexer.cpp` - 29 testes
 
+## Mudanças recentes
+- **Token::lexeme** mudou de `std::string` para `std::string_view` (src/shared/types.h)
+- Lexer reescrito para emitir `string_view` apontando direto pro buffer de source — zero alocação por token
+- Escape sequences agora são processadas no parser, não no lexer (string/char literal armazenam raw content)
+- `std::from_chars` usado para parse numérico (funciona com `string_view`)
+
 ## Observações
 - `and` não é keyword — tratado contextualmente no parser
 - Token types em `src/shared/types.h`
+- Atenção: `string_view` depende do source string permanecer vivo — test infrastructure adaptada com `shared_ptr<string>`

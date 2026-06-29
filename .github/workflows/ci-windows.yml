@@ -1,0 +1,139 @@
+name: CI Windows
+
+on:
+  push:
+    branches: [ main, master ]
+    tags: [ 'v*' ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2 / MinGW-w64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >
+            mingw-w64-i686-gcc
+            mingw-w64-i686-python-pip
+            make
+            git
+
+      - name: Install SCons
+        run: pip install scons
+
+      - name: Build Compiler
+        run: scons target=windows profile=release -j4
+
+      - name: Run Unit Tests
+        run: scons target=windows profile=release test -j4
+
+      - name: Run Windows Integration Tests
+        shell: powershell
+        run: PowerShell -ExecutionPolicy Bypass -File tests/test_windows_integration.ps1
+
+      - name: Upload Test Artifacts (on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-test-logs
+          path: build/*.exe
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [test]
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup MSYS2 / MinGW-w64
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW32
+          update: true
+          install: >
+            mingw-w64-i686-gcc
+            mingw-w64-i686-python-pip
+            make
+            git
+
+      - name: Install SCons
+        run: pip install scons
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: echo "tag=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build Release Binary
+        run: scons target=windows profile=release -j4
+
+      - name: Package Release
+        run: |
+          mkdir -p build/release
+          cp build/brick.exe build/release/
+          cp CHANGELOG.md build/release/
+          cp LICENSE build/release/
+          # Copy required MinGW DLLs so brick.exe runs standalone
+          ldd build/brick.exe 2>/dev/null | grep -i mingw | awk '{print $3}' | xargs -I{} cp {} build/release/ 2>/dev/null || true
+
+      - name: Generate Release Notes
+        id: release_notes
+        shell: bash
+        run: |
+          VERSION="${{ steps.version.outputs.tag }}"
+          PREV=$(git tag --sort=-creatordate | head -2 | tail -1 || true)
+
+          cat > /tmp/release-notes-windows.md << EOF
+          ## Brick Compiler v${VERSION} (Windows)
+
+          ### What's inside
+          - **brick.exe** — Compiler CLI (.brc → C → .exe)
+          - **Runtime** — Block allocator (VirtualAlloc), hot reload (LoadLibrary + ReadDirectoryChangesW), IO
+          - **Window library** — Win32 API (CreateWindow, PeekMessage)
+
+          ### Changes since last release
+          EOF
+
+          if [ -n "$PREV" ]; then
+            git log --oneline --no-decorate "$PREV..HEAD" 2>/dev/null || git log --oneline -20 --no-decorate
+          else
+            git log --oneline -20 --no-decorate
+          fi >> /tmp/release-notes-windows.md
+
+      - name: Upload Release Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: brick-windows-${{ steps.version.outputs.tag }}
+          path: build/release/
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        env:
+          ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: true
+        with:
+          name: Brick v${{ steps.version.outputs.tag }} (Windows)
+          body_path: /tmp/release-notes-windows.md
+          files: |
+            build/release/brick.exe

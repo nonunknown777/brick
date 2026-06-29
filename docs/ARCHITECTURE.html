@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Architecture — Brick</title>
+<meta name="description" content="Brick architecture documentation">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<nav class="doc-nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">Brick</a>
+    <div class="nav-links">
+      <a href="LANGUAGE.html">Language</a>
+      <a href="MACROS.html">Macros</a>
+      <a href="ARCHITECTURE.html">Architecture</a>
+      <a href="GETTING_STARTED.html">Getting Started</a>
+      <a href="OPTIMIZATIONS.html">Optimizations</a>
+      <a href="hot-reload.html">Hot Reload</a>
+      <a href="index.html" class="nav-back">← Home</a>
+    </div>
+  </div>
+</nav>
+
+<main class="doc-main">
+  <div class="container doc-content">
+<h1>Brick Architecture</h1>
+<blockquote>
+<p>Explained simply for anyone to understand.</p>
+</blockquote>
+<h2>Overview</h2>
+<p>Brick is a programming language you write in a <code>.brc</code> file and it becomes a real program. The path is:</p>
+<div class="code-block"><pre class="">Your .brc code  →  Compiler  →  C code  →  gcc  →  Final program
+</pre></div>
+<h2>Project Parts</h2>
+<h3>src/ — The Brain (Compiler in C++20)</h3>
+<p>The compiler has 4 parts in an assembly line:</p>
+<div class="code-block"><pre class="">1. LEXER         2. PARSER           3. MACRO SYSTEM    4. CODEGEN
+   ┌─────┐         ┌──────┐           ┌──────────┐        ┌──────┐
+   │ .brc │ → tokens → │ AST │ → expand → │ .c  │
+   └─────┘         └──────┘           └──────────┘        └──────┘
+                                            ↓
+                                    collect + build + expand
+</pre></div>
+<p><strong>Lexer</strong> (<code>src/lexer/</code>):</p>
+<ul>
+<li>Takes your <code>.brc</code> file and breaks it into tokens</li>
+<li>Example: <code>int x = 5</code> becomes [INT, IDENT(&quot;x&quot;), ASSIGN, INT_LITERAL(5)]</li>
+<li>Ignores comments and whitespace</li>
+</ul>
+<p><strong>Parser</strong> (<code>src/parser/</code>):</p>
+<ul>
+<li>Takes tokens and builds an AST (Abstract Syntax Tree)</li>
+<li>Example: <code>if (x &gt; 0) { }</code> becomes a branch with condition + body</li>
+<li>Also resolves <code>package</code> and <code>using</code> — figures out imports</li>
+<li>Handles <code>macro</code>, <code>build</code>, and <code>emit</code> declarations</li>
+</ul>
+<p><strong>Macro System</strong> (<code>src/parser/</code> — <code>macro_expander.cpp</code>, <code>build_eval.cpp</code>):</p>
+<ul>
+<li>Collects all <code>macro</code> declarations into a table</li>
+<li>Evaluates <code>build {}</code> blocks at compile time, running their <code>emit</code> calls</li>
+<li>Expands each <code>macro_call(...)</code> by cloning the macro body and substituting <code>$</code> parameters</li>
+<li>Generates unique names for <code>__</code>-prefixed variables (gensym)</li>
+<li>Detects infinite recursion (max 64 levels)</li>
+</ul>
+<p><strong>Codegen</strong> (<code>src/codegen/</code>):</p>
+<ul>
+<li>Walks the expanded AST (no macros left) and writes C code</li>
+<li>Each <code>struct</code> becomes <code>typedef struct</code></li>
+<li>Each method becomes <code>StructName_method()</code></li>
+<li>Type-checking: validates types, issues errors for mismatches</li>
+<li>Generates <code>#line</code> directives so you debug in <code>.brc</code>, not C</li>
+</ul>
+<h3>runtime/ — The Foundation (C)</h3>
+<p>The core that runs alongside your program:</p>
+<p><strong>block_memory.c</strong>:</p>
+<ul>
+<li>Manages memory blocks (8MB, 32MB, 256MB...)</li>
+<li>Uses a bump allocator — super fast (~3 CPU cycles per allocation)</li>
+<li>Declare <code>block game = 64MB</code> and allocate objects inside it</li>
+<li>Clear the entire block with <code>block.reset()</code> — no individual free</li>
+<li>Freeze/thaw support for hot reload</li>
+<li>Cross-platform: <code>mmap</code> on Linux, <code>VirtualAlloc</code> on Windows (≥64KB), <code>malloc</code> fallback</li>
+<li>Thread safety: <code>pthread_mutex</code> on Linux, <code>CRITICAL_SECTION</code> on Windows</li>
+<li>TLS: <code>__thread</code> on GCC/Linux, <code>__declspec(thread)</code> on Windows/MinGW</li>
+</ul>
+<p><strong>io.c</strong>:</p>
+<ul>
+<li>Type-specific print functions: <code>io_print_i8</code>, <code>io_print_u32</code>, <code>io_print_f64</code>, etc.</li>
+<li>Uses exact PRI format specifiers from <code>&lt;inttypes.h&gt;</code></li>
+<li>Formatted print with positional arguments: <code>print(&quot;x={0}&quot;, 42)</code></li>
+</ul>
+<p><strong>hot_reload.c</strong>:</p>
+<ul>
+<li>Swap code without stopping your program</li>
+<li>Cross-platform abstraction: <code>dlopen</code>+<code>dlsym</code>+<code>inotify</code> on Linux, <code>LoadLibrary</code>+<code>GetProcAddress</code>+<code>ReadDirectoryChangesW</code> on Windows</li>
+<li>Atomic function pointer swap via <code>__atomic_store_n</code> (GCC) or <code>InterlockedExchange</code> (MSVC/MinGW)</li>
+<li>Watches <code>.so</code>/<code>.dll</code> files for modifications in a separate thread</li>
+</ul>
+<h3>visualizer/ — The Eyes (TUI ncurses / PDCurses)</h3>
+<p>Shows memory blocks in real time in the terminal (ncurses on Linux, PDCurses on Windows):</p>
+<div class="code-block"><pre class="">global  256MB  ████████████░░░  67%
+game     64MB  ██████░░░░░░░░  38%
+</pre></div>
+<h3>debugger/ — The Tools (GDB Python)</h3>
+<p>Helps debug Brick programs:</p>
+<ul>
+<li>Pretty-printers: shows BlockCtx nicely in GDB</li>
+<li>Commands: <code>info blocks</code>, <code>block &lt;name&gt;</code></li>
+<li>.gdbinit loads everything automatically</li>
+</ul>
+<h3>vscode-ext/ — The VS Code Extension</h3>
+<p>Makes VS Code understand the language:</p>
+<ul>
+<li>Syntax highlighting</li>
+<li>LSP server (completions, hover, diagnostics)</li>
+<li>Memory Webview (shows blocks visually during debug)</li>
+</ul>
+<h2>How Everything Connects</h2>
+<div class="code-block"><pre class="">You write:
+    package GAME
+    block global = 256MB
+    block game = 64MB
+    struct Player { int hp }
+    fn main() { Player p = Player(100) @game }
+
+         ↓ Lexer breaks into tokens
+         ↓ Parser builds tree + resolves packages
+         ↓ Macro system collects, builds, and expands macros
+         ↓ Codegen writes C with #line directives
+         ↓ gcc compiles C + runtime
+         ↓
+
+    Program running!
+         ↓
+    Debug with GDB (shows .brc source)
+    View blocks with TUI visualizer
+    Monitor in VS Code memory view
+    Hot reload packages
+</pre></div>
+<h2>Why This Architecture?</h2>
+<ul>
+<li><strong>Performance</strong>: C++20 for the compiler, pure C for the runtime, gcc -O3 for the binary</li>
+<li><strong>Simplicity</strong>: Each part does one thing well</li>
+<li><strong>Debuggable</strong>: #line directives + pretty-printers + TUI visualizer</li>
+<li><strong>Hot Reload</strong>: C runtime with dlopen = stable ABI</li>
+<li><strong>Memory-centric</strong>: Blocks are the center of everything — visible, measurable, controllable</li>
+</ul>
+
+  </div>
+</main>
+
+<footer>
+  <p>Brick — MIT License</p>
+  <p><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
+</footer>
+
+</body>
+</html>

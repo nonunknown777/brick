@@ -11,14 +11,16 @@ namespace brick {
 enum class ASTNodeType {
     PROGRAM,
     PACKAGE_DECL, USING_DECL,
-    STRUCT_DECL, INTERFACE_DECL,
+    STRUCT_DECL, UNION_DECL, INTERFACE_DECL,
     FIELD_DECL, FUNC_DECL, PARAM_DECL,
     BLOCK_DECL, BLOCK_SCOPE,
     ALLOC_INLINE, RESET_EXPR,
-    INCLUDE_DECL, LINK_DECL,
+    INCLUDE_DECL, LINK_DECL, TYPE_ALIAS,
+    CONST_DECL, ENUM_DECL,
 
     // Statements
     BLOCK_STMT, IF_STMT, WHILE_STMT, FOR_STMT, RETURN_STMT, EXPR_STMT,
+    BREAK_STMT, CONTINUE_STMT, MATCH_STMT, DEFER_STMT,
 
     // Expressions
     INT_LITERAL, FLOAT_LITERAL, STRING_LITERAL, BOOL_LITERAL, CHAR_LITERAL, NULL_LITERAL,
@@ -72,6 +74,37 @@ struct LinkDecl : ASTNode {
         : ASTNode(ASTNodeType::LINK_DECL, loc), lib(std::move(l)) {}
 };
 
+struct TypeAliasDecl : ASTNode {
+    std::string alias_name;
+    std::string underlying_type;
+
+    TypeAliasDecl(std::string n, std::string t, SourceLocation loc)
+        : ASTNode(ASTNodeType::TYPE_ALIAS, loc), alias_name(std::move(n)), underlying_type(std::move(t)) {}
+};
+
+struct ConstDecl : ASTNode {
+    std::string name;
+    std::string type_name;  // optional, empty means inferred
+    std::unique_ptr<ASTNode> value;
+
+    ConstDecl(std::string n, SourceLocation loc)
+        : ASTNode(ASTNodeType::CONST_DECL, loc), name(std::move(n)) {}
+};
+
+struct EnumDecl : ASTNode {
+    std::string name;
+    struct Variant {
+        std::string name;
+        int64_t value;
+        bool has_explicit_value = false;
+    };
+    std::vector<Variant> variants;
+    bool is_private = false;
+
+    EnumDecl(std::string n, SourceLocation loc)
+        : ASTNode(ASTNodeType::ENUM_DECL, loc), name(std::move(n)) {}
+};
+
 struct StructDecl : ASTNode {
     std::string name;
     std::string extends;
@@ -79,9 +112,22 @@ struct StructDecl : ASTNode {
     std::vector<std::unique_ptr<ASTNode>> fields;
     std::vector<std::unique_ptr<ASTNode>> methods;
     bool is_private = false;
+    bool is_anonymous = false;
 
     StructDecl(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::STRUCT_DECL, loc), name(std::move(n)) {}
+};
+
+struct UnionDecl : ASTNode {
+    std::string name;
+    std::vector<std::unique_ptr<ASTNode>> fields;
+    bool is_anonymous = false;
+    bool is_private = false;
+
+    UnionDecl(std::string n, SourceLocation loc)
+        : ASTNode(ASTNodeType::UNION_DECL, loc), name(std::move(n)) {}
+    UnionDecl(SourceLocation loc)
+        : ASTNode(ASTNodeType::UNION_DECL, loc), is_anonymous(true) {}
 };
 
 struct InterfaceDecl : ASTNode {
@@ -96,6 +142,7 @@ struct FieldDecl : ASTNode {
     std::string type_name;
     std::string name;
     bool is_private = false;
+    int bit_width = 0;
 
     FieldDecl(std::string t, std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::FIELD_DECL, loc), type_name(std::move(t)), name(std::move(n)) {}
@@ -104,6 +151,7 @@ struct FieldDecl : ASTNode {
 struct ParamDecl : ASTNode {
     std::string type_name;
     std::string name;
+    std::unique_ptr<ASTNode> default_value;  // nullptr = required param
 
     ParamDecl(std::string t, std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::PARAM_DECL, loc), type_name(std::move(t)), name(std::move(n)) {}
@@ -137,6 +185,7 @@ struct BlockDecl : ASTNode {
 struct BlockScope : ASTNode {
     std::string block_name;
     std::vector<std::unique_ptr<ASTNode>> body;
+    bool is_default_change = false;
 
     BlockScope(std::string bn, SourceLocation loc)
         : ASTNode(ASTNodeType::BLOCK_SCOPE, loc), block_name(std::move(bn)) {}
@@ -191,6 +240,31 @@ struct ForStmt : ASTNode {
 struct ReturnStmt : ASTNode {
     std::unique_ptr<ASTNode> value;
     ReturnStmt(SourceLocation loc) : ASTNode(ASTNodeType::RETURN_STMT, loc) {}
+};
+
+struct BreakStmt : ASTNode {
+    BreakStmt(SourceLocation loc) : ASTNode(ASTNodeType::BREAK_STMT, loc) {}
+};
+
+struct ContinueStmt : ASTNode {
+    ContinueStmt(SourceLocation loc) : ASTNode(ASTNodeType::CONTINUE_STMT, loc) {}
+};
+
+struct MatchStmt : ASTNode {
+    std::unique_ptr<ASTNode> value;
+    struct Arm {
+        std::vector<std::unique_ptr<ASTNode>> patterns;  // each pattern is an expression (literal, ident wildcard)
+        std::unique_ptr<ASTNode> body;
+        std::unique_ptr<ASTNode> guard;  // optional condition
+    };
+    std::vector<Arm> arms;
+    MatchStmt(SourceLocation loc) : ASTNode(ASTNodeType::MATCH_STMT, loc) {}
+};
+
+struct DeferStmt : ASTNode {
+    std::unique_ptr<ASTNode> body;
+    DeferStmt(std::unique_ptr<ASTNode> b, SourceLocation loc)
+        : ASTNode(ASTNodeType::DEFER_STMT, loc), body(std::move(b)) {}
 };
 
 struct ExprStmt : ASTNode {

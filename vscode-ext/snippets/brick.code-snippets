@@ -169,5 +169,59 @@
         "prefix": "incandlink",
         "body": "include \"${1:header.h}\" and link ${2:libname}",
         "description": "Include a C header and link a library"
+    },
+    "Enum declaration": {
+        "prefix": "enum",
+        "body": [
+            "enum ${1:Name} {",
+            "\t${2:A}${3: = ${4:0}}${5:;}",
+            "\t${6:B}",
+            "}"
+        ],
+        "description": "Declare an enum type"
+    },
+    "Match statement": {
+        "prefix": "match",
+        "body": [
+            "match ${1:expr} {",
+            "\t${2:pattern} {",
+            "\t\t$0",
+            "\t}",
+            "}"
+        ],
+        "description": "Pattern matching statement"
+    },
+    "Const declaration": {
+        "prefix": "const",
+        "body": "const ${1:name} = ${2:value}",
+        "description": "Declare a compile-time constant"
+    },
+    "Defer statement": {
+        "prefix": "defer",
+        "body": [
+            "defer {",
+            "\t$0",
+            "}"
+        ],
+        "description": "Defer statement to end of scope"
+    },
+    "Break": {
+        "prefix": "break",
+        "body": "break",
+        "description": "Exit loop or match arm"
+    },
+    "Continue": {
+        "prefix": "continue",
+        "body": "continue",
+        "description": "Skip to next loop iteration"
+    },
+    "For-in range": {
+        "prefix": "forin",
+        "body": [
+            "for ${1:x} in ${2:N} {",
+            "\t$0",
+            "}"
+        ],
+        "description": "For-in range loop (0..N)"
     }
 }

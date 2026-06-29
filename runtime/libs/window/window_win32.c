@@ -216,7 +216,7 @@ MetaWindow* meta_window_create(
         memcpy(w->title, title, len);
         w->title[len] = '\0';
     } else {
-        memcpy(w->title, "Brick", 7);
+        memcpy(w->title, "Brick", 6);
     }
 
     DWORD style = WS_OVERLAPPEDWINDOW;

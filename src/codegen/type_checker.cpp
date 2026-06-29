@@ -4,11 +4,29 @@
 #include <cstdint>
 #include <cfloat>
 #include <algorithm>
+#include <cctype>
 
 namespace brick {
 
 // ─── Type helper utilities ───
 // ─── Utilitarios de tipo ───
+
+static bool is_bitfield_type(const std::string& t) {
+    if (t.size() < 2) return false;
+    if (t[0] != 'u' && t[0] != 'i') return false;
+    // Standard fixed-width types are NOT bitfields
+    if (t == "u8" || t == "u16" || t == "u32" || t == "u64" ||
+        t == "i8" || t == "i16" || t == "i32" || t == "i64") return false;
+    for (size_t i = 1; i < t.size(); i++)
+        if (!std::isdigit(t[i])) return false;
+    int w = std::stoi(t.substr(1));
+    return w >= 1 && w <= 64;
+}
+
+static int parse_bitfield_width(const std::string& t) {
+    if (!is_bitfield_type(t)) return 0;
+    return std::stoi(t.substr(1));
+}
 
 static std::string normalize_type(const std::string& t) {
     if (t == "byte" || t == "char") return "u8";
@@ -17,16 +35,19 @@ static std::string normalize_type(const std::string& t) {
     if (t == "long") return "i64";
     if (t == "float") return "f32";
     if (t == "double") return "f64";
+    if (is_bitfield_type(t)) return t;
     return t;
 }
 
 static bool is_signed_int(const std::string& t) {
     std::string n = normalize_type(t);
+    if (is_bitfield_type(n)) return n[0] == 'i';
     return n == "i8" || n == "i16" || n == "i32" || n == "i64" || n == "isize";
 }
 
 static bool is_unsigned_int(const std::string& t) {
     std::string n = normalize_type(t);
+    if (is_bitfield_type(n)) return n[0] == 'u';
     return n == "u8" || n == "u16" || n == "u32" || n == "u64" || n == "usize" || n == "bool";
 }
 
@@ -37,6 +58,7 @@ static bool is_float_type(const std::string& t) {
 
 static int type_rank(const std::string& t) {
     std::string n = normalize_type(t);
+    if (is_bitfield_type(n)) return 0;
     if (n == "u8" || n == "i8" || n == "bool") return 1;
     if (n == "u16" || n == "i16") return 2;
     if (n == "u32" || n == "i32") return 3;
@@ -55,6 +77,18 @@ static std::string signed_type_for_rank(int r) {
 
 static bool int_fits_in_type(int64_t value, const std::string& type) {
     std::string n = normalize_type(type);
+    if (is_bitfield_type(n)) {
+        int w = parse_bitfield_width(n);
+        if (w <= 0 || w > 64) return false;
+        if (n[0] == 'u') {
+            uint64_t max = (w >= 64) ? UINT64_MAX : ((1ULL << w) - 1);
+            return value >= 0 && (uint64_t)value <= max;
+        } else {
+            int64_t min = (w >= 64) ? INT64_MIN : -(1LL << (w - 1));
+            int64_t max = (w >= 64) ? INT64_MAX : (1LL << (w - 1)) - 1;
+            return value >= min && value <= max;
+        }
+    }
     if (n == "u8")  return value >= 0 && value <= UINT8_MAX;
     if (n == "u16") return value >= 0 && value <= UINT16_MAX;
     if (n == "u32") return value >= 0 && value <= UINT32_MAX;
@@ -101,7 +135,10 @@ void TypeChecker::declare(const std::string& name, const std::string& type,
                           bool is_private, bool is_param) {
     if (scopes.empty()) push_scope();
     auto& scope = scopes.back();
-    scope[name] = SymbolInfo{type, is_private, is_param};
+    std::string resolved = type;
+    auto alias_it = type_aliases.find(resolved);
+    if (alias_it != type_aliases.end()) resolved = alias_it->second;
+    scope[name] = SymbolInfo{resolved, is_private, is_param};
 }
 
 SymbolInfo* TypeChecker::lookup(const std::string& name) {
@@ -118,6 +155,11 @@ bool TypeChecker::is_type_known(const std::string& type_name) {
         return is_type_known(type_name.substr(1));
     }
 
+    // Function pointer type: fn(...)->...
+    if (type_name.rfind("fn(", 0) == 0) {
+        return true;
+    }
+
     static const std::unordered_set<std::string> builtins = {
         "int", "float", "bool", "char", "String", "void", "block", "null",
         "u8", "u16", "u32", "u64",
@@ -129,6 +171,9 @@ bool TypeChecker::is_type_known(const std::string& type_name) {
     if (builtins.count(type_name)) return true;
     if (struct_defs.count(type_name)) return true;
     if (interface_defs.count(type_name)) return true;
+    if (union_defs.count(type_name)) return true;
+    if (type_aliases.count(type_name)) return true;
+    if (is_bitfield_type(type_name)) return true;
 
     // Check if it's an array type like "int[10]"
     // Verifica se e um tipo array como "int[10]"
@@ -149,18 +194,35 @@ bool TypeChecker::is_interface_type(const std::string& type_name) {
     return interface_defs.count(type_name) > 0;
 }
 
+bool TypeChecker::is_union_type(const std::string& type_name) {
+    return union_defs.count(type_name) > 0;
+}
+
 bool TypeChecker::can_assign(const std::string& from, const std::string& to) {
-    if (from == to) return true;
-    if (from == "null" || to == "null") return true;
+    // Resolve type aliases
+    std::string f_alias = from;
+    std::string t_alias = to;
+    auto fit = type_aliases.find(f_alias);
+    if (fit != type_aliases.end()) f_alias = fit->second;
+    auto tit = type_aliases.find(t_alias);
+    if (tit != type_aliases.end()) t_alias = tit->second;
+
+    if (f_alias == t_alias) return true;
+    if (f_alias == "null" || t_alias == "null") return true;
+
+    // Function pointer type compatibility: fn(...)->ret = fn(...)->ret if same
+    bool from_fn = f_alias.rfind("fn(", 0) == 0;
+    bool to_fn = t_alias.rfind("fn(", 0) == 0;
+    if (from_fn && to_fn) return f_alias == t_alias;
 
     // Pointer type compatibility: *T = *T, null = *T, *void = *T, String = *u8
-    bool from_ptr = !from.empty() && from[0] == '*';
-    bool to_ptr = !to.empty() && to[0] == '*';
-    if (from_ptr && to_ptr) return from == to || from == "*void" || to == "*void";
-    if (from == "String" && to == "*u8") return true;
+    bool from_ptr = !f_alias.empty() && f_alias[0] == '*';
+    bool to_ptr = !t_alias.empty() && t_alias[0] == '*';
+    if (from_ptr && to_ptr) return f_alias == t_alias || f_alias == "*void" || t_alias == "*void";
+    if (f_alias == "String" && t_alias == "*u8") return true;
 
-    std::string f = normalize_type(from);
-    std::string t = normalize_type(to);
+    std::string f = normalize_type(f_alias);
+    std::string t = normalize_type(t_alias);
 
     if (f == t) return true;
 
@@ -200,10 +262,20 @@ bool TypeChecker::can_assign(const std::string& from, const std::string& to) {
 }
 
 std::string TypeChecker::promote_types(const std::string& a, const std::string& b) {
-    std::string t1 = normalize_type(a);
-    std::string t2 = normalize_type(b);
+    std::string ra = a;
+    std::string rb = b;
+    {
+        auto it = type_aliases.find(ra);
+        if (it != type_aliases.end()) ra = it->second;
+    }
+    {
+        auto it = type_aliases.find(rb);
+        if (it != type_aliases.end()) rb = it->second;
+    }
+    std::string t1 = normalize_type(ra);
+    std::string t2 = normalize_type(rb);
 
-    if (t1 == t2) return a;
+    if (t1 == t2) return ra;
 
     bool f1 = is_float_type(t1);
     bool f2 = is_float_type(t2);
@@ -264,9 +336,23 @@ std::vector<std::string> TypeChecker::check(
                     struct_defs[static_cast<StructDecl*>(decl.get())->name]
                         = static_cast<StructDecl*>(decl.get());
                     break;
+                case ASTNodeType::UNION_DECL: {
+                    auto* ud = static_cast<UnionDecl*>(decl.get());
+                    if (!ud->is_anonymous)
+                        union_defs[ud->name] = ud;
+                    break;
+                }
                 case ASTNodeType::INTERFACE_DECL:
                     interface_defs[static_cast<InterfaceDecl*>(decl.get())->name]
                         = static_cast<InterfaceDecl*>(decl.get());
+                    break;
+                case ASTNodeType::TYPE_ALIAS:
+                    type_aliases[static_cast<TypeAliasDecl*>(decl.get())->alias_name]
+                        = static_cast<TypeAliasDecl*>(decl.get())->underlying_type;
+                    break;
+                case ASTNodeType::ENUM_DECL:
+                    enum_defs[static_cast<EnumDecl*>(decl.get())->name]
+                        = static_cast<EnumDecl*>(decl.get());
                     break;
                 default:
                     break;
@@ -282,14 +368,38 @@ std::vector<std::string> TypeChecker::check(
                 case ASTNodeType::STRUCT_DECL:
                     check_struct(static_cast<StructDecl*>(decl.get()));
                     break;
+                case ASTNodeType::UNION_DECL:
+                    check_union(static_cast<UnionDecl*>(decl.get()));
+                    break;
                 case ASTNodeType::INTERFACE_DECL:
                     check_interface(static_cast<InterfaceDecl*>(decl.get()));
+                    break;
+                case ASTNodeType::TYPE_ALIAS:
+                    // Already collected in first pass, just validate underlying type
+                    {
+                        auto* ta = static_cast<TypeAliasDecl*>(decl.get());
+                        if (!is_type_known(ta->underlying_type)) {
+                            add_error(ta->location.file + ":" + std::to_string(ta->location.line) +
+                                      ": unknown type '" + ta->underlying_type + "' in type alias '" +
+                                      ta->alias_name + "'");
+                        }
+                    }
                     break;
                 case ASTNodeType::FUNC_DECL: {
                     auto* fd = static_cast<FuncDecl*>(decl.get());
                     if (fd->is_extern) {
                         extern_func_defs[fd->name] = fd;
                     }
+                    // Build function pointer type for the function name
+                    // Constroi tipo de ponteiro de funcao para o nome da funcao
+                    std::string fnptr_type = "fn(";
+                    for (size_t i = 0; i < fd->params.size(); i++) {
+                        auto* pd = static_cast<ParamDecl*>(fd->params[i].get());
+                        if (i > 0) fnptr_type += ",";
+                        fnptr_type += pd->type_name;
+                    }
+                    fnptr_type += ")->" + (fd->return_type.empty() ? "void" : fd->return_type);
+                    declare(fd->name, fnptr_type, false);
                     check_function(fd, "");
                     break;
                 }
@@ -308,6 +418,26 @@ std::vector<std::string> TypeChecker::check(
                                   ": duplicate block name '" + bd->name + "'");
                     }
                     declare(bd->name, "block", false);
+                    break;
+                }
+                case ASTNodeType::ENUM_DECL:
+                    check_enum(static_cast<EnumDecl*>(decl.get()));
+                    break;
+                case ASTNodeType::CONST_DECL: {
+                    auto* cd = static_cast<ConstDecl*>(decl.get());
+                    std::string val_type = "int";
+                    if (cd->value) {
+                        val_type = check_expression(cd->value.get());
+                    }
+                    if (!cd->type_name.empty()) {
+                        if (!can_assign(val_type, cd->type_name)) {
+                            add_error(cd->location.file + ":" + std::to_string(cd->location.line) +
+                                      ": cannot assign '" + val_type + "' to '" + cd->type_name + "'");
+                        }
+                        declare(cd->name, cd->type_name, false);
+                    } else {
+                        declare(cd->name, val_type, false);
+                    }
                     break;
                 }
                 case ASTNodeType::MACRO_DECL:
@@ -360,12 +490,86 @@ void TypeChecker::check_struct(StructDecl* sd) {
     for (const auto& field : sd->fields) {
         if (field->type == ASTNodeType::FIELD_DECL) {
             auto* fd = static_cast<FieldDecl*>(field.get());
-            if (!is_type_known(fd->type_name)) {
+            // Resolve type alias
+            std::string resolved_type = fd->type_name;
+            auto alias_it = type_aliases.find(resolved_type);
+            if (alias_it != type_aliases.end()) resolved_type = alias_it->second;
+            // Auto-set bit_width for bitfield types (u4, i3, u24, etc.)
+            if (is_bitfield_type(resolved_type)) {
+                fd->bit_width = parse_bitfield_width(resolved_type);
+            }
+            if (!is_type_known(resolved_type)) {
                 add_error(sd->location.file + ":" + std::to_string(fd->location.line) +
                           ": unknown type '" + fd->type_name + "' in field '" +
                           fd->name + "'");
             }
-            declare(fd->name, fd->type_name, fd->is_private);
+            // Validate bitfield
+            if (fd->bit_width > 0) {
+                std::string n = normalize_type(resolved_type);
+                bool is_int_type = is_signed_int(n) || is_unsigned_int(n);
+                if (!is_int_type && n != "bool") {
+                    add_error(sd->location.file + ":" + std::to_string(fd->location.line) +
+                              ": bitfield requires integer type, got '" + fd->type_name + "'");
+                }
+                int max_bits = 0;
+                if (n == "bool") max_bits = 1;
+                else if (is_bitfield_type(n)) max_bits = parse_bitfield_width(n);
+                else if (n == "u8" || n == "i8") max_bits = 8;
+                else if (n == "u16" || n == "i16") max_bits = 16;
+                else if (n == "u32" || n == "i32" || n == "int") max_bits = 32;
+                else if (n == "u64" || n == "i64" || n == "long") max_bits = 64;
+                if (fd->bit_width > max_bits) {
+                    add_error(sd->location.file + ":" + std::to_string(fd->location.line) +
+                              ": bitfield width " + std::to_string(fd->bit_width) +
+                              " exceeds type '" + fd->type_name + "' capacity (" +
+                              std::to_string(max_bits) + " bits)");
+                }
+            }
+            declare(fd->name, resolved_type, fd->is_private);
+        }
+        // Anonymous union fields become struct fields directly
+        if (field->type == ASTNodeType::UNION_DECL) {
+            auto* ud = static_cast<UnionDecl*>(field.get());
+            for (const auto& uf : ud->fields) {
+                if (uf->type == ASTNodeType::FIELD_DECL) {
+                    auto* fd = static_cast<FieldDecl*>(uf.get());
+                    std::string resolved_type = fd->type_name;
+                    auto alias_it = type_aliases.find(resolved_type);
+                    if (alias_it != type_aliases.end()) resolved_type = alias_it->second;
+                    if (is_bitfield_type(resolved_type)) {
+                        fd->bit_width = parse_bitfield_width(resolved_type);
+                    }
+                    if (!is_type_known(resolved_type)) {
+                        add_error(ud->location.file + ":" +
+                                  std::to_string(fd->location.line) +
+                                  ": unknown type '" + fd->type_name +
+                                  "' in anonymous union field '" + fd->name + "'");
+                    }
+                    declare(fd->name, resolved_type, fd->is_private);
+                }
+                // Anonymous struct inside union is flattened too
+                if (uf->type == ASTNodeType::STRUCT_DECL) {
+                    auto* inner_sd = static_cast<StructDecl*>(uf.get());
+                    for (const auto& inner_f : inner_sd->fields) {
+                        if (inner_f->type == ASTNodeType::FIELD_DECL) {
+                            auto* inner_fd = static_cast<FieldDecl*>(inner_f.get());
+                            std::string resolved_type = inner_fd->type_name;
+                            auto alias_it = type_aliases.find(resolved_type);
+                            if (alias_it != type_aliases.end()) resolved_type = alias_it->second;
+                            if (is_bitfield_type(resolved_type)) {
+                                inner_fd->bit_width = parse_bitfield_width(resolved_type);
+                            }
+                            if (!is_type_known(resolved_type)) {
+                                add_error(ud->location.file + ":" +
+                                          std::to_string(inner_fd->location.line) +
+                                          ": unknown type '" + inner_fd->type_name +
+                                          "' in anonymous struct field '" + inner_fd->name + "'");
+                            }
+                            declare(inner_fd->name, resolved_type, inner_fd->is_private);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -379,6 +583,57 @@ void TypeChecker::check_struct(StructDecl* sd) {
 
     pop_scope();
     current_struct = "";
+}
+
+void TypeChecker::check_union(UnionDecl* ud) {
+    if (ud->is_anonymous) return;
+
+    push_scope();
+    for (const auto& field : ud->fields) {
+        if (field->type == ASTNodeType::FIELD_DECL) {
+            auto* fd = static_cast<FieldDecl*>(field.get());
+            std::string resolved_type = fd->type_name;
+            auto alias_it = type_aliases.find(resolved_type);
+            if (alias_it != type_aliases.end()) resolved_type = alias_it->second;
+            if (is_bitfield_type(resolved_type)) {
+                fd->bit_width = parse_bitfield_width(resolved_type);
+            }
+            if (lookup(fd->name)) {
+                add_error(ud->location.file + ":" + std::to_string(fd->location.line) +
+                          ": duplicate field '" + fd->name + "' in union '" +
+                          ud->name + "'");
+            }
+            if (!is_type_known(resolved_type)) {
+                add_error(ud->location.file + ":" + std::to_string(fd->location.line) +
+                          ": unknown type '" + fd->type_name + "' in field '" +
+                          fd->name + "'");
+            }
+            declare(fd->name, resolved_type, fd->is_private);
+        }
+        // Anonymous struct inside named union (e.g., union Tag { u32 raw; struct { u24 addr; u8 size; } })
+        if (field->type == ASTNodeType::STRUCT_DECL) {
+            auto* inner_sd = static_cast<StructDecl*>(field.get());
+            for (const auto& inner_f : inner_sd->fields) {
+                if (inner_f->type == ASTNodeType::FIELD_DECL) {
+                    auto* inner_fd = static_cast<FieldDecl*>(inner_f.get());
+                    std::string resolved_type = inner_fd->type_name;
+                    auto alias_it = type_aliases.find(resolved_type);
+                    if (alias_it != type_aliases.end()) resolved_type = alias_it->second;
+                    if (is_bitfield_type(resolved_type)) {
+                        inner_fd->bit_width = parse_bitfield_width(resolved_type);
+                    }
+                    if (!is_type_known(resolved_type)) {
+                        add_error(ud->location.file + ":" +
+                                  std::to_string(inner_fd->location.line) +
+                                  ": unknown type '" + inner_fd->type_name +
+                                  "' in anonymous struct field '" + inner_fd->name + "'");
+                    }
+                    declare(inner_fd->name, resolved_type, inner_fd->is_private);
+                }
+            }
+        }
+    }
+    pop_scope();
 }
 
 void TypeChecker::check_interface(InterfaceDecl* id) {
@@ -397,6 +652,13 @@ void TypeChecker::check_interface(InterfaceDecl* id) {
         }
     }
     pop_scope();
+}
+
+void TypeChecker::check_enum(EnumDecl* ed) {
+    declare(ed->name, "int", false);
+    for (auto& variant : ed->variants) {
+        declare(variant.name, ed->name, false);
+    }
 }
 
 void TypeChecker::declare_inherited_fields(StructDecl* sd) {
@@ -592,6 +854,21 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
                         }
                     }
                 }
+            // Variable declaration without initializer: Type name
+            // Declaracao de variavel sem inicializador: Tipo nome
+            if (es->expr->type == ASTNodeType::IDENT_EXPR) {
+                auto* ident = static_cast<IdentExpr*>(es->expr.get());
+                if (!ident->declared_type.empty() && !lookup(ident->name)) {
+                    if (!is_type_known(ident->declared_type)) {
+                        add_error(es->location.file + ":" +
+                                  std::to_string(es->location.line) +
+                                  ": unknown type '" + ident->declared_type + "'");
+                    }
+                    declare(ident->name, ident->declared_type, false);
+                    ident->resolved_type = ident->declared_type;
+                    return;
+                }
+            }
             check_expression(es->expr.get());
             break;
         }
@@ -615,6 +892,68 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
                 check_statement(s.get(), return_type);
             }
             pop_scope();
+            break;
+        }
+
+        case ASTNodeType::BREAK_STMT:
+        case ASTNodeType::CONTINUE_STMT:
+            break;
+
+        case ASTNodeType::DEFER_STMT: {
+            auto* ds = static_cast<DeferStmt*>(stmt);
+            check_statement(ds->body.get(), return_type);
+            break;
+        }
+
+        case ASTNodeType::MATCH_STMT: {
+            auto* ms = static_cast<MatchStmt*>(stmt);
+            std::string val_type = check_expression(ms->value.get());
+            for (auto& arm : ms->arms) {
+                for (auto& pat : arm.patterns) {
+                    std::string pat_type = check_expression(pat.get());
+                    if (pat_type == "unknown") continue;
+                    // Wildcard pattern: "_"
+                    if (pat->type == ASTNodeType::IDENT_EXPR) {
+                        auto* ident = static_cast<IdentExpr*>(pat.get());
+                        if (ident->name == "_") continue;
+                    }
+                    if (!can_assign(val_type, pat_type) && !can_assign(pat_type, val_type)) {
+                        add_error(pat->location.file + ":" +
+                                  std::to_string(pat->location.line) +
+                                  ": match pattern type '" + pat_type +
+                                  "' does not match value type '" + val_type + "'");
+                    }
+                }
+                if (arm.guard) {
+                    std::string guard_type = check_expression(arm.guard.get());
+                    if (!can_assign(guard_type, "bool")) {
+                        add_error(arm.guard->location.file + ":" +
+                                  std::to_string(arm.guard->location.line) +
+                                  ": match guard must be bool, got '" + guard_type + "'");
+                    }
+                }
+                if (arm.body) {
+                    check_statement(arm.body.get(), return_type);
+                }
+            }
+            break;
+        }
+
+        case ASTNodeType::CONST_DECL: {
+            auto* cd = static_cast<ConstDecl*>(stmt);
+            std::string val_type = "int";
+            if (cd->value) {
+                val_type = check_expression(cd->value.get());
+            }
+            if (!cd->type_name.empty()) {
+                if (!can_assign(val_type, cd->type_name)) {
+                    add_error(cd->location.file + ":" + std::to_string(cd->location.line) +
+                              ": cannot assign '" + val_type + "' to '" + cd->type_name + "'");
+                }
+                declare(cd->name, cd->type_name, false);
+            } else {
+                declare(cd->name, val_type, false);
+            }
             break;
         }
 
@@ -694,10 +1033,42 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             std::string left_type = check_expression(bin->left.get());
             std::string right_type = check_expression(bin->right.get());
 
-            // Arithmetic operators
-            // Operadores aritmeticos
+            // Arithmetic operators (including pointer arithmetic)
+            // Operadores aritmeticos (incluindo aritmetica de ponteiros)
             if (bin->op == TokenType::PLUS || bin->op == TokenType::MINUS ||
                 bin->op == TokenType::STAR || bin->op == TokenType::SLASH) {
+                bool left_ptr = !left_type.empty() && left_type[0] == '*';
+                bool right_ptr = !right_type.empty() && right_type[0] == '*';
+
+                // Pointer arithmetic: *T ± int → *T
+                if (left_ptr && !right_ptr && (bin->op == TokenType::PLUS || bin->op == TokenType::MINUS)) {
+                    if (!can_assign(right_type, "int")) {
+                        add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                  ": pointer arithmetic requires integer offset, got '" + right_type + "'");
+                    }
+                    expr->resolved_type = left_type;
+                    return left_type;
+                }
+                // int + *T → *T (commutative for +)
+                if (right_ptr && !left_ptr && bin->op == TokenType::PLUS) {
+                    if (!can_assign(left_type, "int")) {
+                        add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                  ": pointer arithmetic requires integer offset, got '" + left_type + "'");
+                    }
+                    expr->resolved_type = right_type;
+                    return right_type;
+                }
+                // Pointer difference: *T - *T → isize
+                if (left_ptr && right_ptr && bin->op == TokenType::MINUS) {
+                    if (left_type != right_type) {
+                        add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                  ": cannot subtract pointers of different types '" +
+                                  left_type + "' and '" + right_type + "'");
+                    }
+                    expr->resolved_type = "isize";
+                    return "isize";
+                }
+
                 if (!can_assign(left_type, "int") && !can_assign(left_type, "float") &&
                     !can_assign(left_type, "i32") && !can_assign(left_type, "f64")) {
                     add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
@@ -709,11 +1080,27 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                 return result;
             }
 
-            // Comparison operators
-            // Operadores de comparacao
+            // Comparison operators (including pointer comparisons)
+            // Operadores de comparacao (incluindo comparacao de ponteiros)
             if (bin->op == TokenType::EQ || bin->op == TokenType::NEQ ||
                 bin->op == TokenType::LT || bin->op == TokenType::GT ||
                 bin->op == TokenType::LEQ || bin->op == TokenType::GEQ) {
+                // Pointer comparison: same pointer type or with null
+                bool left_ptr = !left_type.empty() && left_type[0] == '*';
+                bool right_ptr = !right_type.empty() && right_type[0] == '*';
+                if (left_ptr && right_ptr) {
+                    if (left_type != right_type) {
+                        add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                  ": cannot compare different pointer types '" +
+                                  left_type + "' and '" + right_type + "'");
+                    }
+                    expr->resolved_type = "bool";
+                    return "bool";
+                }
+                if ((left_ptr && right_type == "null") || (right_ptr && left_type == "null")) {
+                    expr->resolved_type = "bool";
+                    return "bool";
+                }
                 if (!can_assign(left_type, right_type) && !can_assign(right_type, left_type)) {
                     add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
                               ": cannot compare '" + left_type + "' and '" + right_type + "'");
@@ -747,6 +1134,29 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                 }
                 expr->resolved_type = "bool";
                 return "bool";
+            }
+            // Dereference: *ptr → base type of *T
+            if (un->op == TokenType::STAR) {
+                if (op_type.empty() || op_type[0] != '*') {
+                    add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                              ": cannot dereference non-pointer type '" + op_type + "'");
+                    expr->resolved_type = "unknown";
+                    return "unknown";
+                }
+                std::string base = op_type.substr(1);
+                expr->resolved_type = base;
+                return base;
+            }
+            // Address-of: &var → *T (special case: &fn → fn type directly)
+            if (un->op == TokenType::BIT_AND) {
+                if (op_type.rfind("fn(", 0) == 0) {
+                    // Function names are already function pointers; &fn = fn
+                    expr->resolved_type = op_type;
+                    return op_type;
+                }
+                std::string ptr_type = "*" + op_type;
+                expr->resolved_type = ptr_type;
+                return ptr_type;
             }
             expr->resolved_type = op_type;
             return op_type;
@@ -820,10 +1230,25 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                     }
                 }
 
-                // Regular function call
-                // Chamada de funcao normal
-                expr->resolved_type = "int"; // default fallback
-                                             // fallback padrao
+                // Function pointer call through variable
+                // Chamada via ponteiro de funcao
+                if (call->callee->type == ASTNodeType::IDENT_EXPR) {
+                    auto* fn_ident = static_cast<IdentExpr*>(call->callee.get());
+                    auto* sym = lookup(fn_ident->name);
+                    if (sym && sym->type.rfind("fn(", 0) == 0) {
+                        // Extract return type from fn(params)->ret
+                        std::string fn_type = sym->type;
+                        auto arrow = fn_type.rfind(")->");
+                        if (arrow != std::string::npos) {
+                            std::string ret_type = fn_type.substr(arrow + 3);
+                            expr->resolved_type = ret_type.empty() ? "void" : ret_type;
+                            return expr->resolved_type;
+                        }
+                    }
+                }
+
+                // Regular function call (default fallback)
+                expr->resolved_type = "int";
                 return "int";
             }
 
@@ -893,33 +1318,92 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                 base_type.pop_back();
             }
 
-            if (is_struct_type(base_type)) {
-                auto* sd = struct_defs[base_type];
-                for (const auto& field : sd->fields) {
-                    if (field->type == ASTNodeType::FIELD_DECL) {
-                        auto* fd = static_cast<FieldDecl*>(field.get());
-                        if (fd->name == mem->member) {
-                            expr->resolved_type = fd->type_name;
-                            return fd->type_name;
+            if (is_struct_type(base_type) || is_union_type(base_type)) {
+                // Check struct/union fields, including anonymous union/struct members
+                // Verifica campos de struct/union, incluindo membros anonimos
+                auto check_fields = [&](const auto& fields) -> bool {
+                    for (const auto& field : fields) {
+                        if (field->type == ASTNodeType::FIELD_DECL) {
+                            auto* fd = static_cast<FieldDecl*>(field.get());
+                            if (fd->name == mem->member) {
+                                expr->resolved_type = fd->type_name;
+                                return true;
+                            }
+                        }
+                        // Anonymous union: fields are directly accessible
+                        if (field->type == ASTNodeType::UNION_DECL) {
+                            auto* ud = static_cast<UnionDecl*>(field.get());
+                            for (const auto& uf : ud->fields) {
+                                if (uf->type == ASTNodeType::FIELD_DECL) {
+                                    auto* fd = static_cast<FieldDecl*>(uf.get());
+                                    if (fd->name == mem->member) {
+                                        expr->resolved_type = fd->type_name;
+                                        return true;
+                                    }
+                                }
+                                // Anonymous struct inside union
+                                if (uf->type == ASTNodeType::STRUCT_DECL) {
+                                    auto* inner_sd = static_cast<StructDecl*>(uf.get());
+                                    for (const auto& inner_f : inner_sd->fields) {
+                                        if (inner_f->type == ASTNodeType::FIELD_DECL) {
+                                            auto* inner_fd = static_cast<FieldDecl*>(inner_f.get());
+                                            if (inner_fd->name == mem->member) {
+                                                expr->resolved_type = inner_fd->type_name;
+                                                return true;
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        // Anonymous struct: fields are directly accessible
+                        if (field->type == ASTNodeType::STRUCT_DECL) {
+                            auto* inner_sd = static_cast<StructDecl*>(field.get());
+                            for (const auto& inner_f : inner_sd->fields) {
+                                if (inner_f->type == ASTNodeType::FIELD_DECL) {
+                                    auto* inner_fd = static_cast<FieldDecl*>(inner_f.get());
+                                    if (inner_fd->name == mem->member) {
+                                        expr->resolved_type = inner_fd->type_name;
+                                        return true;
+                                    }
+                                }
+                            }
                         }
                     }
-                }
+                    return false;
+                };
 
-                // Check if it's a method reference
-                // Verifica se e uma referencia de metodo
-                for (const auto& method : sd->methods) {
-                    if (method->type == ASTNodeType::FUNC_DECL) {
-                        auto* func = static_cast<FuncDecl*>(method.get());
-                        if (func->name == mem->member) {
-                            expr->resolved_type = "fn";
-                            return "fn";
+                if (is_struct_type(base_type)) {
+                    auto* sd = struct_defs[base_type];
+                    if (check_fields(sd->fields)) return expr->resolved_type;
+
+                    // Check methods
+                    // Verifica metodos
+                    for (const auto& method : sd->methods) {
+                        if (method->type == ASTNodeType::FUNC_DECL) {
+                            auto* func = static_cast<FuncDecl*>(method.get());
+                            if (func->name == mem->member) {
+                                expr->resolved_type = "fn";
+                                return "fn";
+                            }
                         }
                     }
-                }
 
-                add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
-                          ": struct '" + base_type + "' has no member '" +
-                          mem->member + "'");
+                    add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                              ": struct '" + base_type + "' has no member '" +
+                              mem->member + "'");
+                } else {
+                    auto it = union_defs.find(base_type);
+                    if (it == union_defs.end()) {
+                        add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                  ": unknown union type '" + base_type + "'");
+                    } else {
+                        if (check_fields(it->second->fields)) return expr->resolved_type;
+                        add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                  ": union '" + base_type + "' has no member '" +
+                                  mem->member + "'");
+                    }
+                }
             } else {
                 add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
                           ": cannot access member of non-struct type '" + obj_type + "'");
@@ -947,6 +1431,14 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                 return elem_type;
             }
 
+            // Pointer indexing: *T -> T (e.g., *int p; p[0] -> int)
+            // Indexacao de ponteiro: *T -> T (ex: *int p; p[0] -> int)
+            if (!arr_type.empty() && arr_type[0] == '*') {
+                std::string elem_type = arr_type.substr(1);
+                expr->resolved_type = elem_type;
+                return elem_type;
+            }
+
             expr->resolved_type = arr_type;
             return arr_type;
         }
@@ -955,6 +1447,20 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             auto* assign = static_cast<Assignment*>(expr);
             std::string target_type = check_expression(assign->target.get());
             std::string value_type = check_expression(assign->value.get());
+
+            // Pointer compound assignment: *T += int / *T -= int (pointer arithmetic)
+            // Atribuicao composta com ponteiro: *T += int / *T -= int (aritmetica de ponteiro)
+            bool target_ptr = !target_type.empty() && target_type[0] == '*';
+            if (target_ptr && (assign->op == TokenType::PLUS_ASSIGN ||
+                               assign->op == TokenType::MINUS_ASSIGN)) {
+                if (!can_assign(value_type, "int")) {
+                    add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                              ": pointer arithmetic requires integer offset, got '" +
+                              value_type + "'");
+                }
+                expr->resolved_type = target_type;
+                return target_type;
+            }
 
             // Check if unsuffixed literal fits in target type
             // Verifica se literal sem sufixo cabe no tipo destino

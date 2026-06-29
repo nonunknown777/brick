@@ -1,5 +1,5 @@
 # Build: All test binaries + test alias
-Import('env', 'platform_libs', 'has_hotreload', 'has_x11', 'is_cross')
+Import('env', 'platform_libs', 'has_hotreload', 'has_x11', 'is_cross', 'target')
 
 test_bins = []
 
@@ -39,13 +39,17 @@ test_bins.append(build_test('test_macros',  ['test_macros.cpp'],
 # ─── Optimization tests ──────────────────────────────────────
 test_bins.append(build_test('test_pool_allocator', ['test_pool_allocator.c'],
                             ['brick_runtime']))
+
+if target == 'windows':
+    test_bins.append(build_test('test_windows', ['test_windows.c'],
+                                ['brick_runtime']))
 test_bins.append(build_test('test_tls_block', ['test_tls_block.c'],
                             ['brick_runtime']))
 test_bins.append(build_test('test_double_buffer', ['test_double_buffer.c'],
                             ['brick_runtime']))
 
 # ─── Window library tests (X11) ─────────────────────────────
-if has_x11:
+if target != 'windows' and has_x11:
     env_win = env.Clone()
     env_win.ParseConfig('pkg-config --cflags --libs x11')
 
@@ -73,16 +77,18 @@ if has_x11:
 
 # ─── Alias: test (build + run, native only) ─────────────────
 if not is_cross:
+    import os
     for tb in test_bins:
-        name = str(tb[0]).split('/')[-1]
+        name = os.path.basename(str(tb[0]))
         run = env.Command(f'.run_{name}', tb, str(tb[0].path))
         env.AlwaysBuild(run)
         env.Alias('test', run)
 
-    # Also run shell-based error tests
-    macro_error_run = env.Command('.run_macro_errors', [],
-        f'{root_dir}/tests/test_macro_errors.sh')
-    env.AlwaysBuild(macro_error_run)
-    env.Alias('test', macro_error_run)
+    # Also run shell-based error tests (Linux only for now)
+    if target != 'windows':
+        macro_error_run = env.Command('.run_macro_errors', [],
+            f'{root_dir}/tests/test_macro_errors.sh')
+        env.AlwaysBuild(macro_error_run)
+        env.Alias('test', macro_error_run)
 
 Return('test_bins')

@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Hot Reload — Brick</title>
+<meta name="description" content="Brick hot reload documentation">
+<link rel="stylesheet" href="style.css">
+<link rel="stylesheet" href="doc-style.css">
+</head>
+<body>
+
+<nav class="doc-nav">
+  <div class="nav-inner">
+    <a href="index.html" class="nav-logo">Brick</a>
+    <div class="nav-links">
+      <a href="LANGUAGE.html">Language</a>
+      <a href="MACROS.html">Macros</a>
+      <a href="ARCHITECTURE.html">Architecture</a>
+      <a href="GETTING_STARTED.html">Getting Started</a>
+      <a href="OPTIMIZATIONS.html">Optimizations</a>
+      <a href="hot-reload.html">Hot Reload</a>
+      <a href="index.html" class="nav-back">← Home</a>
+    </div>
+  </div>
+</nav>
+
+<main class="doc-main">
+  <div class="container doc-content">
+<h1>Brick Hot Reload</h1>
+<blockquote>
+<p>Swap code without stopping your program.</p>
+</blockquote>
+<h2>Overview</h2>
+<p>Hot reload lets you edit your <code>.brc</code> code, save, and see the result <strong>without restarting</strong> the program. Useful for game jams, live editors, and any situation where downtime is unacceptable.</p>
+<div class="code-block"><pre class="">Edit .brc   →  save   →  compile to .so/.dll   →  load   →  function swapped atomically
+</pre></div>
+<h2>How It Works</h2>
+<h3>Architecture</h3>
+<p>Hot reload is cross-platform, using OS-specific primitives:</p>
+<table>
+<thead>
+<tr><th>Platform</th><th>Dynamic Loading</th><th>File Watching</th><th>Atomic Swap</th></tr>
+</thead>
+<tbody>
+<tr><td>**Linux**</td><td>`dlopen` + `dlsym`</td><td>`inotify`</td><td>`__atomic_store_n`</td></tr>
+<tr><td>**Windows**</td><td>`LoadLibraryA` + `GetProcAddress`</td><td>`ReadDirectoryChangesW` (overlapped I/O)</td><td>`InterlockedExchange`</td></tr>
+</tbody>
+</table>
+<p>The hot reload engine runs in a <strong>separate thread</strong> (<code>pthread</code> on Linux, <code>CreateThread</code> on Windows), watching the <code>.so</code>/<code>.dll</code> directory. When it detects a change, it:</p>
+<ol>
+<li><strong>Copies</strong> the shared library to a temp file (dlopen caches by path; a copy bypasses the cache)</li>
+<li><strong>Loads</strong> the new library via <code>dlopen</code> (Linux) or <code>LoadLibraryA</code> (Windows)</li>
+<li><strong>Atomic swap</strong>: updates all registered function pointers atomically</li>
+<li><strong>Closes</strong> the old library with <code>dlclose</code> (Linux) or <code>FreeLibrary</code> (Windows)</li>
+<li>Fires the <strong>callback</strong> notification</li>
+</ol>
+<h3>States</h3>
+<table>
+<thead>
+<tr><th>State</th><th>Meaning</th></tr>
+</thead>
+<tbody>
+<tr><td>`HR_WAITING`</td><td>Waiting for initial load</td></tr>
+<tr><td>`HR_LOADING`</td><td>Loading new .so</td></tr>
+<tr><td>`HR_OK`</td><td>Ready</td></tr>
+<tr><td>`HR_ERROR`</td><td>dlopen failure</td></tr>
+</tbody>
+</table>
+<h2>How to Use</h2>
+<h3>Compile with hot reload support</h3>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>brick<span style="color: #F8F8F2"> </span>build<span style="color: #F8F8F2"> </span>game.brc<span style="color: #F8F8F2"> </span>--release<span style="color: #F8F8F2"> </span>-o<span style="color: #F8F8F2"> </span>game
+</pre></div>
+</pre></div>
+<p>The <code>--release</code> flag compiles each package as a separate .so.</p>
+<h3>Run</h3>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span>./game
+</pre></div>
+</pre></div>
+<p>The hot reload engine watches the .so files in the background.</p>
+<h3>Edit and see results</h3>
+<p>Edit your <code>.brc</code>, save, and the binary reloads automatically. The function swap is <strong>atomic</strong> — there's no moment where the pointer points nowhere.</p>
+<h3>Typical development cycle</h3>
+<div class="code-block"><pre class="language-bash"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span><span style="color: #959077"># Terminal 1: compile and run</span>
+brick<span style="color: #F8F8F2"> </span>build<span style="color: #F8F8F2"> </span>mygame.brc<span style="color: #F8F8F2"> </span>--release<span style="color: #F8F8F2"> </span>-o<span style="color: #F8F8F2"> </span>mygame
+./mygame
+
+<span style="color: #959077"># Terminal 2: edit code</span>
+vim<span style="color: #F8F8F2"> </span>mygame.brc<span style="color: #F8F8F2">    </span><span style="color: #959077"># make changes</span>
+<span style="color: #959077"># compile new version</span>
+brick<span style="color: #F8F8F2"> </span>build<span style="color: #F8F8F2"> </span>mygame.brc<span style="color: #F8F8F2"> </span>--release<span style="color: #F8F8F2"> </span>-o<span style="color: #F8F8F2"> </span>mygame
+<span style="color: #959077"># → hot reload detects the new .so and swaps functions automatically</span>
+</pre></div>
+</pre></div>
+<h2>Hot Reload API</h2>
+<h3>For end users</h3>
+<p>Just use <code>brick build --release</code>. The compiler generates the .so files and the runtime handles the rest.</p>
+<h3>For C integration</h3>
+<div class="code-block"><pre class="language-c"><div class="highlight" style="background: #272822"><pre style="line-height: 125%;"><span></span><span style="color: #959077">#include</span><span style="color: #F8F8F2"> </span><span style="color: #959077">&quot;hot_reload.h&quot;</span>
+
+<span style="color: #959077">// 1. Create the engine</span>
+<span style="color: #F8F8F2">HotReloadEngine</span><span style="color: #FF4689">*</span><span style="color: #F8F8F2"> hr </span><span style="color: #FF4689">=</span><span style="color: #F8F8F2"> hr_create(</span><span style="color: #E6DB74">&quot;./build/mylib.so&quot;</span><span style="color: #F8F8F2">);</span>
+
+<span style="color: #959077">// 2. Register functions to be swapped</span>
+<span style="color: #66D9EF">void</span><span style="color: #F8F8F2"> (</span><span style="color: #FF4689">*</span><span style="color: #F8F8F2">my_func)(</span><span style="color: #66D9EF">void</span><span style="color: #F8F8F2">) </span><span style="color: #FF4689">=</span><span style="color: #F8F8F2"> NULL;</span>
+<span style="color: #F8F8F2">hr_register_func(hr, </span><span style="color: #E6DB74">&quot;my_function&quot;</span><span style="color: #F8F8F2">, (</span><span style="color: #66D9EF">void</span><span style="color: #FF4689">**</span><span style="color: #F8F8F2">)</span><span style="color: #FF4689">&amp;</span><span style="color: #F8F8F2">my_func);</span>
+
+<span style="color: #959077">// 3. Load initial version</span>
+<span style="color: #F8F8F2">hr_load_initial(hr);</span>
+
+<span style="color: #959077">// 4. Start monitoring (inotify in separate thread)</span>
+<span style="color: #F8F8F2">hr_start_watching(hr);</span>
+
+<span style="color: #959077">// 5. (optional) Callback after each reload</span>
+<span style="color: #F8F8F2">hr_set_callback(hr, my_callback);</span>
+
+<span style="color: #959077">// ... your program runs, edit the .so, and functions are swapped ...</span>
+
+<span style="color: #959077">// 6. Cleanup</span>
+<span style="color: #F8F8F2">hr_destroy(hr);</span>
+</pre></div>
+</pre></div>
+<h3>API Functions</h3>
+<table>
+<thead>
+<tr><th>Function</th><th>Description</th></tr>
+</thead>
+<tbody>
+<tr><td>`hr_create(path)`</td><td>Creates hot reload engine</td></tr>
+<tr><td>`hr_register_func(hr, name, ptr)`</td><td>Registers function for swap</td></tr>
+<tr><td>`hr_load_initial(hr)`</td><td>Loads initial symbols</td></tr>
+<tr><td>`hr_start_watching(hr)`</td><td>Starts inotify monitoring</td></tr>
+<tr><td>`hr_reload(hr)`</td><td>Forces manual reload</td></tr>
+<tr><td>`hr_state(hr)`</td><td>Returns current state</td></tr>
+<tr><td>`hr_set_callback(hr, cb)`</td><td>Sets post-reload callback</td></tr>
+<tr><td>`hr_destroy(hr)`</td><td>Cleans up resources</td></tr>
+</tbody>
+</table>
+<h2>Implementation Details</h2>
+<h3>Atomic swap</h3>
+<p>We use <code>__atomic_store</code> with <code>__ATOMIC_SEQ_CST</code> to ensure all function pointers are updated atomically. Readers always see a valid pointer.</p>
+<h3>Block freeze</h3>
+<p>During reload, the runtime <strong>freezes all block allocations</strong> (<code>block_freeze()</code>). No new allocations happen during the swap. After the swap, blocks are thawed (<code>block_thaw()</code>).</p>
+<h3>Cache busting</h3>
+<p>dlopen caches by file path. To ensure a new version is loaded, we copy the .so to a temporary path before calling dlopen.</p>
+<h3>Rollback</h3>
+<p>If dlopen of the new version fails, the system keeps the old handle and the function pointers untouched. The program continues running with the previous version.</p>
+<h3>Safety delay</h3>
+<p>A 50ms <code>nanosleep</code> between change detection and reload ensures the .so file write has completed fully.</p>
+<h2>Best Practices</h2>
+<ul>
+<li><strong>Stable data structures</strong>: don't change struct layout between versions (ABI must be compatible)</li>
+<li><strong>Minimal global state</strong>: global variables aren't reloaded — pass state via structs</li>
+<li><strong>Callbacks</strong>: use <code>hr_set_callback</code> to reconfigure state after each reload</li>
+</ul>
+<h2>Limitations</h2>
+<table>
+<thead>
+<tr><th>Limitation</th><th>Reason</th><th>Workaround</th></tr>
+</thead>
+<tbody>
+<tr><td>.so/.dll per package</td><td>Each package becomes a separate shared library</td><td>Organize packages by module</td></tr>
+<tr><td>Data doesn't reload</td><td>Only code (functions) is swapped</td><td>Use stable structs</td></tr>
+<tr><td>ABI must be compatible</td><td>Function pointers expect the same signature</td><td>Freeze the public interface</td></tr>
+</tbody>
+</table>
+<h2>Comparison</h2>
+<table>
+<thead>
+<tr><th>Brick Hot Reload</th><th>Live++ / C++ Modules</th></tr>
+</thead>
+<tbody>
+<tr><td>Atomic function pointer swap</td><td>Full TU recompilation</td></tr>
+<tr><td>No runtime cost when not in use</td><td>Instrumentation overhead</td></tr>
+<tr><td>Pure C, no C++ runtime</td><td>Requires C++ runtime</td></tr>
+<tr><td>Simple and predictable</td><td>Complex and state of the art</td></tr>
+</tbody>
+</table>
+<h2>Full Example</h2>
+<p>See <code>tests/test_hot_reload.c</code> and <code>tests/test_libs_window_hr.c</code> for complete API usage examples.</p>
+
+  </div>
+</main>
+
+<footer>
+  <p>Brick — MIT License</p>
+  <p><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
+</footer>
+
+</body>
+</html>

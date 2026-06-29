@@ -7,27 +7,26 @@
 Hot reload permite editar seu código `.brc`, salvar, e ver o resultado **sem reiniciar** o programa. Útil para game jams, editores ao vivo, e qualquer situação onde downtime é inaceitável.
 
 ```
-Edita .brc  →  salva  →  compila pra .so  →  dlopen carrega  →  função trocada atomicamente
+Edita .brc  →  salva  →  compila pra .so/.dll  →  carrega  →  função trocada atomicamente
 ```
 
 ## Como Funciona
 
 ### Arquitetura
 
-O hot reload usa 3 primitivas do Linux:
+O hot reload é multiplataforma, usando primitivas específicas de cada SO:
 
-| Primitiva | Função |
-|---|---|
-| `dlopen` + `dlsym` | Carrega nova versão do .so e extrai símbolos |
-| `inotify` | Monitora o arquivo .so por modificações |
-| `__atomic_store` | Troca ponteiros de função atomicamente |
+| Plataforma | Carregamento Dinâmico | Monitoramento | Swap Atômico |
+|---|---|---|---|
+| **Linux** | `dlopen` + `dlsym` | `inotify` | `__atomic_store_n` |
+| **Windows** | `LoadLibraryA` + `GetProcAddress` | `ReadDirectoryChangesW` (I/O overlapped) | `InterlockedExchange` |
 
-O motor de hot reload roda em uma **thread separada**, monitorando o diretório do .so. Quando detecta uma mudança (`IN_CLOSE_WRITE`), ele:
+O motor de hot reload roda em uma **thread separada** (`pthread` no Linux, `CreateThread` no Windows), monitorando o diretório do .so/.dll. Quando detecta uma mudança, ele:
 
-1. **Copia** o .so pra um arquivo temporário (dlopen cacheia por path, então copia contorna o cache)
-2. **dlopen** o novo .so
-3. **Swap atômico**: atualiza todos os ponteiros de função registrados com `__atomic_store`
-4. **Fecha** o .so antigo com `dlclose`
+1. **Copia** a biblioteca compartilhada pra um arquivo temporário (dlopen cacheia por path, então copia contorna o cache)
+2. **Carrega** a nova biblioteca via `dlopen` (Linux) ou `LoadLibraryA` (Windows)
+3. **Swap atômico**: atualiza todos os ponteiros de função registrados atomicamente
+4. **Fecha** a biblioteca antiga com `dlclose` (Linux) ou `FreeLibrary` (Windows)
 5. Dispara o **callback** de notificação
 
 ### Estados
@@ -115,7 +114,7 @@ hr_destroy(hr);
 | `hr_create(path)` | Cria motor de hot reload |
 | `hr_register_func(hr, name, ptr)` | Registra função para swap |
 | `hr_load_initial(hr)` | Carrega símbolos iniciais |
-| `hr_start_watching(hr)` | Inicia monitoramento com inotify |
+| `hr_start_watching(hr)` | Inicia monitoramento (inotify no Linux, ReadDirectoryChangesW no Windows) |
 | `hr_reload(hr)` | Força recarga manual |
 | `hr_state(hr)` | Retorna estado atual |
 | `hr_set_callback(hr, cb)` | Define callback pós-reload |
@@ -133,11 +132,11 @@ Durante o reload, o runtime congela todas as **alocações em blocos** (`block_f
 
 ### Cache busting
 
-dlopen cacheia por path de arquivo. Para garantir que uma nova versão seja carregada, copiamos o .so para um path temporário antes de chamar dlopen.
+dlopen (Linux) cacheia por path de arquivo. Para garantir que uma nova versão seja carregada, copiamos a biblioteca compartilhada para um path temporário antes de chamar dlopen/LoadLibrary.
 
 ### Rollback
 
-Se o dlopen da nova versão falhar, o sistema mantém o handle antigo e os ponteiros de função intocados. O programa continua rodando com a versão anterior.
+Se o carregamento da nova versão falhar, o sistema mantém o handle antigo e os ponteiros de função intocados. O programa continua rodando com a versão anterior.
 
 ### Atraso de segurança
 
@@ -153,8 +152,7 @@ Um `nanosleep` de 50ms entre a detecção de mudança e o reload garante que a e
 
 | Limitação | Motivo | Alternativa |
 |---|---|---|
-| Só Linux | dlopen + inotify são POSIX | Windows support planejado |
-| .so por package | Cada package vira um .so separado | Organize packages por módulo |
+| .so/.dll por package | Cada package vira uma biblioteca compartilhada separada | Organize packages por módulo |
 | Dados não recarregam | Só código (funções) é trocado | Use structs estáveis |
 | ABI deve ser compatível | Ponteiros de função esperam mesma assinatura | Congele a interface pública |
 

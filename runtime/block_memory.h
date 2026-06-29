@@ -4,6 +4,29 @@
 #include <stddef.h>
 #include <stdint.h>
 
+// ─── Platform portability macros ────────────────────────────
+#if defined(_MSC_VER)
+#  define BRICK_PACKED_STRUCT __pragma(pack(push, 1)) struct __pragma(pack(pop))
+#  define BRICK_PACKED_ATTR
+#  define BRICK_TLS __declspec(thread)
+#  define BRICK_ALIGNED(n) __declspec(align(n))
+#elif defined(__MINGW32__) || defined(__MINGW64__)
+#  define BRICK_PACKED_STRUCT struct __attribute__((packed))
+#  define BRICK_PACKED_ATTR __attribute__((packed))
+#  define BRICK_TLS __thread
+#  define BRICK_ALIGNED(n) __attribute__((aligned(n)))
+#elif defined(__GNUC__) || defined(__clang__)
+#  define BRICK_PACKED_STRUCT struct __attribute__((packed))
+#  define BRICK_PACKED_ATTR __attribute__((packed))
+#  define BRICK_TLS __thread
+#  define BRICK_ALIGNED(n) __attribute__((aligned(n)))
+#else
+#  define BRICK_PACKED_STRUCT struct
+#  define BRICK_PACKED_ATTR
+#  define BRICK_TLS
+#  define BRICK_ALIGNED(n)
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -42,7 +65,7 @@ typedef struct {
 
 #define BRICK_SHM_MAGIC 0x4D455441  // "META"
 
-typedef struct __attribute__((packed)) {
+typedef BRICK_PACKED_STRUCT {
     uint32_t magic;
     uint32_t version;
     int32_t  pid;
@@ -121,7 +144,7 @@ void block_thaw(void);
 // Declara um ponteiro de bloco atual thread-local
 // Each thread can have its own current block, avoiding locks
 // Cada thread pode ter seu proprio bloco atual, evitando locks
-extern __thread BlockCtx* _tls_current_block;
+extern BRICK_TLS BlockCtx* _tls_current_block;
 
 // Set the current thread-local block
 // Define o bloco atual thread-local
