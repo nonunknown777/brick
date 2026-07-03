@@ -1,0 +1,14 @@
+package TEST
+
+using IO
+
+block global = 1MB
+
+fn main() {
+    int x = 42
+    if (x > 10) {
+        print("big")
+    } else {
+        print("small")
+    }
+}

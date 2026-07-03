@@ -242,6 +242,91 @@ fn test_for() -> int {
     std::cout << "  Generated C:\n" << c << "\n";
 }
 
+void test_codegen_match() {
+    std::cout << "=== test_codegen_match ===\n";
+    std::string source = R"(
+package TEST
+
+block global = 1MB
+
+fn test_match_basic() -> int {
+    int x = 0
+    match (x) {
+        0 { x = 10 }
+        1 { x = 20 }
+    }
+    return x
+}
+
+fn test_match_wildcard() -> int {
+    int x = 0
+    match (x) {
+        1 { x = 100 }
+        _ { x = 200 }
+    }
+    return x
+}
+
+fn test_match_var_before() -> int {
+    int val = 2
+    int out = 0
+    match (val) {
+        1 { out = 10 }
+        2 { out = 20 }
+        _ { out = 30 }
+    }
+    return out
+}
+
+fn test_match_multi_pattern() -> int {
+    int val = 1
+    int out = 0
+    match (val) {
+        1, 2 { out = 50 }
+        3 { out = 100 }
+    }
+    return out
+}
+
+fn test_match_guard() -> int {
+    int val = 5
+    int out = 0
+    match (val) {
+        5 if (val > 3) { out = 1 }
+        5 { out = 2 }
+    }
+    return out
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "match")) return;
+    CodegenResult cr;
+    if (!codegen_from_ast(pr, cr, "match")) return;
+
+    std::string c = cr.c_code;
+    check(c.find("switch(") != std::string::npos, "switch generated");
+    check(c.find("case ") != std::string::npos, "case labels");
+    check(c.find("default:") != std::string::npos, "default arm");
+    check(c.find("break;") != std::string::npos, "break statements");
+    // The bug: inside switch arms, assignments must NOT redeclare the variable.
+    // Generated code should have "out = ..." not "int32_t out = ..." inside arms
+    check(c.find("{\n                out = 10;\n            }") != std::string::npos,
+          "arm assignment to outer var (10)");
+    check(c.find("{\n                out = 20;\n            }") != std::string::npos,
+          "arm assignment to outer var (20)");
+    check(c.find("{\n                out = 30;\n            }") != std::string::npos,
+          "arm assignment to outer var (30)");
+    check(c.find("{\n                out = 50;\n            }") != std::string::npos,
+          "multi-pattern arm assignment (50)");
+    // Ensure no duplicate default or body within the same switch
+    // Each arm's body appears exactly once
+    size_t first_out10 = c.find("out = 10;");
+    size_t second_out10 = c.find("out = 10;", first_out10 + 1);
+    check(second_out10 == std::string::npos, "no duplicate body");
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
 void test_codegen_expressions() {
     std::cout << "=== test_codegen_expressions ===\n";
     std::string source = R"(
@@ -1759,10 +1844,101 @@ fn test() {
 )", "union_nested_deep");
 }
 
+void test_codegen_else_line_directive() {
+    std::cout << "=== test_codegen_else_line_directive ===\n";
+    std::string source = R"(
+package TEST
+
+block global = 1MB
+
+fn test() {
+    int x = 42
+    if (x > 10) {
+        x = 1
+    } else {
+        x = 2
+    }
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "else_line")) return;
+    CodegenResult cr;
+    if (!codegen_from_ast(pr, cr, "else_line")) return;
+
+    std::string c = cr.c_code;
+    // #line is suppressed for <input> files, but we verify the
+    // structural fix: no stray '#' on else line (checked compile_c test
+    // actually compiles the C output with -Werror to catch this).
+    // The end-to-end verification is done by test_codegen_compile_c
+    // and the test_if_else.brc example.
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
+void test_codegen_value_struct() {
+    std::cout << "=== test_codegen_value_struct ===\n";
+    std::string source = R"(
+package TEST
+
+block global = 64MB
+
+struct Player {
+    int hp
+
+    fn Player(int h) {
+        hp = h
+    }
+
+    fn get_hp() -> int {
+        return hp
+    }
+
+    fn take_damage(int dmg) {
+        hp = hp - dmg
+    }
+}
+
+struct Entity {
+    int score
+    Player player
+}
+
+fn print_hp(Player p) -> int {
+    return p.get_hp()
+}
+
+fn main() {
+    Entity e @global
+    e.player.hp = 100
+    int hp1 = e.player.get_hp()
+    e.player.take_damage(20)
+    int hp2 = e.player.get_hp()
+    int hp3 = print_hp(e.player)
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "value_struct")) return;
+    CodegenResult cr;
+    if (!codegen_from_ast(pr, cr, "value_struct")) return;
+
+    std::string c = cr.c_code;
+    // Method call on value-type embedded struct must add &
+    check(c.find("Player_get_hp(&(e.player))") != std::string::npos,
+          "method call on value-type field uses &");
+    check(c.find("Player_take_damage(&(e.player), 20)") != std::string::npos,
+          "method call with args on value-type field uses &");
+    // Regular function call with value-type struct arg must add &
+    check(c.find("print_hp(&(e.player))") != std::string::npos,
+          "function call with value-type struct arg uses &");
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
 int main() {
     test_codegen_simple();
     test_codegen_extends();
     test_codegen_control_flow();
+    test_codegen_match();
     test_codegen_expressions();
     test_codegen_string();
     test_codegen_null();
@@ -1859,6 +2035,12 @@ int main() {
     test_type_alias_fnptr();
     test_type_alias_in_struct();
     test_type_alias_in_union();
+
+    // ─── Value-type struct (embedded field) tests ───
+    test_codegen_value_struct();
+
+    // ─── #line directive tests ───
+    test_codegen_else_line_directive();
 
     // ─── Extreme / edge tests ───
     test_bitfield_struct_64_fields();

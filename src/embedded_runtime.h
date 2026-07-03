@@ -45,8 +45,8 @@ extern const char _runtime_libs_window_window_hr_h[];
 extern const size_t _runtime_libs_window_window_hr_h_len;
 extern const char _runtime_hot_reload_c[];
 extern const size_t _runtime_hot_reload_c_len;
-extern const char _runtime_libs_window_window_win32_c[];
-extern const size_t _runtime_libs_window_window_win32_c_len;
+extern const char _runtime_libs_window_window_linux_c[];
+extern const size_t _runtime_libs_window_window_linux_c_len;
 extern const char _runtime_libs_window_window_hr_c[];
 extern const size_t _runtime_libs_window_window_hr_c_len;
 

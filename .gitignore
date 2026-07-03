@@ -15,6 +15,8 @@ meus-testes/main
 # Generated C from .brc compilation
 hello.c
 meus-testes/main.c
+test_*.c
+test_output*.c
 
 # VS Code (personal IDE settings)
 .vscode/

@@ -566,7 +566,7 @@ int main(int argc, char** argv) {
             std::cerr << "error: could not create temp directory\n";
             return 1;
         }
-        std::string bin = tmpdir + PATH_SEP_STR + "prog" + prog_suffix;
+        std::string bin = tmpdir + PATH_SEP_STR + "prog" + get_prog_suffix();
         int ret = cmd_build(input_file, bin, false, false);
         if (ret != 0) {
 #if defined(_WIN32)

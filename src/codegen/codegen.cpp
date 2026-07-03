@@ -188,7 +188,7 @@ private:
                 // Normalize path separators for cross-platform #line directives
                 std::string f = loc.file;
                 for (auto& c : f) if (c == '\\') c = '/';
-                out << "#line " << loc.line << " \"" << f << "\"\n";
+                out << "\n#line " << loc.line << " \"" << f << "\"\n";
             }
             current_line = loc.line;
             current_file = loc.file;
@@ -744,10 +744,6 @@ private:
                             auto* ident = static_cast<IdentExpr*>(pat);
                             if (ident->name == "_") {
                                 indent(); out << "default:\n";
-                                indent_level++;
-                                if (arm.body) gen_statement(arm.body.get());
-                                indent(); out << "break;\n";
-                                indent_level--;
                                 continue;
                             }
                         }
@@ -854,9 +850,15 @@ private:
                     return;
                 }
 
-                std::string var_key = std::to_string(scope_depth) + ":" + ident->name;
-                if (declared_vars.find(var_key) == declared_vars.end()) {
-                    declared_vars.insert(var_key);
+                // Check if variable exists in ANY enclosing scope (not just current)
+                auto var_exists_in_any_scope = [&](const std::string& name) -> bool {
+                    for (int d = scope_depth; d >= 0; d--)
+                        if (declared_vars.count(std::to_string(d) + ":" + name))
+                            return true;
+                    return false;
+                };
+                if (!var_exists_in_any_scope(ident->name)) {
+                    declared_vars.insert(std::to_string(scope_depth) + ":" + ident->name);
                     std::string brick_type = ident->resolved_type.empty()
                         ? "int" : ident->resolved_type;
                     bool is_fnptr = brick_type.rfind("fn(", 0) == 0;
@@ -1152,7 +1154,14 @@ private:
 
                         if (struct_map.count(base_type)) {
                             out << mangle_name(base_type, mem->member) << "(";
+                            // Struct methods expect Type* this
+                            // Pass &obj if obj is a value (not already a pointer variable)
+                            bool obj_is_ptr = (!obj_type.empty() && obj_type.back() == '*');
+                            if (!obj_is_ptr && mem->object->type == ASTNodeType::IDENT_EXPR)
+                                obj_is_ptr = pointer_vars.count(static_cast<IdentExpr*>(mem->object.get())->name);
+                            if (!obj_is_ptr) out << "&(";
                             gen_expression(mem->object.get());
+                            if (!obj_is_ptr) out << ")";
                             for (size_t i = 0; i < call->arguments.size(); i++) {
                                 out << ", ";
                                 gen_expression(call->arguments[i].get());
@@ -1239,7 +1248,19 @@ private:
                             for (size_t i = 0; i < target_fd->params.size(); i++) {
                                 if (i > 0) out << ", ";
                                 if (i < call->arguments.size()) {
-                                    gen_expression(call->arguments[i].get());
+                                    auto* pd = static_cast<ParamDecl*>(target_fd->params[i].get());
+                                    // Struct params are passed as pointers in C; take & if arg is value
+                                    if (struct_map.count(pd->type_name)) {
+                                        bool arg_is_ptr = (!call->arguments[i]->resolved_type.empty() &&
+                                                           call->arguments[i]->resolved_type.back() == '*');
+                                        if (!arg_is_ptr && call->arguments[i]->type == ASTNodeType::IDENT_EXPR)
+                                            arg_is_ptr = pointer_vars.count(static_cast<IdentExpr*>(call->arguments[i].get())->name);
+                                        if (!arg_is_ptr) out << "&(";
+                                        gen_expression(call->arguments[i].get());
+                                        if (!arg_is_ptr) out << ")";
+                                    } else {
+                                        gen_expression(call->arguments[i].get());
+                                    }
                                 } else {
                                     auto* pd = static_cast<ParamDecl*>(target_fd->params[i].get());
                                     gen_expression(pd->default_value.get());

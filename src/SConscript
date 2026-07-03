@@ -8,8 +8,11 @@ out_dir = Dir('#src').abspath
 gen_h   = os.path.join(out_dir, 'embedded_runtime.h')
 gen_cpp = os.path.join(out_dir, 'embedded_runtime.cpp')
 
+python_exe = sys.executable
+if ' ' in python_exe:
+    python_exe = f'"{python_exe}"'
 embed_cmd = (
-    f'{sys.executable} {File("#scripts/embed_runtime.py").abspath}'
+    f'{python_exe} {File("#scripts/embed_runtime.py").abspath}'
     f' --target {target}'
     f' --runtime-dir {Dir("#runtime").abspath}'
     f' --out-h {gen_h}'

@@ -910,13 +910,13 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
             std::string val_type = check_expression(ms->value.get());
             for (auto& arm : ms->arms) {
                 for (auto& pat : arm.patterns) {
-                    std::string pat_type = check_expression(pat.get());
-                    if (pat_type == "unknown") continue;
-                    // Wildcard pattern: "_"
+                    // Wildcard pattern: "_" — skip type checking
                     if (pat->type == ASTNodeType::IDENT_EXPR) {
                         auto* ident = static_cast<IdentExpr*>(pat.get());
-                        if (ident->name == "_") continue;
+                        if (ident->name == "_") { pat->resolved_type = val_type; continue; }
                     }
+                    std::string pat_type = check_expression(pat.get());
+                    if (pat_type == "unknown") continue;
                     if (!can_assign(val_type, pat_type) && !can_assign(pat_type, val_type)) {
                         add_error(pat->location.file + ":" +
                                   std::to_string(pat->location.line) +
