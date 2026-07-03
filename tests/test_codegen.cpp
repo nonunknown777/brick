@@ -629,7 +629,7 @@ void pool_destroy(PoolAllocator* p) { free(p); }
     check(ret == 0, "compilation with gcc -O3 -Wall -Werror");
 
     if (ret != 0) {
-        system(cmd.c_str());
+        (void)system(cmd.c_str());
         std::cout << "  Failed C code:\n" << c_code << "\n";
     }
 }

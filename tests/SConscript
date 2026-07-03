@@ -80,7 +80,7 @@ if not is_cross:
     import os
     for tb in test_bins:
         name = os.path.basename(str(tb[0]))
-        run = env.Command(f'.run_{name}', tb, str(tb[0].path))
+        run = env.Command(f'.run_{name}', tb, tb[0].abspath)
         env.AlwaysBuild(run)
         env.Alias('test', run)
 
