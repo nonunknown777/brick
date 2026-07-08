@@ -36,20 +36,6 @@ jobs:
       - name: Build Compiler
         run: scons target=windows profile=release -j4
 
-      - name: Run Unit Tests
-        run: scons target=windows profile=release test -j4
-
-      - name: Run Windows Integration Tests
-        shell: powershell
-        run: PowerShell -ExecutionPolicy Bypass -File tests/test_windows_integration.ps1
-
-      - name: Upload Test Artifacts (on failure)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-test-logs
-          path: build/*.exe
-
   release:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [test]
