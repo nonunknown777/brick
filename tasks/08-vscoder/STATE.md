@@ -47,3 +47,22 @@
 - Scanner TypeScript (`languageService.ts`) duplica lógica do lexer C++ — precisa manter sync manual
 - Memory webview poderia mostrar `__pool_*` e blocos double-buffered
 - `block_set_tls`/`block_alloc_tls` precisam ser adicionados ao completion provider
+
+## 📌 Recursos recentes — pendentes na extensão
+
+### `export fn` keyword — PENDENTE
+- `export` é nova keyword. Funções `export fn name(params) -> rettype { body }` geram C sem `static inline` (visíveis como símbolo C).
+- **Grammar**: adicionar `export` como keyword de declaração.
+- **Snippets**: criar snippet `exportfn` → `export fn ${1:name}(${2:params}) -> ${3:rettype} {\n\t$4\n}`.
+- **LSP**: `export` no keyword set, autocomplete de `export fn`.
+
+### `$macro(args)` syntax — PENDENTE
+- Macros podem ser chamadas explicitamente com `$nome(args)` (além de `nome(args)` implícito).
+- **Grammar**: adicionar regra para `$identifier(` como macro call (scope `entity.name.function.macro.brc`).
+- **LSP**: reconhecer `$` como prefixo de macro call no scanner.
+
+### `@system` attribute para includes — PENDENTE
+- `include "header.h" @system` gera `#include <header.h>` em vez de `#include "header.h"`.
+- **Grammar**: adicionar `@system` como keyword modifier após include string.
+- **Snippets**: snippet `@system` sugerido após `include "..."` ou adicionar snippet `incs` → `include "${1:header.h}" @system`.
+- **LSP**: `@system` reconhecido como attribute no scanner, completion de atributos após include.

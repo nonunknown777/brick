@@ -1,0 +1,16 @@
+package test_append
+using IO
+block global = 1MB
+
+struct Item {
+    i32 value
+}
+
+fn main() {
+    Item[] items
+    Item it
+    it.value = 10
+    items.append(it)
+
+    if items[0].value != 10 { error("append item 0") }
+}

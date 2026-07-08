@@ -1,0 +1,37 @@
+package test_vtbl_dynarray
+using IO
+block global = 1MB
+
+interface Drawable {
+    fn draw() -> f64
+}
+
+struct Circle {
+    f64 radius
+}
+
+impl Circle : Drawable {
+    fn draw() -> f64 {
+        return radius * 2.0
+    }
+}
+
+struct Square {
+    f64 side
+}
+
+impl Square : Drawable {
+    fn draw() -> f64 {
+        return side * 4.0
+    }
+}
+
+fn main() {
+    Drawable[] items
+
+    Circle c
+    c.radius = 1.5
+    items.append(c)
+
+    if items[0].draw() != 3.0 { error("circle.draw") }
+}

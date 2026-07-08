@@ -1,5 +1,23 @@
 # Changelog
 
+## v1.0.0 — First Stable Release
+
+### Major
+- First stable release
+- Full compiler pipeline: lexer → parser → codegen → C → binary
+- Block-based memory management with bump + pool allocators
+- Native hot reload on Linux (dlopen+inotify) and Windows (LoadLibrary+ReadDirectoryChangesW)
+- TUI memory visualizer (ncurses / PDCurses)
+- Macro system with `macro`, `build`, `emit`
+- C interop via `link`/`include`/`extern fn` and `@system` includes
+- Windows native port (MinGW-w64, all 159 codegen tests passing)
+- VS Code extension with syntax highlighting, LSP, and debug webview
+- GDB pretty-printers and custom commands
+- 11 official libraries: window, input, audio, file, net, math, and more
+- Full documentation in English and Portuguese
+
+---
+
 ## v0.6.0 — Windows Support
 
 ### Major: Native Windows Port

@@ -361,6 +361,87 @@ test_compile_and_expect "test_macro_enum" "$BUILD_DIR/test_macro_enum.brc" \
 "fist=0 gun=1 rifle=2 rocket=3"
 
 echo ""
+echo "Testing dynamic arrays in structs..."
+echo "Testando arrays dinamicos em structs..."
+
+test_compile_and_expect "test_dynarray" "$PROJECT_DIR/tests/features/test_dynamic_arrays.brc" \
+"PASS: all dynamic array tests"
+
+echo ""
+echo "Testing impl + interface (polymorphism)..."
+echo "Testando impl + interface (polimorfismo)..."
+
+test_compile_and_expect "test_impl" "$PROJECT_DIR/tests/features/test_impl_separate.brc" \
+"drawing circle with radius 1.500000
+name = circle"
+
+echo ""
+echo "Testing .sizeof..."
+echo "Testando .sizeof..."
+
+test_compile_and_expect "test_sizeof" "$PROJECT_DIR/tests/features/test_sizeof.brc" \
+"PASS: all sizeof tests"
+
+echo ""
+echo "Testing enum hex..."
+echo "Testando enum hex..."
+
+# Verify hex enum values in generated C code
+$BRICK "$PROJECT_DIR/tests/features/test_enum_hex.brc" -o "$BUILD_DIR/test_enum_hex.c" > /dev/null 2>&1
+if [ $? -eq 0 ]; then
+    # Check the generated C code has correct hex-to-decimal conversions
+    if grep -q "#define HIGH 43981" "$BUILD_DIR/test_enum_hex.c" && \
+       grep -q "#define ALL 255" "$BUILD_DIR/test_enum_hex.c" && \
+       grep -q "#define READ 1" "$BUILD_DIR/test_enum_hex.c"; then
+        echo -e "  test_enum_hex... ${GREEN}PASS${NC}"
+        PASS=$((PASS + 1))
+    else
+        echo -e "  test_enum_hex... ${RED}FAIL (wrong enum values in .c)${NC}"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo -e "  test_enum_hex... ${RED}FAIL${NC}"
+    FAIL=$((FAIL + 1))
+fi
+
+echo ""
+echo "Testing @packed/@align..."
+echo "Testando @packed/@align..."
+
+test_compile_and_expect "test_packed_align" "$PROJECT_DIR/tests/features/test_packed_align.brc" \
+"PASS: all packed/align tests"
+
+echo ""
+echo "Testing vtbl dispatch..."
+echo "Testando despacho vtbl..."
+
+test_compile_and_run "test_vtbl_dispatch" "$PROJECT_DIR/tests/features/test_vtbl_dispatch.brc"
+
+echo ""
+echo "Testing multidimensional arrays..."
+echo "Testando arrays multidimensionais..."
+
+test_compile_and_run "test_multidim_array" "$PROJECT_DIR/tests/test_multidim_array.brc"
+
+echo ""
+echo "Testing const-size arrays..."
+echo "Testando arrays com tamanho constante..."
+
+test_compile_and_run "test_const_array" "$PROJECT_DIR/tests/test_const_array.brc"
+
+echo ""
+echo "Testing dynamic array append..."
+echo "Testando append de array dinamico..."
+
+test_compile_and_run "test_append" "$PROJECT_DIR/tests/test_append.brc"
+
+echo ""
+echo "Testing vtbl in dynamic arrays..."
+echo "Testando vtbl em arrays dinamicos..."
+
+test_compile_and_run "test_vtbl_dynarray" "$PROJECT_DIR/tests/test_vtbl_dynarray.brc"
+
+echo ""
 echo "Testing C interop..."
 echo "Testando C interop..."
 

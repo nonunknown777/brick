@@ -20,7 +20,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow)]()
 [![Platform: Linux | Windows](https://img.shields.io/badge/Platform-Linux%20%7C%20Windows-orange)]()
 [![SCons](https://img.shields.io/badge/Build-SCons-ff69b4)]()
-[![Version](https://img.shields.io/badge/Version-0.6.0-green)]()
+[![Version](https://img.shields.io/badge/Version-1.0.0-green)]()
 
 </div>
 

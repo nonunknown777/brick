@@ -174,6 +174,11 @@ void collect_symbols(ASTNode* node, std::vector<LspSymbol>& symbols) {
             });
             return;
         }
+        case ASTNodeType::IMPL_DECL: {
+            auto* impl = static_cast<ImplDecl*>(node);
+            for (auto& m : impl->methods) collect_symbols(m.get(), symbols);
+            return;
+        }
         case ASTNodeType::BLOCK_SCOPE: {
             auto* bs = static_cast<BlockScope*>(node);
             for (auto& s : bs->body) collect_symbols(s.get(), symbols);

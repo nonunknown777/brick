@@ -1,0 +1,38 @@
+package TEST_IMPL
+
+using IO
+
+block global = 1MB
+
+interface Drawable {
+    fn draw()
+    fn get_name() -> String
+}
+
+struct Circle {
+    f32 radius
+
+    fn Circle(f32 r) {
+        radius = r
+    }
+}
+
+impl Circle : Drawable {
+    fn draw() {
+        print("drawing circle with radius {0}", radius)
+    }
+
+    fn get_name() -> String {
+        return "circle"
+    }
+}
+
+fn main() {
+    Circle c = Circle(1.5) @global
+
+    // Call method directly on struct
+    c.draw()
+    String name = c.get_name()
+    print("name = {0}", name)
+    global.reset()
+}

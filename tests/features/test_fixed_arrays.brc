@@ -1,0 +1,43 @@
+package test_fixed_arrays
+using IO
+block global = 1MB
+fn main() {
+    // Test 1: basic declaration and element assignment
+    // Teste 1: declaracao basica e atribuicao de elemento
+    i32[3] a
+    a[0] = 10
+    a[1] = 20
+    a[2] = 30
+    print("a={0},{1},{2}", a[0], a[1], a[2])
+
+    // Test 2: brace initialization
+    // Teste 2: inicializacao com chaves
+    i32[4] b = {100, 200, 300, 400}
+    print("b={0},{1},{2},{3}", b[0], b[1], b[2], b[3])
+
+    // Test 3: different element types
+    // Teste 3: tipos de elemento diferentes
+    f32[2] c = {1.5, 2.5}
+    print("c={0},{1}", c[0], c[1])
+
+    u8[3] d = {10, 20, 30}
+    print("d={0},{1},{2}", d[0], d[1], d[2])
+
+    i64[2] e = {9999999999, -1}
+    print("e={0},{1}", e[0], e[1])
+
+    // Test 4: array operations
+    // Teste 4: operacoes com array
+    i32[3] f
+    f[0] = 5
+    f[1] = 10
+    f[2] = 15
+    i32 sum = f[0] + f[1] + f[2]
+    print("sum={0}", sum)
+
+    // Test 5: read values in expressions
+    // Teste 5: leitura de valores em expressoes
+    i32[2] g = {7, 3}
+    i32 diff = g[0] - g[1]
+    print("diff={0}", diff)
+}

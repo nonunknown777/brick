@@ -108,6 +108,7 @@ std::unique_ptr<ASTNode> clone_ast(const ASTNode* node) {
             auto* inc = static_cast<const IncludeDecl*>(node);
             auto c = std::make_unique<IncludeDecl>(inc->header, inc->location);
             c->link_lib = inc->link_lib;
+            c->is_system = inc->is_system;
             return c;
         }
         case ASTNodeType::LINK_DECL: {
@@ -601,6 +602,11 @@ static bool is_macro_callee(const ASTNode* node, const MacroTable& table) {
         auto* es = static_cast<const ExprStmt*>(node);
         return is_macro_callee(es->expr.get(), table);
     }
+    // $name(args) produces a MacroCall node directly
+    if (node->type == ASTNodeType::MACRO_CALL) {
+        auto* mc = static_cast<const MacroCall*>(node);
+        return table.count(mc->name) > 0;
+    }
     if (node->type != ASTNodeType::CALL_EXPR) return false;
     auto* ce = static_cast<const CallExpr*>(node);
     if (ce->callee->type != ASTNodeType::IDENT_EXPR) return false;
@@ -615,14 +621,28 @@ static std::vector<std::unique_ptr<ASTNode>> expand_call(
     int depth)
 {
     std::vector<std::unique_ptr<ASTNode>> result;
-    if (node->type != ASTNodeType::CALL_EXPR) return result;
-    auto* ce = static_cast<const CallExpr*>(node);
-    if (ce->callee->type != ASTNodeType::IDENT_EXPR) return result;
-    auto* ident = static_cast<const IdentExpr*>(ce->callee.get());
-    auto it = macro_table.find(ident->name);
+    if (node->type != ASTNodeType::CALL_EXPR && node->type != ASTNodeType::MACRO_CALL)
+        return result;
+
+    std::string macro_name;
+    const std::vector<std::unique_ptr<ASTNode>>* args = nullptr;
+
+    if (node->type == ASTNodeType::MACRO_CALL) {
+        auto* mc = static_cast<const MacroCall*>(node);
+        macro_name = mc->name;
+        args = &mc->args;
+    } else {
+        auto* ce = static_cast<const CallExpr*>(node);
+        if (ce->callee->type != ASTNodeType::IDENT_EXPR) return result;
+        auto* ident = static_cast<const IdentExpr*>(ce->callee.get());
+        macro_name = ident->name;
+        args = &ce->arguments;
+    }
+
+    auto it = macro_table.find(macro_name);
     if (it == macro_table.end()) return result;
 
-    auto expanded = instantiate_macro(it->second, ce->arguments, errors, depth + 1);
+    auto expanded = instantiate_macro(it->second, *args, errors, depth + 1);
     if (expanded) {
         if (expanded->type == ASTNodeType::BLOCK_STMT) {
             auto* bs = static_cast<BlockStmt*>(expanded.get());
@@ -666,11 +686,9 @@ static void expand_in_prog(
     for (auto& d : prog->declarations) {
         // Unwrap ExprStmt for top-level macro calls
         ASTNode* callee_node = d.get();
-        bool was_expr_stmt = false;
         if (callee_node->type == ASTNodeType::EXPR_STMT) {
             auto* es = static_cast<ExprStmt*>(callee_node);
             callee_node = es->expr.get();
-            was_expr_stmt = true;
         }
         if (is_macro_callee(callee_node, macro_table)) {
             auto expanded = expand_call(callee_node, macro_table, errors, depth + 1);
@@ -779,6 +797,9 @@ static void expand_in_decl(ASTNode* decl, MacroTable& macro_table,
         auto* fd = static_cast<FuncDecl*>(decl);
         if (fd->body && fd->body->type == ASTNodeType::BLOCK_STMT)
             expand_in_block(static_cast<BlockStmt*>(fd->body.get()), macro_table, errors, depth);
+    } else if (decl->type == ASTNodeType::IMPL_DECL) {
+        auto* id = static_cast<ImplDecl*>(decl);
+        for (auto& m : id->methods) expand_in_decl(m.get(), macro_table, errors, depth);
     } else if (decl->type == ASTNodeType::BLOCK_SCOPE) {
         auto* bs = static_cast<BlockScope*>(decl);
         for (auto& s : bs->body)
@@ -808,6 +829,7 @@ ExpandResult expand_macros(
                 d->type != ASTNodeType::EMIT_STMT &&
                 d->type != ASTNodeType::INTERPOLATE &&
                 d->type != ASTNodeType::VALUE_PLACEHOLDER) {
+                // Keep IMPL_DECL — resolved by type checker
                 cleaned.push_back(std::move(d));
             }
         }

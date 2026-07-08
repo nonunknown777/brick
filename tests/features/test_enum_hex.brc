@@ -1,0 +1,22 @@
+// Test enum with hex values
+// Testa enum com valores hexadecimais
+
+using IO
+
+enum Flags {
+    NONE = 0x00
+    READ = 0x01
+    WRITE = 0x02
+    EXEC = 0x04
+    ALL = 0xFF
+    HIGH = 0xABCD
+}
+
+fn main() {
+    // Just verify enums with hex values compile and run
+    // The actual hex→decimal conversion is verified by checking the .c file
+    Flags f = NONE
+    if f == NONE {
+        print("PASS: all enum hex tests\n")
+    }
+}

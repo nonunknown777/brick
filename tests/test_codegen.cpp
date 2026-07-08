@@ -2,6 +2,7 @@
 #include "../src/parser/parser.h"
 #include "../src/parser/package.h"
 #include "../src/codegen/codegen.h"
+#include "../src/parser/macro_expander.h"
 #include <cassert>
 #include <iostream>
 #include <vector>
@@ -749,7 +750,7 @@ void test_codegen_c_interop() {
     std::cout << "=== test_codegen_c_interop ===\n";
     std::string source = R"(
 package TEST
-include "math.h" and link m
+include "math.h" @system and link m
 extern fn sqrt(f64 x) -> f64
 fn main() {
     f64 r = sqrt(2.0)
@@ -1934,6 +1935,79 @@ fn main() {
     std::cout << "  Generated C:\n" << c << "\n";
 }
 
+void test_export_function() {
+    std::cout << "=== test_export_function ===\n";
+    std::string source = R"(
+package TEST
+
+export fn exported_func(int x) -> int {
+    return x * 2
+}
+
+fn main() {
+    int r = exported_func(21)
+}
+)";
+
+    auto tokens = tokenize(source);
+    auto parse_result = parse(tokens);
+    check(parse_result.errors.empty(), "export parse");
+    if (!parse_result.errors.empty()) return;
+
+    auto packages = resolve_packages(parse_result.ast, "test.brc");
+    std::vector<std::unique_ptr<ProgramNode>> asts;
+    asts.push_back(std::move(parse_result.ast));
+    auto cr = generate_c(asts, packages);
+    check(cr.success, "export codegen");
+
+    std::string c = cr.c_code;
+    // Exported function should NOT have "static inline"
+    check(c.find("static inline") == std::string::npos ||
+          c.find("static inline") > c.find("exported_func") + 50,
+          "export no static inline");
+    // Exported function should be visible
+    check(c.find("exported_func") != std::string::npos, "export function in output");
+}
+
+void test_dollar_macro() {
+    std::cout << "=== test_dollar_macro ===\n";
+    std::string source = R"(
+package TEST
+
+macro twice(ex) {
+    emit { $ex + $ex }
+}
+
+fn main() {
+    $twice(10)
+}
+)";
+
+    auto tokens = tokenize(source);
+    auto parse_result = parse(tokens);
+    check(parse_result.errors.empty(), "$macro parse");
+    if (!parse_result.errors.empty()) return;
+
+    auto packages = resolve_packages(parse_result.ast, "test.brc");
+    std::vector<std::unique_ptr<ProgramNode>> asts;
+    asts.push_back(std::move(parse_result.ast));
+
+    // Run macro expansion
+    MacroTable macro_table;
+    collect_macros(asts, macro_table);
+    auto expand_result = expand_macros(asts, macro_table);
+    check(expand_result.success, "$macro expansion");
+    if (!expand_result.success) return;
+
+    auto cr = generate_c(asts, packages);
+    check(cr.success, "$macro codegen");
+
+    std::string c = cr.c_code;
+    // Macro expands $ex + $ex with $ex=10, constant-folded to 20
+    check(c.find("20;") != std::string::npos, "$macro expansion (10+10=20)");
+    check(c.find("__brick_init") == std::string::npos, "no block init (no blocks used)");
+}
+
 int main() {
     test_codegen_simple();
     test_codegen_extends();
@@ -2042,9 +2116,19 @@ int main() {
     // ─── #line directive tests ───
     test_codegen_else_line_directive();
 
+    // ─── Export keyword test ───
+    test_export_function();
+
+    // ─── $macro syntax test ───
+    test_dollar_macro();
+
     // ─── Extreme / edge tests ───
     test_bitfield_struct_64_fields();
     test_union_nested_deep();
+
+    // ─── Export and $macro tests ───
+    test_export_function();
+    test_dollar_macro();
 
     std::cout << "\n=== Results ===\n";
     std::cout << "Passed: " << tests_passed << "\n";

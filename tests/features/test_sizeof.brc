@@ -1,0 +1,37 @@
+// Test .sizeof built-in property
+// Testa propriedade .sizeof embutida
+
+using IO
+
+struct Vec2 {
+    f64 x
+    f64 y
+}
+
+fn main() {
+    // Type keyword .sizeof
+    i64 s1 = int.sizeof
+    i64 s2 = f64.sizeof
+    i64 s3 = bool.sizeof
+    i64 s4 = u8.sizeof
+    i64 s5 = i64.sizeof
+    i64 s6 = f32.sizeof
+
+    if s1 != 4 { error("int.sizeof should be 4") }
+    if s2 != 8 { error("f64.sizeof should be 8") }
+    if s3 != 1 { error("bool.sizeof should be 1") }
+    if s4 != 1 { error("u8.sizeof should be 1") }
+    if s5 != 8 { error("i64.sizeof should be 8") }
+    if s6 != 4 { error("f32.sizeof should be 4") }
+
+    // Variable .sizeof
+    int x = 42
+    i64 xs = x.sizeof
+    if xs != 4 { error("int var.sizeof should be 4") }
+
+    f64 pi = 3.14
+    i64 ps = pi.sizeof
+    if ps != 8 { error("f64 var.sizeof should be 8") }
+
+    print("PASS: all sizeof tests\n")
+}

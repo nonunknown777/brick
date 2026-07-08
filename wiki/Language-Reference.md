@@ -461,13 +461,24 @@ String empty = ""                    // empty string
 
 ```brick
 int[10] arr                          // fixed array of 10 integers
-int[5] vals = int[5] @game           // array in a specific block
+int[5] vals = {1, 2, 3, 4, 5}       // with brace initializer
 float[100] data                      // array of 100 floats
+u8[4] bytes = {0xFF, 0x00, 0xAA, 0x55}  // hex literal in array
+f32[4] m = {1.0, 0.0, 0.0, 1.0}     // identity-like initialization
 ```
 
-- Array size is fixed at declaration
+- Array size is fixed at declaration (must be a compile-time constant)
 - Indexing: `arr[0]`, `arr[i]`
-- Arrays are block-allocated like any other value
+- Brace initializer `{val1, val2, ...}` sets all elements at declaration
+- Array literals in expressions (e.g., function calls) generate C99 compound literals:
+  ```brick
+  fn sum_3(*i32 a) -> i32 { return a[0] + a[1] + a[2] }
+  fn main() {
+      i32 r = sum_3({10, 20, 30})   // passes (int32_t[]){10, 20, 30}
+  }
+  ```
+- Elements can be any expression of the element type (or implicit-castable)
+- Hex literals `0xFF`, binary `0b1010`, octal `0o777` work as array elements
 
 ## I/O (Print)
 

@@ -39,6 +39,25 @@ static char process_char_escape(std::string_view raw) {
     throw std::runtime_error("invalid char literal");
 }
 
+static int64_t parse_int_literal(std::string_view sv, bool& is_hex) {
+    int64_t val = 0;
+    if (sv.size() > 2 && sv[0] == '0' && (sv[1] == 'x' || sv[1] == 'X')) {
+        uint64_t uval = 0;
+        std::from_chars(sv.data() + 2, sv.data() + sv.size(), uval, 16);
+        val = static_cast<int64_t>(uval);
+        is_hex = true;
+    } else if (sv.size() > 2 && sv[0] == '0' && (sv[1] == 'b' || sv[1] == 'B')) {
+        std::from_chars(sv.data() + 2, sv.data() + sv.size(), val, 2);
+    } else if (sv.size() > 2 && sv[0] == '0' && (sv[1] == 'o' || sv[1] == 'O')) {
+        std::from_chars(sv.data() + 2, sv.data() + sv.size(), val, 8);
+    } else if (sv.size() > 1 && sv[0] == '0' && sv[1] >= '0' && sv[1] <= '7') {
+        std::from_chars(sv.data(), sv.data() + sv.size(), val, 8);
+    } else {
+        std::from_chars(sv.data(), sv.data() + sv.size(), val);
+    }
+    return val;
+}
+
 static bool is_auto_semicolon(TokenType t) {
     switch (t) {
         case TokenType::IDENTIFIER:
@@ -302,8 +321,10 @@ private:
             case TokenType::STRUCT:  return struct_decl();
             case TokenType::UNION:   return union_decl();
             case TokenType::INTERFACE: return interface_decl();
+            case TokenType::IMPL:    return impl_decl();
             case TokenType::BLOCK:   return block_decl_or_scope();
             case TokenType::FN:      return func_decl();
+            case TokenType::EXPORT:  return export_decl();
             case TokenType::EXTERN:  return extern_decl();
             case TokenType::INCLUDE: return include_decl();
             case TokenType::LINK:    return link_decl();
@@ -390,8 +411,17 @@ private:
                 return var_decl_macro();
             default: {
                 if (peek().type == TokenType::IDENTIFIER && pos + 1 < tokens.size()) {
-                    if (tokens[pos + 1].type == TokenType::IDENTIFIER ||
-                        tokens[pos + 1].type == TokenType::LBRACKET) {
+                    if (tokens[pos + 1].type == TokenType::LBRACKET) {
+                        // Disambiguate T[N] name (declaration) from arr[idx] = val (expression)
+                        bool is_decl = (pos + 3 < tokens.size() &&
+                                        tokens[pos + 2].type == TokenType::INT_LITERAL &&
+                                        tokens[pos + 3].type == TokenType::RBRACKET &&
+                                        pos + 4 < tokens.size() &&
+                                        tokens[pos + 4].type == TokenType::IDENTIFIER);
+                        if (is_decl) return var_decl();
+                        return expr_stmt_macro();
+                    }
+                    if (tokens[pos + 1].type == TokenType::IDENTIFIER) {
                         return var_decl();
                     }
                 }
@@ -587,9 +617,9 @@ private:
         switch (peek().type) {
             case TokenType::INT_LITERAL: {
                 Token t = advance();
-                int64_t val = 0;
-                std::from_chars(t.lexeme.data(), t.lexeme.data() + t.lexeme.size(), val);
-                auto lit = std::make_unique<IntLiteral>(val, loc);
+                bool is_hex = false;
+                int64_t val = parse_int_literal(t.lexeme, is_hex);
+                auto lit = std::make_unique<IntLiteral>(val, loc, is_hex);
                 lit->literal_type = t.literal_type;
                 return lit;
             }
@@ -638,6 +668,28 @@ private:
                 expect(TokenType::RPAREN, "expected ')' after expression");
                 return expr;
             }
+            case TokenType::LBRACE: {
+                advance();
+                auto arr = std::make_unique<ArrayLiteral>(loc);
+                if (peek().type != TokenType::RBRACE) {
+                    arr->elements.push_back(expression_macro());
+                    while (match(TokenType::COMMA)) {
+                        if (peek().type == TokenType::RBRACE) break;
+                        arr->elements.push_back(expression_macro());
+                    }
+                }
+                expect(TokenType::RBRACE, "expected '}' after array literal");
+                return arr;
+            }
+            // Type keywords as expressions (for casts and .sizeof)
+            case TokenType::U8: case TokenType::U16: case TokenType::U32: case TokenType::U64:
+            case TokenType::I8: case TokenType::I16: case TokenType::I32: case TokenType::I64:
+            case TokenType::F32: case TokenType::F64:
+            case TokenType::USIZE: case TokenType::ISIZE:
+            case TokenType::BYTE:
+            case TokenType::BOOL: case TokenType::CHAR:
+            case TokenType::INT: case TokenType::FLOAT: case TokenType::STRING: case TokenType::VOID:
+                return std::make_unique<IdentExpr>(std::string{advance().lexeme}, loc);
             default:
                 throw std::runtime_error("unexpected token '" + std::string(peek().lexeme) + "' in expression");
         }
@@ -650,9 +702,11 @@ private:
         SourceLocation loc = peek().location;
         std::string type_name = parse_type_name();
 
-        if (match(TokenType::LBRACKET)) {
+        while (match(TokenType::LBRACKET)) {
             type_name += "[]";
             if (peek().type == TokenType::INT_LITERAL) {
+                type_name = type_name.substr(0, type_name.size() - 1) + std::string(advance().lexeme) + "]";
+            } else if (peek().type == TokenType::IDENTIFIER) {
                 type_name = type_name.substr(0, type_name.size() - 1) + std::string(advance().lexeme) + "]";
             }
             expect(TokenType::RBRACKET, "expected ']' after array size");
@@ -987,9 +1041,10 @@ private:
         switch (peek().type) {
             case TokenType::INT_LITERAL: {
                 Token t = advance();
-                int64_t val = 0;
-                std::from_chars(t.lexeme.data(), t.lexeme.data() + t.lexeme.size(), val);
-                return std::make_unique<IntLiteral>(val, loc);
+                bool is_hex = false;
+                int64_t val = parse_int_literal(t.lexeme, is_hex);
+                auto lit = std::make_unique<IntLiteral>(val, loc, is_hex);
+                return lit;
             }
             case TokenType::FLOAT_LITERAL: {
                 Token t = advance();
@@ -1010,6 +1065,13 @@ private:
                 expect(TokenType::RPAREN, "expected ')'");
                 return expr;
             }
+            case TokenType::U8: case TokenType::U16: case TokenType::U32: case TokenType::U64:
+            case TokenType::I8: case TokenType::I16: case TokenType::I32: case TokenType::I64:
+            case TokenType::F32: case TokenType::F64:
+            case TokenType::USIZE: case TokenType::ISIZE:
+            case TokenType::BYTE:
+            case TokenType::BOOL: case TokenType::CHAR:
+                return std::make_unique<IdentExpr>(std::string{advance().lexeme}, loc);
             default:
                 throw std::runtime_error("unexpected token '" + std::string(peek().lexeme) + "' in build expression");
         }
@@ -1084,16 +1146,15 @@ private:
             if (peek().type == TokenType::ASSIGN) {
                 advance();
                 int64_t val = 0;
-                if (peek().type == TokenType::INT_LITERAL) {
-                    std::string_view sv = advance().lexeme;
-                    std::from_chars(sv.data(), sv.data() + sv.size(), val);
-                } else if (peek().type == TokenType::MINUS) {
+                bool negate = false;
+                if (peek().type == TokenType::MINUS) {
                     advance();
-                    if (peek().type == TokenType::INT_LITERAL) {
-                        std::string_view sv = advance().lexeme;
-                        std::from_chars(sv.data(), sv.data() + sv.size(), val);
-                        val = -val;
-                    }
+                    negate = true;
+                }
+                if (peek().type == TokenType::INT_LITERAL) {
+                    bool is_hex = false;
+                    val = parse_int_literal(advance().lexeme, is_hex);
+                    if (negate) val = -val;
                 }
                 var.value = val;
                 var.has_explicit_value = true;
@@ -1163,6 +1224,25 @@ private:
         advance();
         std::string name{expect(TokenType::IDENTIFIER, "expected struct name").lexeme};
         auto sd = std::make_unique<StructDecl>(name, loc);
+
+        while (peek().type == TokenType::AT) {
+            advance();
+            if (peek().type == TokenType::IDENTIFIER && peek().lexeme == "packed") {
+                advance();
+                sd->packed = true;
+            } else if (peek().type == TokenType::IDENTIFIER && peek().lexeme == "align") {
+                advance();
+                expect(TokenType::LPAREN, "expected '(' after @align");
+                int64_t align_val = 0;
+                bool is_hex = false;
+                align_val = parse_int_literal(
+                    expect(TokenType::INT_LITERAL, "expected alignment value").lexeme, is_hex);
+                sd->alignment = static_cast<int>(align_val);
+                expect(TokenType::RPAREN, "expected ')' after @align value");
+            } else {
+                throw std::runtime_error("expected '@packed' or '@align(N)' after struct name");
+            }
+        }
 
         if (match(TokenType::EXTENDS)) {
             sd->extends = std::string{expect(TokenType::IDENTIFIER, "expected base struct name").lexeme};
@@ -1260,9 +1340,11 @@ private:
         SourceLocation loc = peek().location;
         std::string type_name = parse_type_name();
 
-        if (match(TokenType::LBRACKET)) {
+        while (match(TokenType::LBRACKET)) {
             type_name += "[]";
             if (peek().type == TokenType::INT_LITERAL) {
+                type_name = type_name.substr(0, type_name.size() - 1) + std::string(advance().lexeme) + "]";
+            } else if (peek().type == TokenType::IDENTIFIER) {
                 type_name = type_name.substr(0, type_name.size() - 1) + std::string(advance().lexeme) + "]";
             }
             expect(TokenType::RBRACKET, "expected ']' after array size");
@@ -1310,9 +1392,11 @@ private:
         expect(TokenType::ASSIGN, "expected '=' in type alias");
         std::string underlying = parse_type_name();
         // Handle array suffix on type alias
-        if (match(TokenType::LBRACKET)) {
+        while (match(TokenType::LBRACKET)) {
             underlying += "[]";
             if (peek().type == TokenType::INT_LITERAL) {
+                underlying = underlying.substr(0, underlying.size() - 1) + std::string(advance().lexeme) + "]";
+            } else if (peek().type == TokenType::IDENTIFIER) {
                 underlying = underlying.substr(0, underlying.size() - 1) + std::string(advance().lexeme) + "]";
             }
             expect(TokenType::RBRACKET, "expected ']' after array size");
@@ -1370,6 +1454,48 @@ private:
         return fd;
     }
 
+    std::unique_ptr<ASTNode> impl_decl() {
+        SourceLocation loc = peek().location;
+        advance(); // consume 'impl'
+
+        std::string struct_name{expect(TokenType::IDENTIFIER, "expected struct name after 'impl'").lexeme};
+
+        if (peek().type == TokenType::COLON) {
+            advance(); // consume ':'
+        } else {
+            // Single colon syntax: impl Struct : Interface
+            // If no colon, it's impl Struct { ... } without interface
+        }
+        std::string interface_name;
+        if (peek().type == TokenType::IDENTIFIER) {
+            interface_name = std::string{advance().lexeme};
+        }
+
+        auto id = std::make_unique<ImplDecl>(struct_name, interface_name, loc);
+
+        expect(TokenType::LBRACE, "expected '{' after impl header");
+        while (peek().type != TokenType::RBRACE && peek().type != TokenType::EOF_) {
+            if (peek().type == TokenType::SEMICOLON) { advance(); continue; }
+            // func_decl consumes 'fn' itself
+            id->methods.push_back(func_decl());
+            if (peek().type == TokenType::SEMICOLON) advance();
+        }
+        expect(TokenType::RBRACE, "expected '}' after impl body");
+
+        return id;
+    }
+
+    std::unique_ptr<ASTNode> export_decl() {
+        advance(); // consume 'export'
+        auto decl = declaration();
+        if (auto* fd = dynamic_cast<FuncDecl*>(decl.get())) {
+            fd->is_export = true;
+        } else {
+            throw std::runtime_error("'export' can only be applied to functions");
+        }
+        return decl;
+    }
+
     std::unique_ptr<ASTNode> extern_decl() {
         SourceLocation loc = peek().location;
         advance();
@@ -1394,6 +1520,19 @@ private:
 
         std::string header{expect(TokenType::STRING_LITERAL, "expected header path").lexeme};
         auto inc = std::make_unique<IncludeDecl>(header, loc);
+
+        // Optional @system attribute → #include <...> instead of "..."
+        // Atributo @system opcional → #include <...> em vez de "..."
+        if (peek().type == TokenType::AT) {
+            size_t save = pos;
+            advance();
+            if (peek().type == TokenType::IDENTIFIER && peek().lexeme == "system") {
+                advance();
+                inc->is_system = true;
+            } else {
+                pos = save; // Not @system, restore
+            }
+        }
 
         if (peek().type == TokenType::AND) {
             advance();
@@ -1542,8 +1681,27 @@ private:
             }
             default:
                 if (peek().type == TokenType::IDENTIFIER && pos + 1 < tokens.size()) {
-                    if (tokens[pos + 1].type == TokenType::IDENTIFIER ||
-                        tokens[pos + 1].type == TokenType::LBRACKET) {
+                    // Disambiguate T[N] name (declaration) from arr[idx] = val (expression)
+                    if (tokens[pos + 1].type == TokenType::LBRACKET) {
+                        // Skip all [N] or [] pairs to find variable name
+                        // Pula todos os pares [N] ou [] para achar o nome da variavel
+                        size_t lp = pos + 1;
+                        while (lp < tokens.size() && tokens[lp].type == TokenType::LBRACKET) {
+                            if (lp + 1 < tokens.size() && tokens[lp + 1].type == TokenType::RBRACKET) {
+                                lp += 2; // T[]
+                            } else if (lp + 2 < tokens.size() && tokens[lp + 2].type == TokenType::RBRACKET &&
+                                       (tokens[lp + 1].type == TokenType::INT_LITERAL ||
+                                        tokens[lp + 1].type == TokenType::IDENTIFIER)) {
+                                lp += 3; // T[N]
+                            } else {
+                                break;
+                            }
+                        }
+                        if (lp < tokens.size() && tokens[lp].type == TokenType::IDENTIFIER)
+                            return var_decl();
+                        return expr_stmt();
+                    }
+                    if (tokens[pos + 1].type == TokenType::IDENTIFIER) {
                         return var_decl();
                     }
                 }
@@ -1555,9 +1713,11 @@ private:
         SourceLocation loc = peek().location;
         std::string type_name = parse_type_name();
 
-        if (match(TokenType::LBRACKET)) {
+        while (match(TokenType::LBRACKET)) {
             type_name += "[]";
             if (peek().type == TokenType::INT_LITERAL) {
+                type_name = type_name.substr(0, type_name.size() - 1) + std::string(advance().lexeme) + "]";
+            } else if (peek().type == TokenType::IDENTIFIER) {
                 type_name = type_name.substr(0, type_name.size() - 1) + std::string(advance().lexeme) + "]";
             }
             expect(TokenType::RBRACKET, "expected ']' after array size");
@@ -1868,6 +2028,10 @@ private:
                 advance();
                 std::string block_name{expect(TokenType::IDENTIFIER, "expected block name after '@'").lexeme};
                 expr = std::make_unique<AllocInline>(std::move(expr), block_name, expr->location);
+            } else if (peek().type == TokenType::AS) {
+                advance();
+                std::string target_type = parse_type_name();
+                expr = std::make_unique<CastExpr>(std::move(expr), target_type, expr->location);
             } else {
                 break;
             }
@@ -1882,9 +2046,9 @@ private:
         switch (peek().type) {
             case TokenType::INT_LITERAL: {
                 Token t = advance();
-                int64_t val = 0;
-                std::from_chars(t.lexeme.data(), t.lexeme.data() + t.lexeme.size(), val);
-                auto lit = std::make_unique<IntLiteral>(val, loc);
+                bool is_hex = false;
+                int64_t val = parse_int_literal(t.lexeme, is_hex);
+                auto lit = std::make_unique<IntLiteral>(val, loc, is_hex);
                 lit->literal_type = t.literal_type;
                 return lit;
             }
@@ -1921,12 +2085,50 @@ private:
             }
             case TokenType::IDENTIFIER:
                 return std::make_unique<IdentExpr>(std::string{advance().lexeme}, loc);
+            case TokenType::DOLLAR: {
+                advance();
+                std::string macro_name{expect(TokenType::IDENTIFIER, "expected macro name after '$'").lexeme};
+                auto mc = std::make_unique<MacroCall>(macro_name, loc);
+                if (peek().type == TokenType::LPAREN) {
+                    advance();
+                    if (peek().type != TokenType::RPAREN) {
+                        do {
+                            mc->args.push_back(expression());
+                        } while (match(TokenType::COMMA));
+                    }
+                    expect(TokenType::RPAREN, "expected ')' after macro arguments");
+                }
+                return mc;
+            }
             case TokenType::LPAREN: {
                 advance();
                 auto expr = expression();
                 expect(TokenType::RPAREN, "expected ')' after expression");
                 return expr;
             }
+            case TokenType::LBRACE: {
+                advance();
+                auto arr = std::make_unique<ArrayLiteral>(loc);
+                if (peek().type != TokenType::RBRACE) {
+                    arr->elements.push_back(expression());
+                    while (match(TokenType::COMMA)) {
+                        if (peek().type == TokenType::RBRACE) break;
+                        arr->elements.push_back(expression());
+                    }
+                }
+                expect(TokenType::RBRACE, "expected '}' after array literal");
+                return arr;
+            }
+            // Type keywords as expressions (for casts: f32(expr), i32(x), etc. and .sizeof)
+            // Palavras-chave de tipo como expressoes (para casts: f32(expr), i32(x), etc. e .sizeof)
+            case TokenType::U8: case TokenType::U16: case TokenType::U32: case TokenType::U64:
+            case TokenType::I8: case TokenType::I16: case TokenType::I32: case TokenType::I64:
+            case TokenType::F32: case TokenType::F64:
+            case TokenType::USIZE: case TokenType::ISIZE:
+            case TokenType::BYTE:
+            case TokenType::BOOL: case TokenType::CHAR:
+            case TokenType::INT: case TokenType::FLOAT: case TokenType::STRING: case TokenType::VOID:
+                return std::make_unique<IdentExpr>(std::string{advance().lexeme}, loc);
             default:
                 throw std::runtime_error("unexpected token '" + std::string(peek().lexeme) + "' in expression");
         }

@@ -20,7 +20,7 @@ enum class TokenType {
     F32, F64,
     USIZE, ISIZE,
     BYTE,
-    EXTERN, INCLUDE, LINK,
+    EXPORT, EXTERN, INCLUDE, LINK, IMPL,
 
     // Macro keywords
     MACRO, BUILD, EMIT, TYPE,

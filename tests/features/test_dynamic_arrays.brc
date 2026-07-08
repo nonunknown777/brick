@@ -1,0 +1,49 @@
+package TEST_DYNARRAY
+
+using IO
+
+block global = 1MB
+
+struct Container {
+    int[] items
+    i32 count
+
+    fn Container() {
+        count = 0
+    }
+
+    fn add(int val) {
+        count = count + 1
+    }
+
+    fn get_len() -> i64 {
+        return items.len
+    }
+
+    fn get_cap() -> i64 {
+        return items.cap
+    }
+
+    fn get_count() -> i32 {
+        return count
+    }
+}
+
+fn main() {
+    Container c = Container() @global
+    i32 n = c.get_count()
+    i64 len = c.items.len
+    i64 cap = c.items.cap
+
+    if n != 0 {
+        print("FAIL: expected count=0 got {0}", n)
+    } else if len != 0 {
+        print("FAIL: expected items.len=0 got {0}", len)
+    } else if cap != 0 {
+        print("FAIL: expected items.cap=0 got {0}", cap)
+    } else {
+        print("PASS: all dynamic array tests")
+    }
+
+    global.reset()
+}

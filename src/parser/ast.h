@@ -25,7 +25,10 @@ enum class ASTNodeType {
     // Expressions
     INT_LITERAL, FLOAT_LITERAL, STRING_LITERAL, BOOL_LITERAL, CHAR_LITERAL, NULL_LITERAL,
     IDENT_EXPR, CALL_EXPR, MEMBER_EXPR, INDEX_EXPR,
-    BINARY_OP, UNARY_OP, ASSIGNMENT,
+    BINARY_OP, UNARY_OP, CAST_EXPR, ASSIGNMENT, ARRAY_LITERAL,
+
+    // Impl node
+    IMPL_DECL,
 
     // Macro nodes
     MACRO_DECL, MACRO_CALL, BUILD_BLOCK, EMIT_STMT,
@@ -62,6 +65,7 @@ struct UsingDecl : ASTNode {
 struct IncludeDecl : ASTNode {
     std::string header;
     std::string link_lib;
+    bool is_system = false;
 
     IncludeDecl(std::string h, SourceLocation loc)
         : ASTNode(ASTNodeType::INCLUDE_DECL, loc), header(std::move(h)) {}
@@ -113,6 +117,8 @@ struct StructDecl : ASTNode {
     std::vector<std::unique_ptr<ASTNode>> methods;
     bool is_private = false;
     bool is_anonymous = false;
+    bool packed = false;
+    int alignment = 0;
 
     StructDecl(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::STRUCT_DECL, loc), name(std::move(n)) {}
@@ -166,6 +172,7 @@ struct FuncDecl : ASTNode {
     bool is_private = false;
     bool is_constructor = false;
     bool is_extern = false;
+    bool is_export = false;
 
     FuncDecl(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::FUNC_DECL, loc), name(std::move(n)) {}
@@ -278,8 +285,9 @@ struct ExprStmt : ASTNode {
 struct IntLiteral : ASTNode {
     int64_t value;
     std::string literal_type;
-    IntLiteral(int64_t v, SourceLocation loc)
-        : ASTNode(ASTNodeType::INT_LITERAL, loc), value(v) {}
+    bool is_hex;
+    IntLiteral(int64_t v, SourceLocation loc, bool hex = false)
+        : ASTNode(ASTNodeType::INT_LITERAL, loc), value(v), is_hex(hex) {}
 };
 
 struct FloatLiteral : ASTNode {
@@ -309,6 +317,11 @@ struct CharLiteral : ASTNode {
 
 struct NullLiteral : ASTNode {
     NullLiteral(SourceLocation loc) : ASTNode(ASTNodeType::NULL_LITERAL, loc) {}
+};
+
+struct ArrayLiteral : ASTNode {
+    std::vector<std::unique_ptr<ASTNode>> elements;
+    ArrayLiteral(SourceLocation loc) : ASTNode(ASTNodeType::ARRAY_LITERAL, loc) {}
 };
 
 struct IdentExpr : ASTNode {
@@ -357,12 +370,31 @@ struct UnaryOp : ASTNode {
         : ASTNode(ASTNodeType::UNARY_OP, loc), op(o), operand(std::move(opnd)) {}
 };
 
+struct CastExpr : ASTNode {
+    std::unique_ptr<ASTNode> expr;
+    std::string target_type;
+    CastExpr(std::unique_ptr<ASTNode> e, std::string t, SourceLocation loc)
+        : ASTNode(ASTNodeType::CAST_EXPR, loc), expr(std::move(e)), target_type(std::move(t)) {}
+};
+
 struct Assignment : ASTNode {
     std::unique_ptr<ASTNode> target;
     TokenType op;
     std::unique_ptr<ASTNode> value;
 
     Assignment(TokenType o, SourceLocation loc) : ASTNode(ASTNodeType::ASSIGNMENT, loc), op(o) {}
+};
+
+// ─── Impl Decl ───
+
+struct ImplDecl : ASTNode {
+    std::string struct_name;
+    std::string interface_name;
+    std::vector<std::unique_ptr<ASTNode>> methods;
+
+    ImplDecl(std::string s, std::string i, SourceLocation loc)
+        : ASTNode(ASTNodeType::IMPL_DECL, loc),
+          struct_name(std::move(s)), interface_name(std::move(i)) {}
 };
 
 // ─── Macro Nodes ───

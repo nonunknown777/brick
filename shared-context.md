@@ -27,6 +27,29 @@ using SPRITES.EFFECTS
 private int internal_var     // visível só no próprio package
 ```
 
+## Built-in .sizeof
+`T.sizeof` ou `expr.sizeof` — retorna o tamanho em bytes como `i64`:
+```brick
+i64 s = int.sizeof     // 4
+s = f64.sizeof         // 8
+s = MyStruct.sizeof    // soma dos campos
+s = my_var.sizeof      // tamanho do tipo da variavel
+```
+
+## Struct attributes: @packed e @align(N)
+```brick
+struct Packed @packed { u8 a, i32 b }           // __attribute__((packed))
+struct Aligned @align(64) { u8 a, i32 b }       // __attribute__((aligned(64)))
+struct Both @packed @align(16) { u8 x, i64 y }
+```
+
+## Dispatch virtual (vtbl)
+Quando um `impl Struct : Interface` existe, o compilador gera automaticamente:
+- Um struct vtbl com ponteiros de função para cada método da interface
+- Um struct wrapper com `void* data` e `const Vtbl* vtbl`
+- Funções wrapper que fazem cast de `void*` para o tipo concreto
+- Instâncias estáticas da vtbl
+
 ## Structs (OOP)
 ```brick
 struct Player extends Entity {
@@ -45,6 +68,18 @@ struct Player extends Entity {
 
 interface Damageable {
     fn take_damage(int d)
+}
+
+// Implementação separada de interface
+// Separate interface implementation
+struct Arrow {
+    int damage
+}
+
+impl Arrow : Damageable {
+    fn take_damage(int d) {
+        damage = d
+    }
 }
 ```
 
@@ -112,6 +147,7 @@ double = f64     // ponto flutuante 64-bit / 64-bit float
 bool         // true | false
 String       // string built-in (dinâmica, alocada em bloco) / built-in string (dynamic, block-allocated)
 T[N]         // array fixo de N elementos de tipo T / fixed array of N elements of type T
+T[]          // array dinâmico em structs (armazena ponteiro + count + capacity) / dynamic array in structs (stores pointer + count + capacity)
 null         // ponteiro nulo / null pointer
 ```
 
@@ -122,6 +158,19 @@ null         // ponteiro nulo / null pointer
 3.14f32  3.14f64              // float
 42usz  42isize                // pointer-size
 ```
+
+### Dynamic Arrays (T[])
+```brick
+struct Container {
+    int[] items     // array dinâmico: armazena ponteiro, count e capacity
+    i32 count
+}
+```
+
+- `T[]` como campo de struct gera 3 campos C: `T* items; int64_t items_cnt; int64_t items_cap;`
+- `.len` → `items_cnt` (quantidade atual de elementos)
+- `.cap` → `items_cap` (capacidade alocada)
+- `arr[i]` → indexação via ponteiro (`items[i]`)
 
 ### Regras de tipo / Type rules
 - Literal sem sufixo: tipo inferido pelo contexto (se cabe no destino, permite)
@@ -434,7 +483,29 @@ emit nome_macro(args)
 - Parâmetros do usuário NÃO são renomeados
 - Gensym counter global por unidade de compilação
 
+### 4. `$macro(args)` — Chamada Explícita de Macro
+Além de `nome(args)`, macros também podem ser chamadas com `$nome(args)` — o `$` indica visualmente que é uma macro.
+```brick
+$my_macro(42, "hello")
+```
+
 ### Limites
 - Recursão máxima: 64 níveis (detectado como erro)
-- `$` fora de macro/build: erro de compilação
 - I/O bloqueado dentro de `build`
+
+## `export fn` (v0.6.0)
+
+Funções marcadas com `export fn` geram C sem `static inline` — ficam visíveis como símbolo C para linking externo.
+```brick
+export fn nome(params) -> rettype {
+    // corpo
+}
+```
+
+## `@system` em includes (v0.6.0)
+
+O atributo `@system` após um `include` gera `#include <header.h>` (angle brackets) em vez de `#include "header.h"`.
+```brick
+include "stdio.h" @system     // → #include <stdio.h>
+include "meu.h"               // → #include "meu.h"
+```

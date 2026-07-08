@@ -1,43 +1,39 @@
 # Task 10 - Tester / Optimizer / Doc - NEXT
 
-## Pendências
+## Concluído nesta sessão (23)
 
-### 0. Token string_view migration (✅ feito)
-- ✅ `Token::lexeme` mudou de `std::string` para `std::string_view`
+### ✅ `export fn` — Funções visíveis para C
+- Lexer: `EXPORT` token
+- AST: `FuncDecl.is_export`
+- Parser: `export_decl()` aplica flag
+- Codegen: gera sem `static inline`
+- Teste: 4 asserts no `test_export_function`
 
-### 1. Aritmética de ponteiros + ++/-- + and/or keywords (✅ feito)
-- ✅ `++`/`--` tokens, prefix e postfix (desugeram para `+=1`/`-=1`)
-- ✅ `*` dereferência, `&` address-of como unários
-- ✅ Aritmética de ponteiros (`ptr+N`, `ptr-N`, `ptr+=N`, `ptr-=N`)
-- ✅ Comparação de ponteiros (`p==q`, `p<q`, `p!=null`)
-- ✅ Indexação de ponteiro (`p[N]`)
-- ✅ Keywords `and`/`or` como alias para `&&`/`||`
-- ✅ 40 novos testes, 198/198 unitários passando
-- ✅ 11/11 integração passando
+### ✅ `$macro(args)` — Chamada explícita de macro
+- Parser: `$id(args)` em `primary()` cria `MacroCall`
+- Expander: `is_macro_callee` + `expand_call` reconhecem `MacroCall`
+- Teste: `test_dollar_macro` com `$twice(10)` → `20`
+- Compatível com chamada implícita existente
 
-### 2. Próximas features
-- **Union types** (com anonymous union dentro de struct)
-- **Bitfields** (`:` + largura em bits em campos de struct)
-- **Function pointers** (`fn(params)->ret` como tipo)
+## Pendências / Sugestões
 
-### 3. Documentação pendente
-- Adicionar comentários inline no código onde faltam
-- Documentar runtime (block_memory.c, io.c)
-- Documentar pointer arithmetic no shared-context.md
+### Testes
+- ✅ 214/215 unitários (1 falha pré-existente: `#include math.h` sem `@system`)
+- Sugestão: adicionar testes unitários para `resolve_array_sizes()` na type checker
+- Sugestão: testar const-size array com struct fields
+- Sugestão: testar `export fn` com struct param (gera `*`)
 
-### 4. Otimizações
-- String interning no parser/codegen (reutilizar strings de nome de tipo/variável)
-- Compiler profiling (medir tempo de compilação)
-- Generated code profiling (runtime performance)
-- Inline asm em hot paths (bump alloc, pool alloc)
+### Otimizações
+- string interning (parser)
+- profiling do compilador
+- inline asm para hot paths
+- Benchmark de arrays grandes / multidimensionais
 
-### 5. Testes adicionais
-- Testes de C interop com mais bibliotecas
-- Testes de type checker (mais casos edge)
-- Benchmark suite (compile time + runtime)
-- Testes de integração com aritmética de ponteiros (compilar .brc → executar)
+### Documentação
+- Atualizar `shared-context.md` com `export` + `$macro()`
+- Atualizar `docs/LANGUAGE.md`
 
-### 6. Coordenação
-- Verificar estado real tasks 08 e 09
-- CI/CD setup (GitHub Actions)
-- Atualizar shared-context.md com aritmética de ponteiros, ++/--, and/or
+### Coordenação
+- STATE.md task 10 atualizado nesta sessão
+- STATE.md task 03 (codegen) — sem mudanças no type checker
+- Notificar tasks 01-09 sobre `export` + `$macro`

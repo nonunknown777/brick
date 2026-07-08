@@ -191,6 +191,21 @@ fn log(String msg) {                   ← void function (no return)
 
 > Parâmetros e valores de retorno vão para o "bloco anônimo" interno do compilador.
 
+### `export fn` — Funções Visíveis para C
+
+```
+export fn calculate(int x) -> int {
+    return x * 2
+}
+```
+
+Funções declaradas com `export fn` NÃO recebem `static inline` no C gerado. Isso permite que código C (ou outras linguagens) linkem contra elas. Útil para bibliotecas compartilhadas.
+
+| Declaração | C gerado |
+|-----------|----------|
+| `fn calc()` | `static inline int32_t calc()` |
+| `export fn calc()` | `int32_t calc()` (visível ao linker) |
+
 ## Controle de Fluxo
 
 ```
@@ -266,6 +281,21 @@ private int y                          ← visible only within own package
 > Apenas comentários de linha (`//`). Comentários de bloco (`/* */`) não são suportados.
 
 ## Macros
+
+### `$macro()` — Chamada Explícita de Macro
+
+```
+$twice(10)   // expande o macro
+```
+
+Macros podem ser chamados com `$nome(args)` para clareza visual. Ambas as sintaxes funcionam:
+
+| Sintaxe | Exemplo |
+|---------|---------|
+| Implícita | `twice(10)` |
+| Explícita | `$twice(10)` |
+
+O `$` deixa explícito que é uma chamada de macro (não de função), útil em código complexo.
 
 Macros geram código em tempo de compilação. Você define um padrão uma vez e o compilador replica onde for chamado.
 

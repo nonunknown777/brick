@@ -35,7 +35,13 @@ public:
                     switch (decl->type) {
             case ASTNodeType::INCLUDE_DECL: {
                 auto* inc = static_cast<IncludeDecl*>(decl.get());
-                out << "#include <" << inc->header << ">\n";
+                // Include path from STRING_LITERAL (no quotes in lexeme)
+                // Caminho do include vindo de STRING_LITERAL (sem aspas no lexema)
+                if (inc->is_system) {
+                    out << "#include <" << inc->header << ">\n";
+                } else {
+                    out << "#include \"" << inc->header << "\"\n";
+                }
                 if (!inc->link_lib.empty())
                     result.link_flags.push_back(inc->link_lib);
                 break;
@@ -100,6 +106,35 @@ public:
             }
             out << "\n";
 
+            // Generate vtbl struct definitions for interfaces
+            // Gera definicoes de struct vtbl para interfaces
+            for (const auto& ast : asts) {
+                for (const auto& decl : ast->declarations) {
+                    if (decl->type == ASTNodeType::INTERFACE_DECL) {
+                        auto* id = static_cast<InterfaceDecl*>(decl.get());
+                        out << "typedef struct " << id->name << "_Vtbl " << id->name << "_Vtbl;\n";
+                        out << "struct " << id->name << "_Vtbl {\n";
+                        for (const auto& method : id->methods) {
+                            if (method->type == ASTNodeType::FUNC_DECL) {
+                                auto* fd = static_cast<FuncDecl*>(method.get());
+                                std::string ret = fd->return_type.empty() ? "void" : map_type(fd->return_type);
+                                out << "    " << ret << " (*" << fd->name << ")(void*";
+                                for (size_t pi = 0; pi < fd->params.size(); pi++) {
+                                    auto* pd = static_cast<ParamDecl*>(fd->params[pi].get());
+                                    out << ", " << map_type(pd->type_name);
+                                }
+                                out << ");\n";
+                            }
+                        }
+                        out << "};\n";
+                        out << "typedef struct " << id->name << " {\n";
+                        out << "    void* data;\n";
+                        out << "    const " << id->name << "_Vtbl* vtbl;\n";
+                        out << "} " << id->name << ";\n\n";
+                    }
+                }
+            }
+
             // Extern prototypes NOT emitted — C headers provide declarations
             // Prototipos extern NAO emitidos — headers C fornecem as declaracoes
 
@@ -132,6 +167,62 @@ public:
                             }
                         }
                     }
+                }
+            }
+
+            // Generate wrapper functions and vtable instances for impls
+            // Gera funcoes wrapper e instancias vtbl para impls
+            // Must come before standalone functions so vtable symbols are visible
+            // Deve vir antes das funcoes avulsas para simbolos vtbl ficarem visiveis
+            for (const auto& ast : asts) {
+                for (const auto& decl : ast->declarations) {
+                    if (decl->type == ASTNodeType::STRUCT_DECL) {
+                        auto* sd = static_cast<StructDecl*>(decl.get());
+                        for (const auto& iface : sd->interfaces) {
+                            if (!interface_map.count(iface)) continue;
+                            auto* id = interface_map[iface];
+                            out << "// Wrapper functions for " << sd->name << " : " << iface << "\n";
+                            for (const auto& method : id->methods) {
+                                if (method->type == ASTNodeType::FUNC_DECL) {
+                                    auto* fd = static_cast<FuncDecl*>(method.get());
+                                    std::string ret = fd->return_type.empty() ? "void" : map_type(fd->return_type);
+                                    std::string wrapper_name = mangle_name(sd->name, mangle_name(iface, fd->name));
+                                    out << "static " << ret << " " << wrapper_name << "(void* self";
+                                    for (size_t pi = 0; pi < fd->params.size(); pi++) {
+                                        auto* pd = static_cast<ParamDecl*>(fd->params[pi].get());
+                                        out << ", " << map_type(pd->type_name) << " __p" << pi;
+                                    }
+                                    out << ") {\n";
+                                    out << "    ";
+                                    if (!fd->return_type.empty()) out << "return ";
+                                    out << mangle_name(sd->name, fd->name) << "((" << map_type(sd->name) << "*)self";
+                                    for (size_t pi = 0; pi < fd->params.size(); pi++) {
+                                        out << ", __p" << pi;
+                                    }
+                                    out << ");\n";
+                                    out << "}\n";
+                                }
+                            }
+                            out << "static const " << iface << "_Vtbl " << sd->name << "_" << iface << "_vtable = {\n";
+                            bool first_entry = true;
+                            for (const auto& method : id->methods) {
+                                if (method->type == ASTNodeType::FUNC_DECL) {
+                                    auto* fd = static_cast<FuncDecl*>(method.get());
+                                    if (!first_entry) out << ",\n";
+                                    first_entry = false;
+                                    out << "    ." << fd->name << " = " << mangle_name(sd->name, mangle_name(iface, fd->name));
+                                }
+                            }
+                            out << "\n};\n\n";
+                        }
+                    }
+                }
+            }
+
+            // Standalone functions (must come after vtbl wrappers)
+            // Funcoes avulsas (devem vir depois dos wrappers vtbl)
+            for (const auto& ast : asts) {
+                for (const auto& decl : ast->declarations) {
                     if (decl->type == ASTNodeType::FUNC_DECL) {
                         auto* fd = static_cast<FuncDecl*>(decl.get());
                         if (!fd->is_extern)
@@ -165,6 +256,7 @@ private:
     std::string current_file;
 
     std::unordered_map<std::string, StructDecl*> struct_map;
+    std::unordered_map<std::string, InterfaceDecl*> interface_map;
     std::unordered_map<std::string, FuncDecl*> extern_funcs;
     std::unordered_map<std::string, FuncDecl*> func_defs;
     std::unordered_set<std::string> declared_vars;
@@ -177,6 +269,7 @@ private:
 
     std::string current_struct_name;
     std::unordered_set<std::string> current_struct_fields;
+
 
     void indent() {
         for (int i = 0; i < indent_level; i++) out << "    ";
@@ -206,6 +299,10 @@ private:
                     auto* sd = static_cast<StructDecl*>(decl.get());
                     struct_map[sd->name] = sd;
                 }
+                if (decl->type == ASTNodeType::INTERFACE_DECL) {
+                    auto* id = static_cast<InterfaceDecl*>(decl.get());
+                    interface_map[id->name] = id;
+                }
             }
         }
     }
@@ -215,6 +312,13 @@ private:
         if (unit == "MB" || unit == "M") return size * 1024 * 1024;
         if (unit == "GB" || unit == "G") return size * 1024 * 1024 * 1024;
         return size;
+    }
+
+    // Check if a type is a dynamic array T[] (no fixed size)
+    static bool is_dynamic_array_type(const std::string& type_name) {
+        auto bracket = type_name.find('[');
+        if (bracket == std::string::npos) return false;
+        return type_name.size() >= bracket + 2 && type_name[bracket + 1] == ']';
     }
 
     // Check if a type is a float type (f32/f32/float/double)
@@ -275,14 +379,26 @@ private:
     }
 
     int type_size_estimate_impl(const std::string& type_name, std::unordered_set<std::string>& visited) {
-        // Array type: base_type[count]
-        // Tipo array: base_type[count]
+        // Dynamic array T[]: pointer + two int64s = 24 bytes
+        if (is_dynamic_array_type(type_name)) {
+            return 24;
+        }
+        // Fixed array type: base_type[N][M]...
+        // Tipo array fixo: base_type[N][M]...
         auto bracket = type_name.find('[');
         if (bracket != std::string::npos) {
             std::string base = type_name.substr(0, bracket);
-            std::string count_str = type_name.substr(bracket + 1, type_name.find(']') - bracket - 1);
-            int count = std::stoi(count_str);
-            return type_size_estimate_impl(base, visited) * count;
+            int64_t total_count = 1;
+            size_t pos = bracket;
+            while (pos != std::string::npos) {
+                auto close = type_name.find(']', pos);
+                if (close == std::string::npos) break;
+                std::string count_str = type_name.substr(pos + 1, close - pos - 1);
+                if (count_str.empty()) break; // [] dynamic array, handled above
+                total_count *= std::stoll(count_str);
+                pos = type_name.find('[', close + 1);
+            }
+            return type_size_estimate_impl(base, visited) * static_cast<int>(total_count);
         }
         // Pointer type: *T
         if (!type_name.empty() && type_name[0] == '*') {
@@ -375,7 +491,10 @@ private:
 
     void gen_struct(StructDecl* sd) {
         emit_line(sd->location);
-        indent(); out << "typedef struct " << sd->name << " {\n";
+        indent(); out << "typedef struct";
+        if (sd->packed) out << " __attribute__((packed))";
+        if (sd->alignment > 0) out << " __attribute__((aligned(" << sd->alignment << ")))";
+        out << " " << sd->name << " {\n";
         indent_level++;
 
         if (!sd->extends.empty()) {
@@ -386,6 +505,16 @@ private:
             if (field->type == ASTNodeType::FIELD_DECL) {
                 auto* fd = static_cast<FieldDecl*>(field.get());
                 std::string actual_type = resolve_type_alias(fd->type_name);
+                // Dynamic array T[]: expand into pointer + count + capacity
+                if (is_dynamic_array_type(actual_type)) {
+                    auto bracket = actual_type.find('[');
+                    std::string elem_type = actual_type.substr(0, bracket);
+                    std::string c_elem_type = map_type(elem_type);
+                    indent(); out << c_elem_type << "* " << fd->name << ";\n";
+                    indent(); out << "int64_t " << fd->name << "_cnt;\n";
+                    indent(); out << "int64_t " << fd->name << "_cap;\n";
+                    continue;
+                }
                 if (is_float_type_for_simd(actual_type) || is_float_array(actual_type)) {
                     indent(); out << "__attribute__((aligned("
                                   << get_simd_alignment(actual_type) << ")))\n";
@@ -423,6 +552,15 @@ private:
                     if (inner_f->type == ASTNodeType::FIELD_DECL) {
                         auto* fd = static_cast<FieldDecl*>(inner_f.get());
                         std::string actual_type = resolve_type_alias(fd->type_name);
+                        if (is_dynamic_array_type(actual_type)) {
+                            auto bracket = actual_type.find('[');
+                            std::string elem_type = actual_type.substr(0, bracket);
+                            std::string c_elem_type = map_type(elem_type);
+                            indent(); out << c_elem_type << "* " << fd->name << ";\n";
+                            indent(); out << "int64_t " << fd->name << "_cnt;\n";
+                            indent(); out << "int64_t " << fd->name << "_cap;\n";
+                            continue;
+                        }
                         bool is_fnptr = actual_type.rfind("fn(", 0) == 0;
                         if (is_fnptr) {
                             indent(); gen_fnptr_decl(actual_type, fd->name);
@@ -569,9 +707,9 @@ private:
             fd->return_type.empty() ? "void" : fd->return_type);
 
         // [OPTIMIZATION] Inline hints for gcc
-        // Add __attribute__((always_inline)) to non-main, non-extern functions
-        // Adiciona __attribute__((always_inline)) para funcoes que nao sao main nem extern
-        if (!is_main && !fd->is_extern) {
+        // Add __attribute__((always_inline)) to non-main, non-extern, non-export functions
+        // Adiciona __attribute__((always_inline)) para funcoes que nao sao main nem extern nem export
+        if (!is_main && !fd->is_extern && !fd->is_export) {
             indent(); out << "__attribute__((always_inline))\n";
             indent(); out << "static inline\n";
         }
@@ -804,15 +942,35 @@ private:
         return false;
     }
 
+    // Split "T[N]" into base type "T" and array suffix "[N]"
+    // Divide "T[N]" em tipo base "T" e sufixo de array "[N]"
+    static std::pair<std::string, std::string> split_array_type(const std::string& brick_type) {
+        auto bracket = brick_type.find('[');
+        if (bracket != std::string::npos) {
+            return {brick_type.substr(0, bracket), brick_type.substr(bracket)};
+        }
+        return {brick_type, ""};
+    }
+
     void gen_var_declaration(const std::string& var_name, const std::string& brick_type) {
         std::string var_key = std::to_string(scope_depth) + ":" + var_name;
         declared_vars.insert(var_key);
-        indent();
-        if (brick_type.rfind("fn(", 0) == 0) {
-            gen_fnptr_decl(brick_type, var_name);
-            out << ";\n";
+        if (is_dynamic_array_type(brick_type)) {
+            auto bracket = brick_type.find('[');
+            std::string elem_type = brick_type.substr(0, bracket);
+            std::string c_elem_type = map_type(elem_type);
+            indent(); out << c_elem_type << "* " << var_name << ";\n";
+            indent(); out << "int64_t " << var_name << "_cnt = 0;\n";
+            indent(); out << "int64_t " << var_name << "_cap = 0;\n";
         } else {
-            out << map_type(brick_type) << " " << var_name << ";\n";
+            indent();
+            if (brick_type.rfind("fn(", 0) == 0) {
+                gen_fnptr_decl(brick_type, var_name);
+                out << ";\n";
+            } else {
+                auto [base, array_suffix] = split_array_type(brick_type);
+                out << map_type(base) << " " << var_name << array_suffix << ";\n";
+            }
         }
     }
 
@@ -885,6 +1043,8 @@ private:
                         return;
                     }
 
+                    auto [base_type, array_suffix] = split_array_type(brick_type);
+                    bool is_array = !array_suffix.empty();
                     indent();
                     if (is_fnptr) {
                         gen_fnptr_decl(brick_type, ident->name);
@@ -893,10 +1053,10 @@ private:
                         out << ";\n";
                         return;
                     }
-                    if (is_block_alloc) {
+                    if (is_block_alloc && !is_array) {
                         out << c_type << "* " << ident->name;
                     } else {
-                        out << c_type << " " << ident->name;
+                        out << c_type << " " << ident->name << array_suffix;
                     }
 
                     // Handle block alloc + constructor: multi-line
@@ -920,6 +1080,7 @@ private:
                                     indent();
                                     out << mangle_name(struct_name, struct_name)
                                         << "(" << ident->name;
+                                    
                                     for (size_t i = 0; i < call->arguments.size(); i++) {
                                         out << ", ";
                                         gen_expression(call->arguments[i].get());
@@ -948,8 +1109,73 @@ private:
                     // Regular variable assignment
                     // Atribuicao de variavel normal
                     out << " = ";
-                    gen_expression(assign->value.get());
+                    if (assign->value->type == ASTNodeType::ARRAY_LITERAL) {
+                        // Inline array literal as init (not compound literal, which is invalid in C inits)
+                        // Literal de array inline como init (compound literal e invalido em inits C)
+                        auto* al = static_cast<ArrayLiteral*>(assign->value.get());
+                        out << "{";
+                        for (size_t ei = 0; ei < al->elements.size(); ei++) {
+                            if (ei > 0) out << ", ";
+                            // Named init: emit .field = value
+                            if (al->elements[ei]->type == ASTNodeType::ASSIGNMENT) {
+                                auto* ass = static_cast<Assignment*>(al->elements[ei].get());
+                                if (ass->target->type == ASTNodeType::IDENT_EXPR) {
+                                    auto* ident = static_cast<IdentExpr*>(ass->target.get());
+                                    out << "." << ident->name << " = ";
+                                    gen_expression(ass->value.get());
+                                    continue;
+                                }
+                            }
+                            gen_expression(al->elements[ei].get());
+                        }
+                        out << "}";
+                    } else {
+                        gen_expression(assign->value.get());
+                    }
                     out << ";\n";
+                    return;
+                }
+            }
+        }
+        // Dynamic array .append(val)
+        // Append de array dinamico
+        if (expr->type == ASTNodeType::CALL_EXPR) {
+            auto* call = static_cast<CallExpr*>(expr);
+            if (call->callee->type == ASTNodeType::MEMBER_EXPR) {
+                auto* mem = static_cast<MemberExpr*>(call->callee.get());
+                std::string obj_type = mem->object->resolved_type;
+                if (is_dynamic_array_type(obj_type) && mem->member == "append") {
+                    auto bracket = obj_type.find('[');
+                    std::string elem_type = obj_type.substr(0, bracket);
+                    std::string arr_name;
+                    if (mem->object->type == ASTNodeType::IDENT_EXPR) {
+                        arr_name = static_cast<IdentExpr*>(mem->object.get())->name;
+                    } else {
+                        arr_name = "_arr";
+                    }
+                    // Grow array if needed
+                    indent(); out << "if (" << arr_name << "_cnt >= " << arr_name << "_cap) {\n";
+                    indent_level++;
+                    indent(); out << arr_name << "_cap = " << arr_name << "_cap == 0 ? 4 : " << arr_name << "_cap * 2;\n";
+                    indent(); out << arr_name << " = realloc(" << arr_name
+                             << ", " << arr_name << "_cap * sizeof(" << map_type(elem_type) << "));\n";
+                    indent_level--;
+                    indent(); out << "}\n";
+                    // Interface element type: wrap in interface struct
+                    if (interface_map.count(elem_type)) {
+                        auto* arg = call->arguments[0].get();
+                        std::string arg_type = arg->resolved_type;
+                        if (arg_type.empty()) arg_type = "unknown";
+                        indent(); out << arr_name << "[" << arr_name << "_cnt++] = ("
+                                      << map_type(elem_type)
+                                      << "){.data = &(";
+                        gen_expression(arg);
+                        out << "), .vtbl = &" << arg_type << "_" << elem_type << "_vtable};\n";
+                    } else {
+                        indent(); out << arr_name << "[" << arr_name << "_cnt++] = ";
+                        gen_expression(call->arguments[0].get());
+                        out << ";\n";
+                    }
                     return;
                 }
             }
@@ -1023,6 +1249,14 @@ private:
         out << ";\n";
     }
 
+    static bool is_type_keyword(const std::string& name) {
+        return name == "int" || name == "float" || name == "bool" || name == "char" ||
+               name == "byte" || name == "String" || name == "void" ||
+               name == "u8" || name == "u16" || name == "u32" || name == "u64" ||
+               name == "i8" || name == "i16" || name == "i32" || name == "i64" ||
+               name == "f32" || name == "f64" || name == "usize" || name == "isize";
+    }
+
     void gen_expression(ASTNode* node) {
         if (!node) return;
 
@@ -1032,7 +1266,14 @@ private:
                 if (!il->literal_type.empty()) {
                     out << "(" << map_type(il->literal_type) << ")";
                 }
-                out << il->value;
+                if (il->is_hex) {
+                    char buf[32];
+                    uint64_t uval = static_cast<uint64_t>(il->value);
+                    snprintf(buf, sizeof(buf), "0x%llX", (unsigned long long)uval);
+                    out << buf;
+                } else {
+                    out << il->value;
+                }
                 break;
             }
             case ASTNodeType::FLOAT_LITERAL: {
@@ -1045,7 +1286,16 @@ private:
             }
             case ASTNodeType::STRING_LITERAL: {
                 auto& sv = static_cast<StringLiteral*>(node)->value;
-                out << "((BrickString){.data=\"" << sv << "\", .len=(size_t)" << sv.size() << "})";
+                std::string esc;
+                esc.reserve(sv.size() + 4);
+                for (char c : sv) {
+                    if (c == '\n')       esc += "\\n";
+                    else if (c == '\t')  esc += "\\t";
+                    else if (c == '\\')  esc += "\\\\";
+                    else if (c == '"')   esc += "\\\"";
+                    else                 esc += c;
+                }
+                out << "((BrickString){.data=\"" << esc << "\", .len=(size_t)" << sv.size() << "})";
                 break;
             }
             case ASTNodeType::BOOL_LITERAL:
@@ -1054,6 +1304,25 @@ private:
             case ASTNodeType::CHAR_LITERAL:
                 out << "'" << static_cast<CharLiteral*>(node)->value << "'";
                 break;
+            case ASTNodeType::ARRAY_LITERAL: {
+                auto* al = static_cast<ArrayLiteral*>(node);
+                // In expression context: C99 compound literal (T[]){vals}
+                // Em contexto de expressao: compound literal C99 (T[]){vals}
+                std::string arr_type = al->resolved_type;
+                auto bracket = arr_type.find('[');
+                if (bracket != std::string::npos) {
+                    std::string elem_type = arr_type.substr(0, bracket);
+                    out << "(" << map_type(elem_type) << "[]){";
+                } else {
+                    out << "{";
+                }
+                for (size_t i = 0; i < al->elements.size(); i++) {
+                    if (i > 0) out << ", ";
+                    gen_expression(al->elements[i].get());
+                }
+                out << "}";
+                break;
+            }
             case ASTNodeType::NULL_LITERAL:
                 out << "NULL";
                 break;
@@ -1162,6 +1431,7 @@ private:
                             if (!obj_is_ptr) out << "&(";
                             gen_expression(mem->object.get());
                             if (!obj_is_ptr) out << ")";
+                            
                             for (size_t i = 0; i < call->arguments.size(); i++) {
                                 out << ", ";
                                 gen_expression(call->arguments[i].get());
@@ -1169,10 +1439,29 @@ private:
                             out << ")";
                             return;
                         }
+
+                        // Interface method call: dispatch through vtbl
+                        if (interface_map.count(base_type)) {
+                            gen_expression(mem->object.get());
+                            out << ".vtbl->" << mem->member << "(";
+                            gen_expression(mem->object.get());
+                            out << ".data";
+                            for (size_t i = 0; i < call->arguments.size(); i++) {
+                                out << ", ";
+                                gen_expression(call->arguments[i].get());
+                            }
+                            out << ")";
+                            return;
+                        }
+
+                        // Dynamic array T[] built-in methods: .append(val)
+                        // (handled in gen_expr_stmt, not here)
+                        // (tratado em gen_expr_stmt, nao aqui)
                     }
 
                     gen_expression(mem->object.get());
                     out << "." << mem->member << "(";
+                    
                     for (size_t i = 0; i < call->arguments.size(); i++) {
                         gen_expression(call->arguments[i].get());
                         if (i + 1 < call->arguments.size()) out << ", ";
@@ -1196,6 +1485,7 @@ private:
                     if (struct_map.count(callee_ident->name)) {
                         std::string struct_name = callee_ident->name;
                         out << mangle_name(struct_name, struct_name) << "(";
+                        
                         for (size_t i = 0; i < call->arguments.size(); i++) {
                             gen_expression(call->arguments[i].get());
                             if (i + 1 < call->arguments.size()) out << ", ";
@@ -1204,23 +1494,43 @@ private:
                         break;
                     }
 
+                    // Type cast: f32(expr), i32(x), etc.
+                    // Cast de tipo: f32(expr), i32(x), etc.
+                    if (call->arguments.size() == 1 && is_type_keyword(callee_ident->name)) {
+                        out << "(" << map_type(callee_ident->name) << ")(";
+                        gen_expression(call->arguments[0].get());
+                        out << ")";
+                        break;
+                    }
+
                     // error("msg") built-in
                     // error("msg") embutido
                     if (callee_ident->name == "error") {
-                        out << "fprintf(stderr, ";
                         if (!call->arguments.empty()) {
-                            gen_expression(call->arguments[0].get());
+                            auto* arg = call->arguments[0].get();
+                            if (arg->type == ASTNodeType::STRING_LITERAL) {
+                                auto& sv = static_cast<StringLiteral*>(arg)->value;
+                                out << "fprintf(stderr, \"%.*s\", (int)" << sv.size()
+                                    << ", \"" << sv << "\")";
+                            } else {
+                                out << "{ BrickString _err = ";
+                                gen_expression(arg);
+                                out << "; fprintf(stderr, \"%.*s\", (int)_err.len, _err.data); }";
+                            }
+                        } else {
+                            out << "fprintf(stderr, \"error\")";
                         }
-                        out << "); exit(1)";
+                        out << "; exit(1)";
                         break;
                     }
 
                     // Extern function call (with String→*u8 auto-conversion)
                     // Chamada de funcao externa (com conversao automatica String→*u8)
-                    auto ext_it = extern_funcs.find(callee_ident->name);
+                        auto ext_it = extern_funcs.find(callee_ident->name);
                     if (ext_it != extern_funcs.end()) {
                         auto* ext_fd = ext_it->second;
                         out << ext_fd->name << "(";
+                        
                         for (size_t i = 0; i < call->arguments.size(); i++) {
                             if (i > 0) out << ", ";
                             auto* arg = call->arguments[i].get();
@@ -1245,6 +1555,7 @@ private:
                         if (func_it != func_defs.end()) {
                             auto* target_fd = func_it->second;
                             out << target_fd->name << "(";
+                            
                             for (size_t i = 0; i < target_fd->params.size(); i++) {
                                 if (i > 0) out << ", ";
                                 if (i < call->arguments.size()) {
@@ -1274,6 +1585,7 @@ private:
 
                 gen_expression(call->callee.get());
                 out << "(";
+                
                 for (size_t i = 0; i < call->arguments.size(); i++) {
                     gen_expression(call->arguments[i].get());
                     if (i + 1 < call->arguments.size()) out << ", ";
@@ -1283,6 +1595,55 @@ private:
             }
             case ASTNodeType::MEMBER_EXPR: {
                 auto* mem = static_cast<MemberExpr*>(node);
+
+                if (mem->member == "sizeof") {
+                    if (mem->object->type == ASTNodeType::IDENT_EXPR) {
+                        auto* ident = static_cast<IdentExpr*>(mem->object.get());
+                        if (is_type_keyword(ident->name) ||
+                            struct_map.count(ident->name) ||
+                            type_aliases_.count(ident->name)) {
+                            out << "sizeof(" << map_type(ident->name) << ")";
+                            break;
+                        }
+                    }
+                    out << "sizeof(" << map_type(mem->object->resolved_type) << ")";
+                    break;
+                }
+                if (mem->member == "alignof") {
+                    if (mem->object->type == ASTNodeType::IDENT_EXPR) {
+                        auto* ident = static_cast<IdentExpr*>(mem->object.get());
+                        if (is_type_keyword(ident->name) ||
+                            struct_map.count(ident->name) ||
+                            type_aliases_.count(ident->name)) {
+                            out << "_Alignof(" << map_type(ident->name) << ")";
+                            break;
+                        }
+                    }
+                    out << "_Alignof(" << map_type(mem->object->resolved_type) << ")";
+                    break;
+                }
+
+                std::string obj_type = mem->object->resolved_type;
+                // Dynamic array T[] built-in properties: .len -> _cnt, .cap -> _cap
+                if (is_dynamic_array_type(obj_type)) {
+                    if (mem->member == "len" || mem->member == "cap") {
+                        // The object must be a field access like obj.items or a local var
+                        if (mem->object->type == ASTNodeType::MEMBER_EXPR) {
+                            auto* inner = static_cast<MemberExpr*>(mem->object.get());
+                            gen_expression(inner->object.get());
+                            bool is_ptr = false;
+                            if (inner->object->type == ASTNodeType::IDENT_EXPR) {
+                                is_ptr = pointer_vars.count(
+                                    static_cast<IdentExpr*>(inner->object.get())->name);
+                            }
+                            out << (is_ptr ? "->" : ".") << inner->member;
+                        } else {
+                            gen_expression(mem->object.get());
+                        }
+                        out << (mem->member == "len" ? "_cnt" : "_cap");
+                        break;
+                    }
+                }
                 if (mem->object->type == ASTNodeType::IDENT_EXPR) {
                     auto* ident = static_cast<IdentExpr*>(mem->object.get());
                     if (pointer_vars.count(ident->name)) {
@@ -1301,6 +1662,13 @@ private:
                 out << "[";
                 gen_expression(ie->index.get());
                 out << "]";
+                break;
+            }
+            case ASTNodeType::CAST_EXPR: {
+                auto* ce = static_cast<CastExpr*>(node);
+                out << "(" << map_type(ce->target_type) << ")(";
+                gen_expression(ce->expr.get());
+                out << ")";
                 break;
             }
             case ASTNodeType::ASSIGNMENT: {
@@ -1390,29 +1758,38 @@ private:
             return map_type(base) + "*";
         }
 
+        // Array type: T[N] or T[] -> mapped_base_type (array suffix handled separately in declarations)
+        if (!mc_type.empty()) {
+            auto bracket = mc_type.find('[');
+            if (bracket != std::string::npos) {
+                return map_type(mc_type.substr(0, bracket));
+            }
+        }
+
         static const std::unordered_map<std::string, std::string> type_map = {
-            {"int", "int32_t"},
-            {"i32", "int32_t"},
-            {"i64", "int64_t"},
+            {"int", "int32_t"}, {"Int", "int32_t"},
+            {"i32", "int32_t"}, {"I32", "int32_t"},
+            {"i64", "int64_t"}, {"I64", "int64_t"},
             {"long", "int64_t"},
-            {"i16", "int16_t"},
+            {"i16", "int16_t"}, {"I16", "int16_t"},
             {"short", "int16_t"},
-            {"i8", "int8_t"},
-            {"u8", "uint8_t"},
+            {"i8", "int8_t"}, {"I8", "int8_t"},
+            {"u8", "uint8_t"}, {"U8", "uint8_t"},
             {"byte", "uint8_t"},
-            {"u16", "uint16_t"},
-            {"u32", "uint32_t"},
-            {"u64", "uint64_t"},
-            {"float", "float"},
-            {"f32", "float"},
-            {"f64", "double"},
-            {"bool", "uint8_t"},
+            {"u16", "uint16_t"}, {"U16", "uint16_t"},
+            {"u32", "uint32_t"}, {"U32", "uint32_t"},
+            {"u64", "uint64_t"}, {"U64", "uint64_t"},
+            {"float", "float"}, {"Float", "float"},
+            {"f32", "float"}, {"F32", "float"},
+            {"f64", "double"}, {"F64", "double"},
+            {"double", "double"}, {"Double", "double"},
+            {"bool", "uint8_t"}, {"Bool", "uint8_t"},
             {"char", "uint8_t"},
             {"String", "BrickString"},
-            {"void", "void"},
+            {"void", "void"}, {"Void", "void"},
             {"block", "BlockCtx*"},
-            {"usize", "size_t"},
-            {"isize", "ptrdiff_t"},
+            {"usize", "size_t"}, {"Usize", "size_t"}, {"USIZE", "size_t"},
+            {"isize", "ptrdiff_t"}, {"Isize", "ptrdiff_t"}, {"ISIZE", "ptrdiff_t"},
         };
 
         auto it = type_map.find(mc_type);
@@ -1423,10 +1800,24 @@ private:
     std::string normalize_type_name(const std::string& t) {
         if (t == "byte" || t == "char") return "u8";
         if (t == "short") return "i16";
-        if (t == "int") return "i32";
+        if (t == "int" || t == "Int") return "i32";
         if (t == "long") return "i64";
-        if (t == "float") return "f32";
-        if (t == "double") return "f64";
+        if (t == "float" || t == "Float") return "f32";
+        if (t == "double" || t == "Double") return "f64";
+        if (t == "F32") return "f32";
+        if (t == "F64") return "f64";
+        if (t == "I8") return "i8";
+        if (t == "I16") return "i16";
+        if (t == "I32") return "i32";
+        if (t == "I64") return "i64";
+        if (t == "U8") return "u8";
+        if (t == "U16") return "u16";
+        if (t == "U32") return "u32";
+        if (t == "U64") return "u64";
+        if (t == "Bool") return "bool";
+        if (t == "Void") return "void";
+        if (t == "Usize" || t == "USIZE") return "usize";
+        if (t == "Isize" || t == "ISIZE") return "isize";
         if (is_bitfield_type(t)) return t;
         return t;
     }

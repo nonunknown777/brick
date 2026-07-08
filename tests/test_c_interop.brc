@@ -1,4 +1,4 @@
-include "math.h" and link m
+include "math.h" @system and link m
 
 extern fn sqrt(f64 x) -> f64
 extern fn pow(f64 base, f64 exp) -> f64

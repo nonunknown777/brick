@@ -11,6 +11,12 @@ namespace brick {
 // ─── Type helper utilities ───
 // ─── Utilitarios de tipo ───
 
+static bool is_dynamic_array_type(const std::string& t) {
+    auto bracket = t.find('[');
+    if (bracket == std::string::npos) return false;
+    return t.size() >= bracket + 2 && t[bracket + 1] == ']';
+}
+
 static bool is_bitfield_type(const std::string& t) {
     if (t.size() < 2) return false;
     if (t[0] != 'u' && t[0] != 'i') return false;
@@ -31,12 +37,48 @@ static int parse_bitfield_width(const std::string& t) {
 static std::string normalize_type(const std::string& t) {
     if (t == "byte" || t == "char") return "u8";
     if (t == "short") return "i16";
-    if (t == "int") return "i32";
+    if (t == "int" || t == "Int") return "i32";
     if (t == "long") return "i64";
-    if (t == "float") return "f32";
-    if (t == "double") return "f64";
+    if (t == "float" || t == "Float") return "f32";
+    if (t == "double" || t == "Double") return "f64";
+    if (t == "U8") return "u8";
+    if (t == "U16") return "u16";
+    if (t == "U32") return "u32";
+    if (t == "U64") return "u64";
+    if (t == "I8") return "i8";
+    if (t == "I16") return "i16";
+    if (t == "I32") return "i32";
+    if (t == "I64") return "i64";
+    if (t == "F32") return "f32";
+    if (t == "F64") return "f64";
+    if (t == "Bool") return "bool";
+    if (t == "Void") return "void";
+    if (t == "Usize" || t == "USIZE") return "usize";
+    if (t == "Isize" || t == "ISIZE") return "isize";
     if (is_bitfield_type(t)) return t;
     return t;
+}
+
+std::string TypeChecker::resolve_array_sizes(const std::string& type) {
+    std::string result = type;
+    size_t bracket = 0;
+    while ((bracket = result.find('[', bracket)) != std::string::npos) {
+        size_t close = result.find(']', bracket);
+        if (close == std::string::npos) break;
+        std::string inner = result.substr(bracket + 1, close - bracket - 1);
+        if (!inner.empty() && !std::isdigit(inner[0]) && inner[0] != '-') {
+            auto it = const_values_.find(inner);
+            if (it != const_values_.end()) {
+                result = result.substr(0, bracket + 1) +
+                         std::to_string(it->second) +
+                         result.substr(close);
+                bracket = close + 1; // skip past the replaced value
+                continue;
+            }
+        }
+        bracket = close + 1;
+    }
+    return result;
 }
 
 static bool is_signed_int(const std::string& t) {
@@ -49,6 +91,14 @@ static bool is_unsigned_int(const std::string& t) {
     std::string n = normalize_type(t);
     if (is_bitfield_type(n)) return n[0] == 'u';
     return n == "u8" || n == "u16" || n == "u32" || n == "u64" || n == "usize" || n == "bool";
+}
+
+static bool is_type_keyword(const std::string& name) {
+    return name == "int" || name == "float" || name == "bool" || name == "char" ||
+           name == "byte" || name == "String" || name == "void" ||
+           name == "u8" || name == "u16" || name == "u32" || name == "u64" ||
+           name == "i8" || name == "i16" || name == "i32" || name == "i64" ||
+           name == "f32" || name == "f64" || name == "usize" || name == "isize";
 }
 
 static bool is_float_type(const std::string& t) {
@@ -75,19 +125,33 @@ static std::string signed_type_for_rank(int r) {
     return "i64";
 }
 
-static bool int_fits_in_type(int64_t value, const std::string& type) {
+static bool int_fits_in_type(int64_t value, const std::string& type, bool is_hex = false) {
     std::string n = normalize_type(type);
+    uint64_t uval = static_cast<uint64_t>(value);
     if (is_bitfield_type(n)) {
         int w = parse_bitfield_width(n);
         if (w <= 0 || w > 64) return false;
         if (n[0] == 'u') {
             uint64_t max = (w >= 64) ? UINT64_MAX : ((1ULL << w) - 1);
-            return value >= 0 && (uint64_t)value <= max;
+            return is_hex ? (uval <= max) : (value >= 0 && (uint64_t)value <= max);
         } else {
             int64_t min = (w >= 64) ? INT64_MIN : -(1LL << (w - 1));
             int64_t max = (w >= 64) ? INT64_MAX : (1LL << (w - 1)) - 1;
             return value >= min && value <= max;
         }
+    }
+    if (is_hex) {
+        if (n == "u8")  return uval <= UINT8_MAX;
+        if (n == "u16") return uval <= UINT16_MAX;
+        if (n == "u32") return uval <= UINT32_MAX;
+        if (n == "u64") return true;
+        if (n == "usize") return true;
+        if (n == "i8")  return uval <= UINT8_MAX;
+        if (n == "i16") return uval <= UINT16_MAX;
+        if (n == "i32") return uval <= UINT32_MAX;
+        if (n == "i64") return true;
+        if (n == "isize") return true;
+        return true;
     }
     if (n == "u8")  return value >= 0 && value <= UINT8_MAX;
     if (n == "u16") return value >= 0 && value <= UINT16_MAX;
@@ -198,6 +262,19 @@ bool TypeChecker::is_union_type(const std::string& type_name) {
     return union_defs.count(type_name) > 0;
 }
 
+FieldDecl* TypeChecker::find_struct_field(StructDecl* sd, const std::string& name) {
+    for (auto& f : sd->fields) {
+        if (f->type == ASTNodeType::FIELD_DECL) {
+            auto* fd = static_cast<FieldDecl*>(f.get());
+            if (fd->name == name) return fd;
+        }
+    }
+    if (!sd->extends.empty() && struct_defs.count(sd->extends)) {
+        return find_struct_field(struct_defs[sd->extends], name);
+    }
+    return nullptr;
+}
+
 bool TypeChecker::can_assign(const std::string& from, const std::string& to) {
     // Resolve type aliases
     std::string f_alias = from;
@@ -225,6 +302,15 @@ bool TypeChecker::can_assign(const std::string& from, const std::string& to) {
     std::string t = normalize_type(t_alias);
 
     if (f == t) return true;
+
+    // Struct → interface: check if struct implements the interface
+    // Struct → interface: verifica se struct implementa a interface
+    if (is_interface_type(t) && struct_defs.count(f)) {
+        auto* sd = struct_defs.at(f);
+        for (const auto& iface : sd->interfaces) {
+            if (iface == t) return true;
+        }
+    }
 
     // One of them is not a numeric type — allow only if same
     // Um deles nao e numerico — permite apenas se igual
@@ -360,6 +446,44 @@ std::vector<std::string> TypeChecker::check(
         }
     }
 
+    // Pre-pass: process impl declarations (add methods to structs)
+    // Pre-passagem: processa declaracoes impl (adiciona metodos a structs)
+    for (const auto& ast : asts) {
+        for (const auto& decl : ast->declarations) {
+            if (decl->type == ASTNodeType::IMPL_DECL) {
+                auto* id = static_cast<ImplDecl*>(decl.get());
+                // Validate struct exists
+                if (!struct_defs.count(id->struct_name)) {
+                    add_error(id->location.file + ":" + std::to_string(id->location.line) +
+                              ": impl for unknown struct '" + id->struct_name + "'");
+                    continue;
+                }
+                // Validate interface exists (if specified)
+                if (!id->interface_name.empty() &&
+                    !interface_defs.count(id->interface_name)) {
+                    add_error(id->location.file + ":" + std::to_string(id->location.line) +
+                              ": impl references unknown interface '" +
+                              id->interface_name + "'");
+                    continue;
+                }
+                auto* sd = struct_defs[id->struct_name];
+                // Add interface to struct's interface list
+                if (!id->interface_name.empty()) {
+                    bool already = false;
+                    for (const auto& iface : sd->interfaces) {
+                        if (iface == id->interface_name) { already = true; break; }
+                    }
+                    if (!already) sd->interfaces.push_back(id->interface_name);
+                }
+                // Add methods from impl block to struct
+                for (auto& m : id->methods) {
+                    sd->methods.push_back(std::move(m));
+                }
+                id->methods.clear(); // prevent double-free
+            }
+        }
+    }
+
     // Second pass: check all declarations
     // Segunda passada: verifica todas as declaracoes
     for (const auto& ast : asts) {
@@ -440,6 +564,7 @@ std::vector<std::string> TypeChecker::check(
                     }
                     break;
                 }
+                case ASTNodeType::IMPL_DECL:
                 case ASTNodeType::MACRO_DECL:
                 case ASTNodeType::BUILD_BLOCK:
                 case ASTNodeType::EMIT_STMT:
@@ -821,16 +946,17 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
                             // Check if unsuffixed literal fits in declared type
                             // Verifica se literal sem sufixo cabe no tipo declarado
                             if (!ident->declared_type.empty()) {
+                                ident->declared_type = resolve_array_sizes(ident->declared_type);
                                 bool is_unsuffixed_literal = false;
                                 if (assign->value->type == ASTNodeType::INT_LITERAL) {
                                     auto* il = static_cast<IntLiteral*>(assign->value.get());
                                     if (il->literal_type.empty()) {
                                         is_unsuffixed_literal = true;
-                                        if (!int_fits_in_type(il->value, ident->declared_type)) {
+                                        if (!int_fits_in_type(il->value, ident->declared_type, il->is_hex)) {
                                             add_error(assign->location.file + ":" +
-                                                      std::to_string(assign->location.line) +
-                                                      ": value " + std::to_string(il->value) +
-                                                      " does not fit in type '" + ident->declared_type + "'");
+                                                       std::to_string(assign->location.line) +
+                                                       ": value " + std::to_string(il->value) +
+                                                       " does not fit in type '" + ident->declared_type + "'");
                                         }
                                     }
                                 }
@@ -840,8 +966,103 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
                                         is_unsuffixed_literal = true;
                                     }
                                 }
-                                // Check type compatibility for non-literal values
-                                if (!is_unsuffixed_literal && !can_assign(val_type, ident->declared_type)) {
+                                // Array literal initialization: {val1, val2, ...}
+                                if (assign->value->type == ASTNodeType::ARRAY_LITERAL) {
+                                    auto* al = static_cast<ArrayLiteral*>(assign->value.get());
+                                    auto bracket = ident->declared_type.find('[');
+                                    if (bracket != std::string::npos) {
+                                        std::string target_elem = ident->declared_type.substr(0, bracket);
+                                        for (auto& el : al->elements) {
+                                            // Check if unsuffixed literal fits in target element type
+                                            if (el->type == ASTNodeType::INT_LITERAL) {
+                                                auto* iel = static_cast<IntLiteral*>(el.get());
+                                                if (iel->literal_type.empty() &&
+                                                    iel->resolved_type != target_elem && 
+                                                    !int_fits_in_type(iel->value, target_elem, iel->is_hex)) {
+                                                    add_error(assign->location.file + ":" +
+                                                              std::to_string(assign->location.line) +
+                                                              ": value " + std::to_string(iel->value) +
+                                                              " does not fit in array element type '" +
+                                                              target_elem + "'");
+                                                }
+                                                el->resolved_type = target_elem;
+                                            } else if (el->type == ASTNodeType::FLOAT_LITERAL) {
+                                                el->resolved_type = target_elem;
+                                            } else if (!can_assign(el->resolved_type, target_elem)) {
+                                                add_error(assign->location.file + ":" +
+                                                          std::to_string(assign->location.line) +
+                                                          ": cannot assign '" + el->resolved_type +
+                                                          "' to array element type '" + target_elem + "'");
+                                            } else {
+                                                el->resolved_type = target_elem;
+                                            }
+                                        }
+                                    } else if (is_struct_type(ident->declared_type)) {
+                                        auto* sd = struct_defs[ident->declared_type];
+                                        // Check if it's named init (elements are Assignments)
+                                        bool is_named = (!al->elements.empty() &&
+                                                         al->elements[0]->type == ASTNodeType::ASSIGNMENT);
+                                        if (is_named) {
+                                            for (auto& el : al->elements) {
+                                                if (el->type != ASTNodeType::ASSIGNMENT) continue;
+                                                auto* ass = static_cast<Assignment*>(el.get());
+                                                if (ass->target->type != ASTNodeType::IDENT_EXPR) continue;
+                                                std::string fname = static_cast<IdentExpr*>(ass->target.get())->name;
+                                                auto* fd = find_struct_field(sd, fname);
+                                                if (!fd) {
+                                                    add_error(assign->location.file + ":" +
+                                                              std::to_string(assign->location.line) +
+                                                              ": struct '" + ident->declared_type +
+                                                              "' has no field '" + fname + "'");
+                                                    continue;
+                                                }
+                                                std::string val_type = ass->value->resolved_type;
+                                                if (val_type.empty()) val_type = check_expression(ass->value.get());
+                                                if (!can_assign(val_type, fd->type_name)) {
+                                                    add_error(assign->location.file + ":" +
+                                                              std::to_string(assign->location.line) +
+                                                              ": cannot assign '" + val_type +
+                                                              "' to field '" + fname + "'");
+                                                }
+                                            }
+                                        } else {
+                                            // Positional init: match by index
+                                            size_t n = std::min(al->elements.size(), sd->fields.size());
+                                            for (size_t ei = 0; ei < n; ei++) {
+                                                auto* fd = static_cast<FieldDecl*>(sd->fields[ei].get());
+                                                auto& el = al->elements[ei];
+                                                if (el->type == ASTNodeType::INT_LITERAL) {
+                                                    auto* iel = static_cast<IntLiteral*>(el.get());
+                                                    if (iel->literal_type.empty() &&
+                                                        iel->resolved_type != fd->type_name &&
+                                                        !int_fits_in_type(iel->value, fd->type_name, iel->is_hex)) {
+                                                        add_error(assign->location.file + ":" +
+                                                                  std::to_string(assign->location.line) +
+                                                                  ": value " + std::to_string(iel->value) +
+                                                                  " does not fit in struct field '" +
+                                                                  fd->name + "' of type '" + fd->type_name + "'");
+                                                    }
+                                                    el->resolved_type = fd->type_name;
+                                                } else if (el->type == ASTNodeType::FLOAT_LITERAL) {
+                                                    el->resolved_type = fd->type_name;
+                                                } else if (!can_assign(el->resolved_type, fd->type_name)) {
+                                                    add_error(assign->location.file + ":" +
+                                                              std::to_string(assign->location.line) +
+                                                              ": cannot assign '" + el->resolved_type +
+                                                              "' to struct field '" + fd->name +
+                                                              "' of type '" + fd->type_name + "'");
+                                                } else {
+                                                    el->resolved_type = fd->type_name;
+                                                }
+                                            }
+                                        }
+                                    } else {
+                                        add_error(assign->location.file + ":" +
+                                                  std::to_string(assign->location.line) +
+                                                  ": cannot assign array literal to non-array type '" +
+                                                  ident->declared_type + "'");
+                                    }
+                                } else if (!is_unsuffixed_literal && !can_assign(val_type, ident->declared_type)) {
                                     add_error(assign->location.file + ":" +
                                               std::to_string(assign->location.line) +
                                               ": cannot assign '" + val_type + "' to '" + ident->declared_type + "'");
@@ -859,6 +1080,7 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
             if (es->expr->type == ASTNodeType::IDENT_EXPR) {
                 auto* ident = static_cast<IdentExpr*>(es->expr.get());
                 if (!ident->declared_type.empty() && !lookup(ident->name)) {
+                    ident->declared_type = resolve_array_sizes(ident->declared_type);
                     if (!is_type_known(ident->declared_type)) {
                         add_error(es->location.file + ":" +
                                   std::to_string(es->location.line) +
@@ -944,6 +1166,11 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
             std::string val_type = "int";
             if (cd->value) {
                 val_type = check_expression(cd->value.get());
+                // Store const int value for array size resolution
+                if (val_type == "int" && cd->value->type == ASTNodeType::INT_LITERAL) {
+                    auto* il = static_cast<IntLiteral*>(cd->value.get());
+                    const_values_[cd->name] = il->value;
+                }
             }
             if (!cd->type_name.empty()) {
                 if (!can_assign(val_type, cd->type_name)) {
@@ -971,7 +1198,7 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
         case ASTNodeType::INT_LITERAL: {
             auto* il = static_cast<IntLiteral*>(expr);
             if (!il->literal_type.empty()) {
-                if (!int_fits_in_type(il->value, il->literal_type)) {
+                if (!int_fits_in_type(il->value, il->literal_type, il->is_hex)) {
                     add_error(expr->location.file + ":" +
                               std::to_string(expr->location.line) +
                               ": value " + std::to_string(il->value) +
@@ -1204,6 +1431,28 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                     return "void";
                 }
 
+                // Check for type cast: T(expr) where T is a type keyword
+                // Verifica cast de tipo: T(expr) onde T e uma palavra-chave de tipo
+                if (call->arguments.size() == 1 && is_type_keyword(ident->name)) {
+                    std::string val_type = check_expression(call->arguments[0].get());
+                    std::string target = ident->name;
+                    // Allow narrowing with explicit cast: check only if types are compatible
+                    bool num_from = is_signed_int(val_type) || is_unsigned_int(val_type) || is_float_type(val_type);
+                    bool num_to = is_signed_int(target) || is_unsigned_int(target) || is_float_type(target);
+                    if (num_from && num_to) {
+                        // Numeric cast is always allowed (including narrowing)
+                        expr->resolved_type = target;
+                        return target;
+                    }
+                    if (!can_assign(val_type, target) && !can_assign(target, val_type)) {
+                        add_error(expr->location.file + ":" +
+                                  std::to_string(expr->location.line) +
+                                  ": cannot cast '" + val_type + "' to '" + target + "'");
+                    }
+                    expr->resolved_type = target;
+                    return target;
+                }
+
                 // Check for constructor call: struct name matches
                 // Verifica chamada de construtor: nome da struct corresponde
                 if (is_struct_type(ident->name)) {
@@ -1298,6 +1547,50 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                                   ": struct '" + base_type + "' has no method '" +
                                   mem->member + "'");
                     }
+                } else if (is_interface_type(base_type)) {
+                    // Interface method call
+                    // Chamada de metodo de interface
+                    auto* id = interface_defs[base_type];
+                    bool found = false;
+                    for (const auto& method : id->methods) {
+                        if (method->type == ASTNodeType::FUNC_DECL) {
+                            auto* fd = static_cast<FuncDecl*>(method.get());
+                            if (fd->name == mem->member) {
+                                expr->resolved_type = fd->return_type.empty() ? "void" : fd->return_type;
+                                found = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (!found) {
+                        add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                  ": interface '" + base_type + "' has no method '" +
+                                  mem->member + "'");
+                    }
+                } else if (is_dynamic_array_type(base_type)) {
+                    // Dynamic array T[] built-in methods
+                    // Metodos embutidos de array dinamico T[]
+                    if (mem->member == "append") {
+                        if (call->arguments.size() != 1) {
+                            add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                      ": append() requires exactly 1 argument");
+                        } else {
+                            auto bracket = base_type.find('[');
+                            std::string elem_type = base_type.substr(0, bracket);
+                            std::string arg_type = check_expression(call->arguments[0].get());
+                            if (!can_assign(arg_type, elem_type)) {
+                                add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                          ": cannot append '" + arg_type + "' to array of '" +
+                                          elem_type + "'");
+                            }
+                        }
+                        expr->resolved_type = "void";
+                    } else {
+                        add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                                  ": array type '" + base_type + "' has no method '" +
+                                  mem->member + "'");
+                        expr->resolved_type = "void";
+                    }
                 } else {
                     add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
                               ": cannot call method on non-struct type '" + obj_type + "'");
@@ -1311,11 +1604,76 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
 
         case ASTNodeType::MEMBER_EXPR: {
             auto* mem = static_cast<MemberExpr*>(expr);
+
+            // Handle .sizeof and .alignof built-in properties
+            if (mem->member == "sizeof" || mem->member == "alignof") {
+                if (mem->object->type == ASTNodeType::IDENT_EXPR) {
+                    auto* ident = static_cast<IdentExpr*>(mem->object.get());
+                    if (is_type_keyword(ident->name) ||
+                        struct_defs.count(ident->name) ||
+                        interface_defs.count(ident->name) ||
+                        type_aliases.count(ident->name)) {
+                        expr->resolved_type = "i64";
+                        return "i64";
+                    }
+                    auto* sym = lookup(ident->name);
+                    if (sym) {
+                        ident->resolved_type = sym->type;
+                        expr->resolved_type = "i64";
+                        return "i64";
+                    }
+                }
+                // expression.sizeof — resolve object and get its type size
+                {
+                    std::string t = check_expression(mem->object.get());
+                    if (t != "unknown" && !t.empty()) {
+                        expr->resolved_type = "i64";
+                        return "i64";
+                    }
+                }
+                add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                          ": cannot get sizeof of expression");
+                expr->resolved_type = "unknown";
+                return "unknown";
+            }
+
             std::string obj_type = check_expression(mem->object.get());
 
             std::string base_type = obj_type;
             if (!base_type.empty() && base_type.back() == '*') {
                 base_type.pop_back();
+            }
+
+            // Dynamic array T[] built-in properties: .len -> i64, .cap -> i64
+            if (is_dynamic_array_type(base_type)) {
+                if (mem->member == "len" || mem->member == "cap") {
+                    expr->resolved_type = "i64";
+                    return "i64";
+                }
+                add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                          ": array type '" + base_type + "' has no member '" +
+                          mem->member + "'");
+                expr->resolved_type = "unknown";
+                return "unknown";
+            }
+
+            // Interface type: check method access
+            if (is_interface_type(base_type)) {
+                auto* id = interface_defs[base_type];
+                for (const auto& method : id->methods) {
+                    if (method->type == ASTNodeType::FUNC_DECL) {
+                        auto* fd = static_cast<FuncDecl*>(method.get());
+                        if (fd->name == mem->member) {
+                            expr->resolved_type = "fn";
+                            return "fn";
+                        }
+                    }
+                }
+                add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                          ": interface '" + base_type + "' has no member '" +
+                          mem->member + "'");
+                expr->resolved_type = "unknown";
+                return "unknown";
             }
 
             if (is_struct_type(base_type) || is_union_type(base_type)) {
@@ -1443,6 +1801,22 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             return arr_type;
         }
 
+        case ASTNodeType::CAST_EXPR: {
+            auto* ce = static_cast<CastExpr*>(expr);
+            std::string val_type = check_expression(ce->expr.get());
+            std::string target = ce->target_type;
+            // Allow all numeric casts (including narrowing) with explicit cast
+            bool num_from = is_signed_int(val_type) || is_unsigned_int(val_type) || is_float_type(val_type);
+            bool num_to = is_signed_int(target) || is_unsigned_int(target) || is_float_type(target);
+            if (!(num_from && num_to)) {
+                add_error(expr->location.file + ":" +
+                          std::to_string(expr->location.line) +
+                          ": cannot cast '" + val_type + "' to '" + target + "'");
+            }
+            expr->resolved_type = target;
+            return target;
+        }
+
         case ASTNodeType::ASSIGNMENT: {
             auto* assign = static_cast<Assignment*>(expr);
             std::string target_type = check_expression(assign->target.get());
@@ -1462,12 +1836,126 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                 return target_type;
             }
 
+            // Array literal initialization: {val1, val2, ...}
+            if (assign->value->type == ASTNodeType::ARRAY_LITERAL) {
+                auto* al = static_cast<ArrayLiteral*>(assign->value.get());
+                auto bracket = target_type.find('[');
+                if (bracket == std::string::npos) {
+                    if (is_struct_type(target_type)) {
+                        auto* sd = struct_defs[target_type];
+                        // Check if it's named init (elements are Assignments)
+                        bool is_named = (!al->elements.empty() &&
+                                         al->elements[0]->type == ASTNodeType::ASSIGNMENT);
+                        if (is_named) {
+                            // Named init: match by field name
+                            // Init nomeado: casa por nome do campo
+                            for (auto& el : al->elements) {
+                                if (el->type != ASTNodeType::ASSIGNMENT) {
+                                    add_error(expr->location.file + ":" +
+                                              std::to_string(expr->location.line) +
+                                              ": named init requires all elements to be 'field = value'");
+                                    continue;
+                                }
+                                auto* ass = static_cast<Assignment*>(el.get());
+                                if (ass->target->type != ASTNodeType::IDENT_EXPR) {
+                                    add_error(expr->location.file + ":" +
+                                              std::to_string(expr->location.line) +
+                                              ": expected field name in named init");
+                                    continue;
+                                }
+                                std::string fname = static_cast<IdentExpr*>(ass->target.get())->name;
+                                auto* fd = find_struct_field(sd, fname);
+                                if (!fd) {
+                                    add_error(expr->location.file + ":" +
+                                              std::to_string(expr->location.line) +
+                                              ": struct '" + target_type + "' has no field '" +
+                                              fname + "'");
+                                    continue;
+                                }
+                                std::string val_type = ass->value->resolved_type;
+                                if (val_type.empty()) val_type = check_expression(ass->value.get());
+                                if (!can_assign(val_type, fd->type_name)) {
+                                    add_error(expr->location.file + ":" +
+                                              std::to_string(expr->location.line) +
+                                              ": cannot assign '" + val_type +
+                                              "' to field '" + fname + "' of type '" +
+                                              fd->type_name + "'");
+                                }
+                            }
+                        } else {
+                            // Positional init: match by index
+                            size_t n = std::min(al->elements.size(), sd->fields.size());
+                            for (size_t ei = 0; ei < n; ei++) {
+                                auto* fd = static_cast<FieldDecl*>(sd->fields[ei].get());
+                                auto& el = al->elements[ei];
+                                if (el->type == ASTNodeType::INT_LITERAL) {
+                                    auto* iel = static_cast<IntLiteral*>(el.get());
+                                    if (iel->literal_type.empty() &&
+                                        iel->resolved_type != fd->type_name &&
+                                        !int_fits_in_type(iel->value, fd->type_name, iel->is_hex)) {
+                                        add_error(expr->location.file + ":" +
+                                                  std::to_string(expr->location.line) +
+                                                  ": value " + std::to_string(iel->value) +
+                                                  " does not fit in struct field '" +
+                                                  fd->name + "' of type '" + fd->type_name + "'");
+                                    }
+                                    el->resolved_type = fd->type_name;
+                                } else if (el->type == ASTNodeType::FLOAT_LITERAL) {
+                                    el->resolved_type = fd->type_name;
+                                } else if (!can_assign(el->resolved_type, fd->type_name)) {
+                                    add_error(expr->location.file + ":" +
+                                              std::to_string(expr->location.line) +
+                                              ": cannot assign '" + el->resolved_type +
+                                              "' to struct field '" + fd->name +
+                                              "' of type '" + fd->type_name + "'");
+                                } else {
+                                    el->resolved_type = fd->type_name;
+                                }
+                            }
+                        }
+                    } else {
+                        add_error(expr->location.file + ":" +
+                                  std::to_string(expr->location.line) +
+                                  ": cannot assign array literal to non-array type '" +
+                                  target_type + "'");
+                    }
+                } else {
+                    std::string target_elem = target_type.substr(0, bracket);
+                    for (auto& el : al->elements) {
+                        if (el->type == ASTNodeType::INT_LITERAL) {
+                            auto* iel = static_cast<IntLiteral*>(el.get());
+                            if (iel->literal_type.empty() &&
+                                iel->resolved_type != target_elem &&
+                                !int_fits_in_type(iel->value, target_elem, iel->is_hex)) {
+                                add_error(expr->location.file + ":" +
+                                          std::to_string(expr->location.line) +
+                                          ": value " + std::to_string(iel->value) +
+                                          " does not fit in array element type '" +
+                                          target_elem + "'");
+                            }
+                            el->resolved_type = target_elem;
+                        } else if (el->type == ASTNodeType::FLOAT_LITERAL) {
+                            el->resolved_type = target_elem;
+                        } else if (!can_assign(el->resolved_type, target_elem)) {
+                            add_error(expr->location.file + ":" +
+                                      std::to_string(expr->location.line) +
+                                      ": cannot assign '" + el->resolved_type +
+                                      "' to array element type '" + target_elem + "'");
+                        } else {
+                            el->resolved_type = target_elem;
+                        }
+                    }
+                }
+                expr->resolved_type = target_type;
+                return target_type;
+            }
+
             // Check if unsuffixed literal fits in target type
             // Verifica se literal sem sufixo cabe no tipo destino
             if (assign->value->type == ASTNodeType::INT_LITERAL) {
                 auto* il = static_cast<IntLiteral*>(assign->value.get());
                 if (il->literal_type.empty() && target_type != value_type) {
-                    if (!int_fits_in_type(il->value, target_type)) {
+                    if (!int_fits_in_type(il->value, target_type, il->is_hex)) {
                         add_error(expr->location.file + ":" +
                                   std::to_string(expr->location.line) +
                                   ": value " + std::to_string(il->value) +
@@ -1493,6 +1981,32 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             std::string inner_type = check_expression(ai->expr.get());
             expr->resolved_type = inner_type;
             return inner_type;
+        }
+
+        case ASTNodeType::ARRAY_LITERAL: {
+            auto* al = static_cast<ArrayLiteral*>(expr);
+            std::string common;
+            for (auto& el : al->elements) {
+                if (el->type == ASTNodeType::ASSIGNMENT) {
+                    // Named struct init: field = value — only check the value part
+                    auto* ass = static_cast<Assignment*>(el.get());
+                    std::string t = check_expression(ass->value.get());
+                    if (common.empty()) common = t;
+                } else {
+                    std::string t = check_expression(el.get());
+                    if (common.empty()) {
+                        common = t;
+                    } else if (t != common) {
+                        add_error(expr->location.file + ":" +
+                                  std::to_string(expr->location.line) +
+                                  ": all elements of array literal must have the same type, got '" +
+                                  common + "' and '" + t + "'");
+                    }
+                }
+            }
+            if (common.empty()) common = "int"; // Empty array -> int[] default
+            expr->resolved_type = common + "[]";
+            return expr->resolved_type;
         }
 
         case ASTNodeType::RESET_EXPR: {

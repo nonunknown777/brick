@@ -2,6 +2,10 @@
 
 ## Status: ✅ COMPLETO
 
+## Novidades (Sessão 22)
+- ✅ `ALIGNOF` token adicionado para `.alignof` built-in
+- ✅ `AT` token (`@`) adicionado para `@system` em includes e attributes
+
 O lexer está completo e funcionando. Todos os 29 testes unitários passam.
 
 ## Implementado
@@ -23,6 +27,9 @@ O lexer está completo e funcionando. Todos os 29 testes unitários passam.
 - Lexer reescrito para emitir `string_view` apontando direto pro buffer de source — zero alocação por token
 - Escape sequences agora são processadas no parser, não no lexer (string/char literal armazenam raw content)
 - `std::from_chars` usado para parse numérico (funciona com `string_view`)
+
+## Mudanças recentes
+- `IMPL` keyword adicionada para `impl Struct : Interface { }` syntax
 
 ## Observações
 - `and` não é keyword — tratado contextualmente no parser

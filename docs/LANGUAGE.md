@@ -235,10 +235,12 @@ String empty = ""                      ← empty string
 
 ```
 int[10] arr                            ← fixed array of 10 integers
-int[5] vals = int[5] @game             ← array in a block
+int[5] vals = {1, 2, 3, 4, 5}         ← with brace initializer
+f32[4] m = {1.0, 0.0, 0.0, 1.0}      ← matrix init
 ```
 
-> Fixed size defined at declaration.
+> Fixed size defined at declaration. Brace init `{val, ...}` sets all elements.
+> Array literals in expressions generate C99 compound literals `(T[]){val, ...}`.
 
 ## Error Handling
 

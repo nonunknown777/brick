@@ -46,6 +46,10 @@ private:
     // Type aliases (type X = Y)
     std::unordered_map<std::string, std::string> type_aliases;
 
+    // Const values for array size resolution
+    // Valores const para resolucao de tamanho de array
+    std::unordered_map<std::string, int64_t> const_values_;
+
     // Enum definitions
     std::unordered_map<std::string, EnumDecl*> enum_defs;
 
@@ -63,8 +67,10 @@ private:
     bool is_struct_type(const std::string& type_name);
     bool is_interface_type(const std::string& type_name);
     bool is_union_type(const std::string& type_name);
+    FieldDecl* find_struct_field(StructDecl* sd, const std::string& name);
     bool can_assign(const std::string& from, const std::string& to);
     std::string promote_types(const std::string& a, const std::string& b);
+    std::string resolve_array_sizes(const std::string& type);
 
     void check_program(ProgramNode* program);
     void check_struct(StructDecl* sd);

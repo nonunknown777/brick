@@ -1,0 +1,37 @@
+// Test @packed and @align struct attributes
+// Testa atributos @packed e @align de struct
+
+using IO
+
+struct PackedExample @packed {
+    u8 a
+    i32 b
+}
+
+struct AlignedExample @align(64) {
+    u8 a
+    i32 b
+}
+
+// Anonymous structs inside unions with @packed: just test parsing
+struct AllInOne @packed @align(16) {
+    u8 x
+    i64 y
+}
+
+fn main() {
+    // Just verify these compile and run
+    PackedExample p
+    p.a = 1
+    p.b = 2
+
+    AlignedExample a
+    a.a = 3
+    a.b = 4
+
+    AllInOne o
+    o.x = 5
+    o.y = 6
+
+    print("PASS: all packed/align tests\n")
+}
