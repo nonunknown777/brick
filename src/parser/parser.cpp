@@ -510,7 +510,8 @@ private:
 
     std::unique_ptr<ASTNode> factor_macro() {
         auto left = unary_macro();
-        while (peek().type == TokenType::STAR || peek().type == TokenType::SLASH) {
+        while (peek().type == TokenType::STAR || peek().type == TokenType::SLASH ||
+               peek().type == TokenType::BIT_AND) {
             TokenType op = advance().type;
             auto right = unary_macro();
             left = std::make_unique<BinaryOp>(std::move(left), op, std::move(right), left->location);
@@ -970,7 +971,8 @@ private:
 
     std::unique_ptr<ASTNode> factor_build() {
         auto left = unary_build();
-        while (peek().type == TokenType::STAR || peek().type == TokenType::SLASH) {
+        while (peek().type == TokenType::STAR || peek().type == TokenType::SLASH ||
+               peek().type == TokenType::BIT_AND) {
             TokenType op = advance().type;
             auto right = unary_build();
             left = std::make_unique<BinaryOp>(std::move(left), op, std::move(right), left->location);
@@ -1949,7 +1951,8 @@ private:
 
     std::unique_ptr<ASTNode> factor() {
         auto left = unary();
-        while (peek().type == TokenType::STAR || peek().type == TokenType::SLASH) {
+        while (peek().type == TokenType::STAR || peek().type == TokenType::SLASH ||
+               peek().type == TokenType::BIT_AND) {
             TokenType op = advance().type;
             auto right = unary();
             left = std::make_unique<BinaryOp>(std::move(left), op, std::move(right), left->location);

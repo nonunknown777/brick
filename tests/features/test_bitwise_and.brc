@@ -1,0 +1,56 @@
+package TEST
+
+using IO
+
+block global = 1MB
+
+enum Permission {
+    READ  = 0x01
+    WRITE = 0x02
+    EXEC  = 0x04
+}
+
+fn main() {
+    // Basic bitwise AND
+    u8 a = 0xFF
+    u8 b = 0x0F
+    u8 c = a & b
+    print("a&b={0}", c as u32)  // expected: 15
+
+    // Bitwise AND with hex literals
+    u32 x = 0xFFFF0000
+    u32 y = 0x0000FFFF
+    u32 z = x & y
+    print("x&y={0}", z)  // expected: 0
+
+    // Bitwise AND to check flags
+    u32 flags = 0x06
+    if flags & 0x02 {
+        print("flag 2 set")
+    }
+    if flags & 0x04 {
+        print("flag 4 set")
+    }
+    if not (flags & 0x01) {
+        print("flag 1 not set")
+    }
+
+    // Bitwise AND with enumerated flags
+    int perms = READ or WRITE
+    if perms & READ {
+        print("can read")
+    }
+    if perms & WRITE {
+        print("can write")
+    }
+    if not (perms & EXEC) {
+        print("cannot exec")
+    }
+
+    // Bitwise AND in expressions
+    u32 val = (0xFFu32 & 0xF0u32) + 1u32
+    print("val={0}", val)  // expected: 241 (0xF0 + 1)
+
+    // Verify results
+    print("all bitwise tests passed")
+}

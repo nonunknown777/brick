@@ -2,19 +2,59 @@
 
 ## v1.0.0 — First Stable Release
 
-### Major
-- First stable release
-- Full compiler pipeline: lexer → parser → codegen → C → binary
-- Block-based memory management with bump + pool allocators
-- Native hot reload on Linux (dlopen+inotify) and Windows (LoadLibrary+ReadDirectoryChangesW)
-- TUI memory visualizer (ncurses / PDCurses)
-- Macro system with `macro`, `build`, `emit`
-- C interop via `link`/`include`/`extern fn` and `@system` includes
-- Windows native port (MinGW-w64, all 159 codegen tests passing)
-- VS Code extension with syntax highlighting, LSP, and debug webview
-- GDB pretty-printers and custom commands
-- 11 official libraries: window, input, audio, file, net, math, and more
-- Full documentation in English and Portuguese
+### Major: Complete Language Implementation
+- **First stable release** — Full compiler pipeline: lexer → parser → codegen → C → binary
+- **Block-based memory management** — Bump allocator (`block name = 64MB`), pool allocator (`pool_create`), TLS blocks, double-buffer API
+- **Native hot reload** — Linux (dlopen+inotify), Windows (LoadLibrary+ReadDirectoryChangesW), atomic function swap
+- **TUI memory visualizer** — ncurses (Linux) / PDCurses (Windows), standalone and attach modes
+- **Macro system** — `macro` with `$` interpolation, `macro NAME(args...)` varargs, `build {}` compile-time eval, `emit {}` code gen
+- **`$macro()` explicit call syntax** — Call macros with `$name(args)` for visual clarity alongside `name(args)`
+- **C interop** — `include`/`link`/`extern fn`, `@system` for angle-bracket includes, `export fn` for linker-visible functions
+- **Windows native port** — MinGW-w64, VirtualAlloc blocks, LoadLibrary hot reload, Win32 window library, full CI pipeline
+
+### Language Features (v1.0.0 Complete)
+- **Binary `&` operator** — Bitwise AND implemented as a binary operator (`a & b`). Parser updated to handle `&` in expressions alongside `*`/`/` precedence. Type checker validates integer operands. Constant folding for compile-time evaluation.
+- **Struct alignment** — Pool allocator now correctly accounts for struct field alignment padding. Added `type_alignment()` helper; struct size estimation includes per-field padding and trailing struct alignment. Fixes pool allocator crash for structs near the 64-byte threshold.
+- **Enum type handling** — Enum variants now have type `int` instead of the enum name, allowing direct use in arithmetic and bitwise operations. `can_assign()` recognizes enum types as integers.
+- **Integer conditions** — `if`/`while`/`for`/`not`/`or`/`and` now accept integer types in addition to `bool`, enabling natural C-style conditions like `if flags & 0x02`.
+- **Arrays** — Fixed `int[10]`, dynamic `int[]` with `.append`/`.len`/`.cap`, local stack arrays, array literals `{1, 2, 3}`
+- **Struct enhancements** — Arrays in struct fields, anonymous struct/union nesting, `@packed`/`@align(N)` attributes, init literals (positional + named)
+- **Interfaces & polymorphism** — `interface` declarations, `impl Struct : Interface` separate block, vtbl dispatch, `is`/`as` type checks
+- **Types** — Fixed-width (`u8`..`u64`, `i8`..`i64`, `f32`/`f64`, `usize`/`isize`, `byte`), `short`/`long`/`double` aliases, `type NAME = TYPE` aliases, bitfields (`u4`, `i3`), `sizeof`/`alignof`
+- **Flow control** — `if`/`else`, `while`, `for` (C-style + `for x in N`), `break`/`continue`, `match` with patterns, `defer`
+- **Literals** — Hex (`0xFF`), binary (`0b1010`), octal (`0o77`), underscore separators (`1_000_000`), float, char, string
+- **Enums** — Named constants with hex values (`enum Flags { A = 0xFF; B }`)
+- **Unions** — `union Data { int i; float f }`, anonymous union inside struct
+- **Pointers** — `*T` pointer type, full pointer arithmetic, pointer arrays `*T[N]`
+- **Constants** — `const NAME = value` with compile-time expression evaluation
+- **Narrowing** — Explicit cast with `as` operator, overflow checking, widening rules
+- **Logical operators** — `and`/`or`/`not` keywords alongside `&&`/`||`/`!`
+- **Error handling** — `error("msg")` panic with message and abort
+- **Private/public** — Visibility modifiers at field and top-level
+- **Package system** — `package NAME`, `using Package`, relative includes
+
+### VS Code Extension v1.0.0
+- **Syntax highlighting** — All keywords, types, operators, attributes (`@packed`/`@align`), macro sigil (`$`), pointers
+- **Language Server** — Completions (keywords, snippets, runtime functions, document symbols), hover docs, go-to-definition, signature help, document symbols, semantic tokens, diagnostics
+- **Full feature support** — `union`, `impl`, `type`, dynamic arrays, bitfields, anonymous struct/union, `@packed`/`@align`, `export fn`, `@system` includes, `$macro()`, pointer types, all fixed-width types, `and`/`or`/`not`, `short`/`long`/`double`, `defer`, `const`, `match`, `break`/`continue`, `for x in N`
+- **Debug webview** — Memory blocks, pool allocator inspection
+- **Workspace setup** — Auto-generated `launch.json`/`tasks.json` with debug and compile tasks
+- **283 scanner tests** — All passing with zero failures
+
+### Documentation
+- **Full language spec** — `docs/LANGUAGE.md` (EN + PT-BR) with 30+ sections covering every feature
+- **Macro documentation** — `docs/MACROS.md` with comprehensive examples
+- **Architecture docs** — `docs/ARCHITECTURE.md`, `docs/OPTIMIZATIONS.md`, `docs/hot-reload.md` (EN + PT-BR)
+- **Website** — `docs/index.html` with feature cards for all capabilities
+- **Wiki** — All pages updated: Language-Reference, Home, FAQ, Architecture, Getting-Started, Memory-Blocks, Hot-Reload, Performance, VS-Code-Extension, Contributing
+- **215 codegen tests** — All passing, 0 failures
+
+### Tooling & Infrastructure
+- **`brick build`/`brick run`** — CLI for compile and execute
+- **SCons build system** — Multi-target (Linux/Windows), profiles (release/debug/sanitize/pgo), parallel build
+- **GDB integration** — Pretty-printers for BlockCtx/BrickString, `info blocks` command, `#line` directives
+- **GitHub Actions CI** — Linux and Windows pipelines, full build + release automation
+- **Gravity Index** — Integrated tool discovery for third-party services
 
 ---
 

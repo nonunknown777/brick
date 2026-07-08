@@ -1,0 +1,121 @@
+// README Demo — Brick v1.0.0 feature showcase
+// All code here is verified to compile with the brick compiler
+
+package DEMO
+
+using IO
+
+block global = 1MB
+
+// ── Interface ──
+interface Damageable {
+    fn take_damage(i32 dmg)
+}
+
+// ── Struct with interface, methods, dynamic array ──
+struct Player {
+    i32 hp
+    String name
+    i32 ammo
+    f64 accuracy
+    f64 armor                       // pushes struct past 64B pool threshold
+    bool active                     // extra padding for alignment
+    String[] inventory               // dynamic array
+
+    fn Player(i32 h, String n, i32 a, f64 acc, f64 arm, bool act) {
+        hp = h
+        name = n
+        ammo = a
+        accuracy = acc
+        armor = arm
+        active = act
+    }
+
+    fn take_damage(i32 dmg) {
+        hp -= dmg
+        print("{0} took {1} damage, hp={2}", name, dmg, hp)
+    }
+}
+
+// ── Impl: separate interface implementation ──
+struct Arrow {
+    i32 damage
+
+    fn Arrow() {
+        damage = 0
+    }
+}
+
+impl Arrow : Damageable {
+    fn take_damage(i32 d) {
+        damage = d
+        print("Arrow took {0} damage", d)
+    }
+}
+
+// ── Union with anonymous struct ──
+union Data {
+    i32 int_val
+    struct { u8 low; u8 high }
+}
+
+// ── Enum with hex values ──
+enum Flags {
+    READ  = 0x01
+    WRITE = 0x02
+    EXEC  = 0x04
+}
+
+// ── Defer, Const ──
+fn evaluate(i32 score) -> String {
+    defer { print("evaluation complete") }
+    const THRESHOLD = 80
+    if score >= THRESHOLD {
+        return "passed!"
+    }
+    return "failed"
+}
+
+fn main() {
+    // Dynamic array
+    int[] numbers
+    numbers.append(10)
+    numbers.append(20)
+    numbers.append(30)
+    print("count: {0}", numbers.len)
+
+    // Defer + const + if
+    String result = evaluate(85)
+    print("result: {0}", result)
+
+    // Union + anonymous struct
+    Data d
+    d.int_val = 0x0A0B
+    print("low={0}, high={1}", d.low, d.high)
+
+    // Enum with hex + binary &
+    int f = READ or WRITE
+    if f & READ {
+        print("can read")
+    }
+    if f & WRITE {
+        print("can write")
+    }
+    if not (f & EXEC) {
+        print("cannot exec")
+    }
+
+    // OOP with methods
+    Player p = Player(100, "Felipe", 30, 0.85f64, 5.0f64, true) @global
+    p.take_damage(20)
+
+    // Separate impl
+    Arrow a = Arrow() @global
+    a.take_damage(5)
+
+    // Sizeof
+    i64 s = int.sizeof
+    print("int.sizeof = {0}", s)
+
+    global.reset()
+}

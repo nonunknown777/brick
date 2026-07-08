@@ -101,6 +101,12 @@ static bool is_type_keyword(const std::string& name) {
            name == "f32" || name == "f64" || name == "usize" || name == "isize";
 }
 
+static bool is_integer_type(const std::string& t) {
+    std::string n = normalize_type(t);
+    if (is_bitfield_type(n)) return true;
+    return is_signed_int(t) || is_unsigned_int(t);
+}
+
 static bool is_float_type(const std::string& t) {
     std::string n = normalize_type(t);
     return n == "f32" || n == "f64";
@@ -302,6 +308,14 @@ bool TypeChecker::can_assign(const std::string& from, const std::string& to) {
     std::string t = normalize_type(t_alias);
 
     if (f == t) return true;
+
+    // Enum types: treat as int for assignment compatibility
+    // Tipos enum: trata como int para compatibilidade de atribuicao
+    if (enum_defs.count(f) || enum_defs.count(t)) {
+        std::string f_eff = enum_defs.count(f) ? "int" : f_alias;
+        std::string t_eff = enum_defs.count(t) ? "int" : t_alias;
+        return can_assign(f_eff, t_eff);
+    }
 
     // Struct → interface: check if struct implements the interface
     // Struct → interface: verifica se struct implementa a interface
@@ -782,7 +796,7 @@ void TypeChecker::check_interface(InterfaceDecl* id) {
 void TypeChecker::check_enum(EnumDecl* ed) {
     declare(ed->name, "int", false);
     for (auto& variant : ed->variants) {
-        declare(variant.name, ed->name, false);
+        declare(variant.name, "int", false);
     }
 }
 
@@ -871,9 +885,9 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
         case ASTNodeType::IF_STMT: {
             auto* is = static_cast<IfStmt*>(stmt);
             std::string cond_type = check_expression(is->condition.get());
-            if (!can_assign(cond_type, "bool")) {
+            if (!can_assign(cond_type, "bool") && !is_integer_type(cond_type)) {
                 add_error(stmt->location.file + ":" + std::to_string(stmt->location.line) +
-                          ": if condition must be bool, got '" + cond_type + "'");
+                          ": if condition must be bool or integer, got '" + cond_type + "'");
             }
             check_statement(is->then_branch.get(), return_type);
             if (is->else_branch) {
@@ -885,9 +899,9 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
         case ASTNodeType::WHILE_STMT: {
             auto* ws = static_cast<WhileStmt*>(stmt);
             std::string cond_type = check_expression(ws->condition.get());
-            if (!can_assign(cond_type, "bool")) {
+            if (!can_assign(cond_type, "bool") && !is_integer_type(cond_type)) {
                 add_error(stmt->location.file + ":" + std::to_string(stmt->location.line) +
-                          ": while condition must be bool, got '" + cond_type + "'");
+                          ": while condition must be bool or integer, got '" + cond_type + "'");
             }
             check_statement(ws->body.get(), return_type);
             break;
@@ -898,9 +912,9 @@ void TypeChecker::check_statement(ASTNode* stmt, const std::string& return_type)
             if (fs->init) check_statement(fs->init.get(), return_type);
             if (fs->condition) {
                 std::string cond_type = check_expression(fs->condition.get());
-                if (!can_assign(cond_type, "bool")) {
+                if (!can_assign(cond_type, "bool") && !is_integer_type(cond_type)) {
                     add_error(stmt->location.file + ":" + std::to_string(stmt->location.line) +
-                              ": for condition must be bool, got '" + cond_type + "'");
+                              ": for condition must be bool or integer, got '" + cond_type + "'");
                 }
             }
             if (fs->increment) check_expression(fs->increment.get());
@@ -1260,6 +1274,22 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             std::string left_type = check_expression(bin->left.get());
             std::string right_type = check_expression(bin->right.get());
 
+            // Bitwise operators: require integer types, return promoted type
+            // Operadores bitwise: exigem tipos inteiros, retornam tipo promovido
+            if (bin->op == TokenType::BIT_AND || bin->op == TokenType::BIT_OR ||
+                bin->op == TokenType::BIT_XOR) {
+                bool left_int = is_signed_int(left_type) || is_unsigned_int(left_type);
+                bool right_int = is_signed_int(right_type) || is_unsigned_int(right_type);
+                if (!left_int || !right_int) {
+                    add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
+                              ": bitwise op requires integer types, got '" +
+                              left_type + "' and '" + right_type + "'");
+                }
+                std::string result = promote_types(left_type, right_type);
+                expr->resolved_type = result;
+                return result;
+            }
+
             // Arithmetic operators (including pointer arithmetic)
             // Operadores aritmeticos (incluindo aritmetica de ponteiros)
             if (bin->op == TokenType::PLUS || bin->op == TokenType::MINUS ||
@@ -1339,9 +1369,9 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             // Logical operators
             // Operadores logicos
             if (bin->op == TokenType::AND || bin->op == TokenType::OR) {
-                if (!can_assign(left_type, "bool")) {
+                if (!can_assign(left_type, "bool") && !is_integer_type(left_type)) {
                     add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
-                              ": logical op requires bool, got '" + left_type + "'");
+                              ": logical op requires bool or integer, got '" + left_type + "'");
                 }
                 expr->resolved_type = "bool";
                 return "bool";
@@ -1355,9 +1385,9 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             auto* un = static_cast<UnaryOp*>(expr);
             std::string op_type = check_expression(un->operand.get());
             if (un->op == TokenType::NOT) {
-                if (!can_assign(op_type, "bool")) {
+                if (!can_assign(op_type, "bool") && !is_integer_type(op_type)) {
                     add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
-                              ": not requires bool, got '" + op_type + "'");
+                              ": not requires bool or integer, got '" + op_type + "'");
                 }
                 expr->resolved_type = "bool";
                 return "bool";

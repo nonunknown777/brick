@@ -371,6 +371,50 @@ private:
         return is_signed ? "int64_t" : "uint64_t";
     }
 
+    // Estimate byte alignment of a Brick type
+    // Estima alinhamento em bytes de um tipo Brick
+    int type_alignment(const std::string& type_name) {
+        std::string n = normalize_type_name(type_name);
+        // Dynamic array T[]: pointer (8-byte aligned)
+        if (is_dynamic_array_type(type_name)) {
+            return 8;
+        }
+        // Fixed array: alignment = element alignment
+        auto bracket = type_name.find('[');
+        if (bracket != std::string::npos) {
+            std::string base = type_name.substr(0, bracket);
+            return type_alignment(base);
+        }
+        // Pointer type: *T
+        if (!type_name.empty() && type_name[0] == '*') {
+            return 8;
+        }
+        // Bitfield type
+        if (n.size() >= 2 && (n[0] == 'u' || n[0] == 'i') && n.find_first_not_of("0123456789", 1) == std::string::npos) {
+            int w = std::stoi(n.substr(1));
+            if (w >= 1 && w <= 64) return (w <= 8) ? 1 : (w <= 16) ? 2 : (w <= 32) ? 4 : 8;
+        }
+        if (n == "u8" || n == "i8" || n == "bool" || n == "char") return 1;
+        if (n == "u16" || n == "i16") return 2;
+        if (n == "u32" || n == "i32" || n == "f32") return 4;
+        if (n == "u64" || n == "i64" || n == "f64" || n == "usize" || n == "isize") return 8;
+        if (n == "String") return 8; // BrickString { char*, size_t } → pointer-aligned
+        // Struct: max field alignment
+        if (struct_map.count(n)) {
+            int max_align = 1;
+            auto* sd = struct_map[n];
+            for (auto& f : sd->fields) {
+                if (f->type == ASTNodeType::FIELD_DECL) {
+                    auto* fd = static_cast<FieldDecl*>(f.get());
+                    int fa = type_alignment(fd->type_name);
+                    if (fa > max_align) max_align = fa;
+                }
+            }
+            return max_align;
+        }
+        return 8; // unknown, assume max
+    }
+
     // Estimate byte size of a Brick type for pool allocator decision
     // Estima tamanho em bytes de um tipo Brick para decisao do pool
     int type_size_estimate(const std::string& type_name) {
@@ -415,18 +459,27 @@ private:
         if (n == "u32" || n == "i32" || n == "f32") return 4;
         if (n == "u64" || n == "i64" || n == "f64" || n == "usize" || n == "isize") return 8;
         if (n == "String") return 16; // BrickString { char*, size_t }
-        // Struct: sum of field sizes
+        // Struct: sum of field sizes with proper alignment padding
         if (struct_map.count(n)) {
             if (visited.count(n)) return 64; // circular, cap at threshold
             visited.insert(n);
             int total = 0;
+            int struct_align = 1;
             auto* sd = struct_map[n];
             for (auto& f : sd->fields) {
                 if (f->type == ASTNodeType::FIELD_DECL) {
                     auto* fd = static_cast<FieldDecl*>(f.get());
-                    total += type_size_estimate_impl(fd->type_name, visited);
+                    int field_size = type_size_estimate_impl(fd->type_name, visited);
+                    int field_align = type_alignment(fd->type_name);
+                    if (field_align > struct_align) struct_align = field_align;
+                    // Pad to field alignment
+                    int pad = (field_align - (total % field_align)) % field_align;
+                    total += pad + field_size;
                 }
             }
+            // Trailing padding to struct alignment
+            int trailing_pad = (struct_align - (total % struct_align)) % struct_align;
+            total += trailing_pad;
             return total;
         }
         return 64; // unknown, assume threshold
@@ -959,7 +1012,7 @@ private:
             auto bracket = brick_type.find('[');
             std::string elem_type = brick_type.substr(0, bracket);
             std::string c_elem_type = map_type(elem_type);
-            indent(); out << c_elem_type << "* " << var_name << ";\n";
+            indent(); out << c_elem_type << "* " << var_name << " = NULL;\n";
             indent(); out << "int64_t " << var_name << "_cnt = 0;\n";
             indent(); out << "int64_t " << var_name << "_cap = 0;\n";
         } else {
@@ -1363,7 +1416,15 @@ private:
                         break;
                     }
                 }
-                if (left->type == ASTNodeType::FLOAT_LITERAL &&
+                if (left->type == ASTNodeType::INT_LITERAL &&
+                    right->type == ASTNodeType::INT_LITERAL &&
+                    bin->op == TokenType::BIT_AND) {
+                    auto* lil = static_cast<IntLiteral*>(left);
+                    auto* ril = static_cast<IntLiteral*>(right);
+                    out << (lil->value & ril->value);
+                    break;
+                }
+                if (left->type == ASTNodeType::INT_LITERAL &&
                     right->type == ASTNodeType::FLOAT_LITERAL) {
                     auto* lfl = static_cast<FloatLiteral*>(left);
                     auto* rfl = static_cast<FloatLiteral*>(right);
@@ -2050,6 +2111,8 @@ private:
             case TokenType::OR: return "||";
             case TokenType::NOT: return "!";
             case TokenType::BIT_AND: return "&";
+            case TokenType::BIT_OR: return "|";
+            case TokenType::BIT_XOR: return "^";
             case TokenType::ASSIGN: return "=";
             case TokenType::PLUS_ASSIGN: return "+=";
             case TokenType::MINUS_ASSIGN: return "-=";
