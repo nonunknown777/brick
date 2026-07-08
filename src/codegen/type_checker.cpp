@@ -312,8 +312,8 @@ bool TypeChecker::can_assign(const std::string& from, const std::string& to) {
     // Enum types: treat as int for assignment compatibility
     // Tipos enum: trata como int para compatibilidade de atribuicao
     if (enum_defs.count(f) || enum_defs.count(t)) {
-        std::string f_eff = enum_defs.count(f) ? "int" : f_alias;
-        std::string t_eff = enum_defs.count(t) ? "int" : t_alias;
+        std::string f_eff = enum_defs.count(f) ? "int" : f;
+        std::string t_eff = enum_defs.count(t) ? "int" : t;
         return can_assign(f_eff, t_eff);
     }
 
@@ -1274,15 +1274,14 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
             std::string left_type = check_expression(bin->left.get());
             std::string right_type = check_expression(bin->right.get());
 
-            // Bitwise operators: require integer types, return promoted type
-            // Operadores bitwise: exigem tipos inteiros, retornam tipo promovido
-            if (bin->op == TokenType::BIT_AND || bin->op == TokenType::BIT_OR ||
-                bin->op == TokenType::BIT_XOR) {
+            // Bitwise AND: requires integer types, returns promoted type
+            // AND binario: exige tipos inteiros, retorna tipo promovido
+            if (bin->op == TokenType::BIT_AND) {
                 bool left_int = is_signed_int(left_type) || is_unsigned_int(left_type);
                 bool right_int = is_signed_int(right_type) || is_unsigned_int(right_type);
                 if (!left_int || !right_int) {
                     add_error(expr->location.file + ":" + std::to_string(expr->location.line) +
-                              ": bitwise op requires integer types, got '" +
+                              ": bitwise AND requires integer types, got '" +
                               left_type + "' and '" + right_type + "'");
                 }
                 std::string result = promote_types(left_type, right_type);

@@ -17,6 +17,7 @@
 - **Struct alignment** — Pool allocator now correctly accounts for struct field alignment padding. Added `type_alignment()` helper; struct size estimation includes per-field padding and trailing struct alignment. Fixes pool allocator crash for structs near the 64-byte threshold.
 - **Enum type handling** — Enum variants now have type `int` instead of the enum name, allowing direct use in arithmetic and bitwise operations. `can_assign()` recognizes enum types as integers.
 - **Integer conditions** — `if`/`while`/`for`/`not`/`or`/`and` now accept integer types in addition to `bool`, enabling natural C-style conditions like `if flags & 0x02`.
+- **Bug fixes** — Removed BIT_OR/BIT_XOR dead code from type_checker and codegen. Fixed enum fallback in `can_assign()` to use normalized types. Fixed float constant folding (was incorrectly checking `INT_LITERAL` instead of `FLOAT_LITERAL`).
 - **Arrays** — Fixed `int[10]`, dynamic `int[]` with `.append`/`.len`/`.cap`, local stack arrays, array literals `{1, 2, 3}`
 - **Struct enhancements** — Arrays in struct fields, anonymous struct/union nesting, `@packed`/`@align(N)` attributes, init literals (positional + named)
 - **Interfaces & polymorphism** — `interface` declarations, `impl Struct : Interface` separate block, vtbl dispatch, `is`/`as` type checks

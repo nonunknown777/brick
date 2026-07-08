@@ -1424,7 +1424,7 @@ private:
                     out << (lil->value & ril->value);
                     break;
                 }
-                if (left->type == ASTNodeType::INT_LITERAL &&
+                if (left->type == ASTNodeType::FLOAT_LITERAL &&
                     right->type == ASTNodeType::FLOAT_LITERAL) {
                     auto* lfl = static_cast<FloatLiteral*>(left);
                     auto* rfl = static_cast<FloatLiteral*>(right);
@@ -2111,8 +2111,6 @@ private:
             case TokenType::OR: return "||";
             case TokenType::NOT: return "!";
             case TokenType::BIT_AND: return "&";
-            case TokenType::BIT_OR: return "|";
-            case TokenType::BIT_XOR: return "^";
             case TokenType::ASSIGN: return "=";
             case TokenType::PLUS_ASSIGN: return "+=";
             case TokenType::MINUS_ASSIGN: return "-=";
