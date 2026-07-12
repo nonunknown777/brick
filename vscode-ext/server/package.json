@@ -1,7 +1,7 @@
 {
     "name": "brick-language-server",
     "description": "LSP server for Brick language",
-    "version": "1.0.0",
+    "version": "1.1.0",
     "engines": {
         "node": "*"
     },
