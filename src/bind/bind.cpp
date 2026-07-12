@@ -131,24 +131,104 @@ static std::vector<CToken> tokenize_header(const std::string& content, std::vect
 
 // ─── C Type to Brick Type ────────────────────────────────
 
-static std::string c_type_to_brick(const std::string& c_type) {
-    if (c_type == "int" || c_type == "int32_t") return "i32";
-    if (c_type == "unsigned int" || c_type == "uint32_t") return "u32";
-    if (c_type == "short" || c_type == "int16_t" || c_type == "short int") return "i16";
-    if (c_type == "unsigned short" || c_type == "uint16_t") return "u16";
-    if (c_type == "char" || c_type == "uint8_t") return "u8";
-    if (c_type == "signed char" || c_type == "int8_t") return "i8";
-    if (c_type == "long" || c_type == "int64_t" || c_type == "long long") return "i64";
-    if (c_type == "unsigned long" || c_type == "uint64_t" || c_type == "unsigned long long") return "u64";
-    if (c_type == "float") return "f32";
-    if (c_type == "double") return "f64";
-    if (c_type == "size_t") return "usize";
-    if (c_type == "ptrdiff_t" || c_type == "ssize_t") return "isize";
-    if (c_type == "void") return "void";
-    if (c_type == "bool" || c_type == "_Bool") return "bool";
-    if (c_type == "char*" || c_type == "const char*" || c_type == "const char *" || c_type == "char *") return "*u8";
-    if (c_type == "void*" || c_type == "void *") return "*void";
-    return c_type; // Pass through for user-defined types
+// Normalize a C type string: collapses multiple spaces, trims, strips "const"/"signed"/"unsigned" for lookup
+static std::string normalize_c_type(std::string s) {
+    // Collapse multiple spaces and trim
+    std::string out;
+    bool space = false;
+    for (char c : s) {
+        if (c == ' ') {
+            if (!space && !out.empty()) { out += ' '; space = true; }
+        } else {
+            out += c;
+            space = false;
+        }
+    }
+    // Trim leading/trailing
+    size_t start = out.find_first_not_of(' ');
+    size_t end = out.find_last_not_of(' ');
+    if (start == std::string::npos) return "";
+    return out.substr(start, end - start + 1);
+}
+
+// Check if normalized type is a known C base type (for pointer conversion)
+static std::string convert_base_type(const std::string& type) {
+    if (type == "int" || type == "int32_t") return "i32";
+    if (type == "unsigned int" || type == "uint32_t") return "u32";
+    if (type == "short" || type == "short int" || type == "int16_t") return "i16";
+    if (type == "unsigned short" || type == "unsigned short int" || type == "uint16_t") return "u16";
+    if (type == "char" || type == "uint8_t") return "u8";
+    if (type == "signed char" || type == "int8_t") return "i8";
+    if (type == "long" || type == "long int" || type == "int64_t" || type == "long long") return "i64";
+    if (type == "unsigned long" || type == "unsigned long int" || type == "uint64_t" || type == "unsigned long long") return "u64";
+    if (type == "float") return "f32";
+    if (type == "double") return "f64";
+    if (type == "size_t") return "usize";
+    if (type == "ptrdiff_t" || type == "ssize_t") return "isize";
+    if (type == "void") return "void";
+    if (type == "bool" || type == "_Bool") return "bool";
+    return ""; // Unknown base type
+}
+
+static std::string c_type_to_brick(const std::string& raw_type) {
+    std::string type = normalize_c_type(raw_type);
+    if (type.empty()) return raw_type;
+
+    // Handle pointer types: count all trailing '*' levels
+    // int* -> *i32, int** -> **i32, const char* -> *u8
+    int ptr_levels = 0;
+    while (!type.empty() && type.back() == '*') {
+        type.pop_back();
+        ptr_levels++;
+    }
+
+    if (ptr_levels > 0) {
+        while (!type.empty() && type.back() == ' ') type.pop_back();
+
+        // Strip 'const' prefix from base for lookup
+        std::string lookup = type;
+        if (lookup.find("const ") == 0) {
+            lookup = normalize_c_type(lookup.substr(6));
+        }
+
+        std::string brick_base = convert_base_type(lookup);
+        if (!brick_base.empty()) {
+            return std::string(ptr_levels, '*') + brick_base;
+        }
+        // For unknown pointer types (e.g., user-defined structs)
+        if (type.find(' ') == std::string::npos && !type.empty()) {
+            return std::string(ptr_levels, '*') + type;
+        }
+        return std::string(ptr_levels, '*') + "void"; // fallback
+    }
+
+    // Non-pointer: check exact matches first
+    std::string result = convert_base_type(type);
+    if (!result.empty()) return result;
+
+    // Strip 'const' prefix for non-pointer too
+    if (type.find("const ") == 0) {
+        std::string stripped = normalize_c_type(type.substr(6));
+        result = convert_base_type(stripped);
+        if (!result.empty()) return result;
+    }
+
+    // Strip 'unsigned'/'signed' prefix
+    if (type.find("unsigned ") == 0) {
+        std::string stripped = normalize_c_type(type.substr(9));
+        result = convert_base_type("unsigned " + stripped);
+        if (!result.empty()) return result;
+        if (stripped == "int") return "u32";
+    }
+    if (type.find("signed ") == 0) {
+        std::string stripped = normalize_c_type(type.substr(7));
+        result = convert_base_type(stripped);
+        if (!result.empty()) return result;
+        if (stripped == "int") return "i32";
+    }
+
+    // Pass through for user-defined types
+    return type;
 }
 
 // ─── Type Keyword Check ──────────────────────────────────
