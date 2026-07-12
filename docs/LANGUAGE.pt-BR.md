@@ -1,306 +1,953 @@
-# Referência da Linguagem Brick
+# Referência da Linguagem Brick (v1.1.0)
 
-> Tudo que você precisa saber para escrever código em Brick.
+Referência completa da linguagem de programação Brick. Todas as features documentadas.
 
-## Estrutura de Arquivo (.brc)
+---
 
-```
-package NAME              ← which package this file belongs to
-using OTHER               ← import another package
+## 1. Estrutura do Arquivo
 
-block global = 256MB       ← block declaration (REQUIRED in main file)
-block game   = 64MB
+```brick
+package NOME              ← pacote deste arquivo
+using OUTRO               ← importar outro pacote
 
-struct Player { }          ← your structs with methods
+block global = 256MB       ← declaração de bloco (OBRIGATÓRIO no main)
+block jogo   = 64MB
 
-fn main() { }              ← program entry point
-```
+type MeuInt = int          ← alias de tipo
 
-> Todo arquivo `.brc` começa com a declaração do pacote, imports opcionais, blocos de memória, structs e funções.
+struct Jogador { }         ← structs com métodos
+union Dados { }            ← unions
+enum Cor { VERMELHO; VERDE } ← enums
 
-## Pacotes
+const MAX_HP = 100          ← constante em tempo de compilação
+const int TILE = 16         ← constante com tipo explícito
 
-```
-package SPRITES                    ← declare package
-package SPRITES.EFFECTS            ← sub-package (hierarchy)
-using SPRITES                      ← import everything from package
-private int secret                 ← visible only within the package
+fn main() { }              ← ponto de entrada
 ```
 
-> Tudo é `public` por padrão. Use `private` para esconder.
+---
 
-## Structs (com métodos!)
+## 2. Comentários
+
+```brick
+// Isto é um comentário de linha
+int x = 5  // comentário inline
+```
+
+Apenas comentários de linha (`//`). Comentários de bloco (`/* */`) não são suportados.
+
+---
+
+## 3. Tipos
+
+### 3.1 Tipos de Largura Fixa
+
+| Brick | Tipo C | Tam. | Descrição |
+|-------|--------|:----:|-----------|
+| `i8` | `int8_t` | 8 | Inteiro com sinal |
+| `i16` | `int16_t` | 16 | Inteiro com sinal |
+| `i32` | `int32_t` | 32 | Inteiro com sinal (padrão `int`) |
+| `i64` | `int64_t` | 64 | Inteiro com sinal |
+| `u8` | `uint8_t` | 8 | Inteiro sem sinal (também `char`/`byte`) |
+| `u16` | `uint16_t` | 16 | Inteiro sem sinal |
+| `u32` | `uint32_t` | 32 | Inteiro sem sinal |
+| `u64` | `uint64_t` | 64 | Inteiro sem sinal |
+| `f32` | `float` | 32 | Ponto flutuante (padrão `float`) |
+| `f64` | `double` | 64 | Dupla precisão |
+| `usize` | `size_t` | ptr | Inteiro sem sinal do tamanho do ponteiro |
+| `isize` | `ptrdiff_t` | ptr | Inteiro com sinal do tamanho do ponteiro |
+| `bool` | `uint8_t` | 8 | Booleano (true/false) |
+| `String` | `BrickString` | dyn | Texto dinâmico (alocado em bloco) |
+| `void` | `void` | — | Nada (para funções) |
+
+### 3.2 Aliases
+
+| Alias | Mapa Para |
+|-------|-----------|
+| `int` | `i32` |
+| `float` | `f32` |
+| `char` | `u8` |
+| `byte` | `u8` |
+| `short` | `i16` |
+| `long` | `i64` |
+| `double` | `f64` |
+
+### 3.3 Type Aliases Definidos pelo Usuário
+
+```brick
+type MeuInt = int
+type Coord = f64
+type Cor = u32
+type Callback = fn(i32)->void
+```
+
+### 3.4 Bitfields
+
+Os tipos `uN`/`iN` definem campos com largura específica de bits (1–64):
+
+```brick
+struct Flags {
+    u4  nibble_baixo     // 4 bits sem sinal
+    i3  signed_3bit      // 3 bits com sinal
+    u1  bit_unico        // flag de 1 bit
+    u24 parte_endereco   // endereço de 24 bits
+    u8  byte_val         // 8 bits (equivalente a u8, mas bitfield explícito)
+}
+```
+
+### 3.5 Sufixos Literais
 
 ```
-struct Player {
-    int hp                     ← field
-    String name                ← field
+42u8   42u16  42u32  42u64        ← tipos inteiros sem sinal
+42i8   42i16  42i32  42i64        ← tipos inteiros com sinal
+3.14f32  3.14f64                  ← tipos float
+42usz  42isize                    ← tipos tamanho de ponteiro
+```
 
-    fn Player(int h, String n) {    ← CONSTRUCTOR (same name as struct)
+Literais sem sufixo inferem tipo do contexto. Overflow → erro de compilação.
+
+---
+
+## 4. Literais
+
+### Inteiro
+
+```brick
+42           ← sem tipo (inferido)
+-128i8       ← sufixo de tipo
+0x00FF       ← literal hex
+0b1010       ← literal binário
+0o777        ← literal octal
+1_000_000    ← separador de underscore
+```
+
+### Float
+
+```brick
+3.14         ← inferido como f32 ou f64
+3.14f32      ← float 32 bits
+3.14159f64   ← float 64 bits
+1.0e40       ← valor grande promovido a f64
+```
+
+### Hex
+
+```brick
+0xFF         ← 255
+0xABCD       ← 43981
+0x1A2Bu16    ← hex com sufixo de tipo
+0x443355FF   ← cor RGBA
+```
+
+### Outros
+
+```brick
+true         ← literal bool
+false        ← literal bool
+'a'          ← literal char
+"olá"        ← literal string
+null         ← literal ponteiro nulo
+```
+
+---
+
+## 5. Regras de Tipos
+
+- **Widening** permitido: `i8` → `i16`, `u8` → `u64`, `f32` → `f64`
+- **Narrowing** proibido: `i64` → `i32` = erro (use cast explícito: `i32(expr)`)
+- **Com sinal ↔ Sem sinal** mesmo rank: proibido (`i32` ↔ `u32` = erro)
+- **Int + Float** → Float (int promove a float)
+- **Cast explícito**: `T(expr)` ou `expr as T` — permite narrowing
+
+### Overflow Checking
+
+```brick
+u8 a = 300     // erro: 300 não cabe em u8
+u8 b = 0x1FF   // erro: valor hex muito grande para o tipo
+```
+
+---
+
+## 6. Variáveis
+
+```brick
+x = 5                ← inferido como int
+int y = 10           ← tipo explícito
+String nome = "Brick"
+float pi = 3.14
+i64 grande = 9223372036854775807
+u8 pequeno = 255u8
+f32 preciso = 3.14f32
+```
+
+Variáveis sem inicializador usam o nome do tipo:
+
+```brick
+int x               ← declarada mas não inicializada
+String s            ← declarada
+```
+
+---
+
+## 7. Constantes
+
+```brick
+const MAX_JOGADORES = 4            ← constante compile-time (tipo inferido)
+const int TAM_TILE = 16            ← com tipo explícito
+const LARGURA_TELA = 800           ← pode usar em tamanhos de array
+
+const TAM_GRADE = 32
+int[TAM_GRADE] buffer              ← constante usada como tamanho de array
+```
+
+Constantes são avaliadas em tempo de compilação. Valores são substituídos diretamente no código C gerado como `static const`.
+
+---
+
+## 8. Blocos de Memória
+
+Blocos são regiões contíguas de memória com um bump allocator.
+
+### Declaração
+
+```brick
+block global = 256MB       ← bloco padrão
+block jogo   = 64MB
+block temp   = 8KB
+block dados  = 1GB
+```
+
+**Unidades**: `B`, `KB`, `MB`, `GB` (case-sensitive).
+
+### Modos de Alocação
+
+**1. Bloco padrão** — variáveis vão para `global`:
+
+```brick
+int x = 5                  ← em global
+String s = "olá"           ← em global
+```
+
+**2. Escopo de bloco** — tudo dentro do escopo usa aquele bloco:
+
+```brick
+block jogo {
+    Jogador p = Jogador(100, "Felipe")   ← ambos em 'jogo'
+    Inimigo e = Inimigo(50)
+}
+```
+
+**3. Anotação inline** — alocar em um bloco específico:
+
+```brick
+float f = 2.0 @temp        ← f vive em 'temp'
+Jogador p = Jogador(100, "Felipe") @jogo
+```
+
+### Operações de Bloco
+
+```brick
+jogo.reset()               ← O(1) — libera TODA a memória em 'jogo'
+global.reset()
+```
+
+- **Sem free individual** — apenas reset de blocos inteiros
+- **Referências cruzadas** entre blocos são permitidas
+- **Overflow** → `error("block overflow")` — programa aborta
+
+### Pool Allocator
+
+Tipos ≤ 64 bytes usam automaticamente um pool allocator (O(1) free):
+
+```brick
+// Particula = 16 bytes → pool_alloc() usado automaticamente
+struct Particula { f32 x, y, z; i32 vida }
+Particula p = Particula() @global
+```
+
+### TLS Blocks
+
+Cada thread pode ter seu próprio bloco via `__thread`:
+
+```c
+block_set_tls(meu_bloco);  // do C
+// Alocações vão para meu_bloco sem especificar
+```
+
+### Double-Buffer
+
+Zero-pausa para hot reload:
+
+```c
+block_enable_double_buffer(cena);
+block_swap_buffers(cena);   // swap atômico em ~1 ciclo
+```
+
+---
+
+## 9. Structs (POO)
+
+### Struct Básica
+
+```brick
+struct Jogador {
+    int hp
+    String nome
+    int municao
+
+    // Construtor — mesmo nome da struct
+    fn Jogador(int h, String n, int m) {
         hp = h
-        name = n
+        nome = n
+        municao = m
     }
 
-    fn take_damage(int dmg) {       ← normal method
+    // Método
+    fn tomar_dano(int dmg) {
         hp -= dmg
     }
 
-    fn get_hp() -> int {            ← method with return value
+    // Método com valor de retorno
+    fn get_hp() -> int {
         return hp
     }
 }
 ```
 
-> Structs juntam dados e métodos. O construtor tem o mesmo nome da struct.
+Uso:
+
+```brick
+Jogador p = Jogador(100, "Felipe", 30) @jogo
+p.tomar_dano(20)
+int hp = p.get_hp()
+```
 
 ### Herança
 
-```
-struct NPC extends Player {
-    int ai_type
+```brick
+struct NPC extends Jogador {
+    int tipo_ia
 
-    fn NPC(int h, int ai) {
-        hp = h                    ← inherited field from Player
-        ai_type = ai
+    fn NPC(int h, String n, int m, int ia) {
+        hp = h          // herdado de Jogador
+        nome = n
+        municao = m
+        tipo_ia = ia    // novo campo
+    }
+
+    fn patrulhar() {
+        // comportamento específico de NPC
     }
 }
 ```
 
-> Uma struct pode estender outra, herdando seus campos.
+C gerado: struct pai é o primeiro campo (`base`), campos herdados diretamente.
 
-### Interface
+### Interfaces
 
-```
-interface Damageable {
-    fn take_damage(int d)
+```brick
+interface Danificavel {
+    fn tomar_dano(int d)
 }
 
-struct Enemy : Damageable {       ← or "extends" + "implements"
-    fn take_damage(int d) { }
+interface Serializavel {
+    fn salvar() -> String
+}
+
+// Uma struct implementa múltiplas interfaces
+struct Inimigo : Danificavel, Serializavel {
+    fn tomar_dano(int d) { }
+    fn salvar() -> String { return "Inimigo" }
 }
 ```
 
-> Interfaces definem contratos de métodos que structs devem implementar.
+### Bloco impl Separado
 
-## Blocos de Memória
+```brick
+struct Flecha { int dano }
 
+impl Flecha : Danificavel {
+    fn tomar_dano(int d) {
+        dano = d
+    }
+}
 ```
-block global = 256MB        ← declare block (KB, MB, GB)
-block temp   = 8KB
 
-int x = 5                   ← goes to global block (default)
+### Dispatch Virtual (vtbl)
 
-block game {                ← scope: everything here goes to block game
-    Player p = Player(100, "Felipe")
-    Enemy e = Enemy(50)
+Quando `impl Struct : Interface` existe, o compilador gera:
+- Uma vtbl struct com ponteiros de função
+- Uma struct wrapper com `void* data` e `const Vtbl* vtbl`
+- Instâncias vtbl estáticas
+- Funções wrapper que castam `void*` para o tipo concreto
+
+```brick
+interface Desenhavel { fn desenhar() }
+
+struct Circulo : Desenhavel {
+    fn desenhar() { print("Círculo") }
 }
 
-float f = 2.0 @temp        ← explicit inline allocation
-int hp = p.get_hp()
-
-game.reset()               ← clears EVERYTHING in block game (super fast)
+fn main() {
+    Desenhavel d = Circulo() @global
+    d.desenhar()  // despacha através de vtbl
+}
 ```
 
-> Blocos de memória são o coração do Brick. São regiões contíguas de memória. Alocar é só avançar um ponteiro — super rápido. Resetar um bloco limpa tudo de uma vez.
+### is / as — Type Checks de Interface
 
-Regras:
-- `global` é o bloco padrão (precisa ser declarado no main)
-- `block nome: { }` muda o bloco padrão dentro daquele escopo
-- `@nome` aloca uma variável específica em um bloco
-- `bloco.reset()` limpa o bloco inteiro (sem free individual)
-- Se o bloco encher: `error("block overflow")` — o programa aborta
+Em tempo de execução, verifique se um valor implementa uma interface com `is`, e faça cast com `as`:
 
-## Tipos
+```brick
+interface Desenhavel { fn desenhar() }
+struct Circulo : Desenhavel { fn desenhar() { print("Círculo") } }
+struct Quadrado : Desenhavel { fn desenhar() { print("Quadrado") } }
 
-### Tipos de Largura Fixa
+fn main() {
+    Desenhavel d = Circulo() @global
 
-| Brick | C Type       | Size    | Description          |
-|--------|-------------|---------|----------------------|
-| `i8`   | `int8_t`    | 8 bits  | Signed integer       |
-| `i16`  | `int16_t`   | 16 bits | Signed integer       |
-| `i32`  | `int32_t`   | 32 bits | Signed integer       |
-| `i64`  | `int64_t`   | 64 bits | Signed integer       |
-| `u8`   | `uint8_t`   | 8 bits  | Unsigned integer     |
-| `u16`  | `uint16_t`  | 16 bits | Unsigned integer     |
-| `u32`  | `uint32_t`  | 32 bits | Unsigned integer     |
-| `u64`  | `uint64_t`  | 64 bits | Unsigned integer     |
-| `f32`  | `float`     | 32 bits | Floating point       |
-| `f64`  | `double`    | 64 bits | Double precision     |
-| `usize`| `size_t`    | pointer | Unsigned pointer-size|
-| `isize`| `ptrdiff_t` | pointer | Signed pointer-size  |
+    // is — verifica se o tipo concreto é Circulo
+    if d is Circulo {
+        print("é um círculo!")
+    }
 
-> Cada tipo numérico tem um tamanho fixo e previsível — sem adivinhação.
-
-### Apelidos
-
-| Alias    | Maps To | Notes                      |
-|----------|---------|----------------------------|
-| `int`    | `i32`   | Default integer            |
-| `float`  | `f32`   | Default float              |
-| `char`   | `u8`    | Character                  |
-| `byte`   | `u8`    | Same as char               |
-| `short`  | `i16`   | Short integer              |
-| `long`   | `i64`   | Long integer               |
-| `double` | `f64`   | Double precision           |
-
-> Nomes amigáveis para os tipos mais comuns.
-
-### Outros Tipos
-
-| Brick     | C Type         | Description                  |
-|------------|----------------|------------------------------|
-| `bool`     | `uint8_t`      | true/false                   |
-| `String`   | `BrickString`  | Built-in string (dynamic)    |
-| `T[N]`     | `T[]`          | Fixed array of N elements    |
-| `null`     | `NULL`         | Null pointer                 |
-| `void`     | `void`         | No return value (functions)  |
-
-### Sufixos Literais
-
-```
-42u8   42u16  42u32  42u64     ← unsigned integer types
-42i8   42i16  42i32  42i64     ← signed integer types
-3.14f32  3.14f64               ← float types
-42usz  42isize                 ← pointer-size types
+    // as — cast para tipo concreto
+    Circulo c = d as Circulo
+    c.desenhar()
+}
 ```
 
-> Literais sem sufixo inferem o tipo pelo contexto (se couber no alvo -> permitido).
-> Overflow em literal em tempo de compilação -> erro.
+- `expr is Type` → `bool`
+- `expr as Type` → `Type`
 
-### Regras de Tipo
+### Inicialização Nomeada de Struct
 
-> - **Ampliação** permitida: i8 -> i16, u8 -> u64, f32 -> f64
-> - **Estreitamento** proibido: i64 -> i32 = erro
-> - **Sinalizado <-> Não sinalizado** mesmo tamanho proibido: i32 <-> u32 = erro
-> - **Int + Float** -> Float (int vira float)
-> - **Expressões mistas**: promoção para o tipo que cabe ambos operandos
-
-## Funções
-
+```brick
+Jogador p = {hp = 100, nome = "Felipe", municao = 30}  ← nomeado
+Jogador p2 = {100, "Felipe", 30}                        ← posicional
 ```
-fn main() { }                          ← entry point (no return)
 
-fn add(int a, int b) -> int {          ← function returning int
+### @packed/@align
+
+```brick
+struct Compacto @packed { u8 a; i32 b }       // __attribute__((packed))
+struct Alinhado @align(64) { u8 a; i32 b }    // __attribute__((aligned(64)))
+struct Ambos @packed @align(16) { u8 x; i64 y }
+```
+
+### Sem `this`, Sem Shadowing
+
+Nomes de campos são resolvidos diretamente dentro de métodos. Não é necessário `this->hp`. Shadowing (parâmetro ou local com mesmo nome de campo) não é permitido.
+
+---
+
+## 10. Unions
+
+### Union Nomeada
+
+```brick
+union Dados {
+    int i
+    float f
+    bool b
+}
+
+fn main() {
+    Dados d
+    d.i = 42     // define inteiro
+    d.f = 3.14   // sobrescreve mesma memória como float
+}
+```
+
+### Union Anônima dentro de Struct
+
+```brick
+struct Pacote {
+    int id
+    union {
+        int x
+        float y
+    }             // x e y se sobrepõem na memória
+}
+
+fn main() {
+    Pacote p
+    p.id = 1
+    p.x = 99     // acessa campo da union diretamente
+}
+```
+
+### Struct Anônima dentro de Union
+
+```brick
+union Dados {
+    u32 raw
+    struct { u8 baixo; u8 alto }
+}
+
+fn main() {
+    Dados d
+    d.raw = 0x0A0B
+    u8 b = d.baixo    // 0x0B
+    u8 a = d.alto     // 0x0A
+}
+```
+
+---
+
+## 11. Enums
+
+```brick
+enum Cor {
+    VERMELHO     // = 0 (auto-incremento)
+    VERDE        // = 1
+    AZUL         // = 2
+}
+
+enum FlagsTextura {
+    CLAMP_U = 0x01    ← valor hex
+    CLAMP_V = 0x02
+    FILTRO  = 0x04
+}
+
+fn main() {
+    Cor c = VERDE
+    if c == VERDE { print("verde") }
+
+    // Uso bitwise de enum
+    u32 flags = CLAMP_U | CLAMP_V
+    if flags & CLAMP_U { print("clampeado") }
+}
+```
+
+Enums geram constantes `#define` em C. Variantes são constantes globais.
+
+---
+
+## 12. Funções
+
+### Funções Básicas
+
+```brick
+fn main() { }                            ← ponto de entrada (retorna void)
+
+fn somar(int a, int b) -> int {          ← retorna int
     return a + b
 }
 
-fn log(String msg) {                   ← void function (no return)
+fn log(String msg) {                     ← função void
     // ...
 }
 ```
 
-> Parâmetros e valores de retorno vão para o "bloco anônimo" interno do compilador.
+### export fn — Visibilidade C
 
-### `export fn` — Funções Visíveis para C
-
-```
-export fn calculate(int x) -> int {
+```brick
+export fn calcular(int x) -> int {
     return x * 2
 }
 ```
 
-Funções declaradas com `export fn` NÃO recebem `static inline` no C gerado. Isso permite que código C (ou outras linguagens) linkem contra elas. Útil para bibliotecas compartilhadas.
-
-| Declaração | C gerado |
+| Declaração | C Gerado |
 |-----------|----------|
 | `fn calc()` | `static inline int32_t calc()` |
 | `export fn calc()` | `int32_t calc()` (visível ao linker) |
 
-## Controle de Fluxo
+### Ponteiros de Função
 
-```
-if cond { }
-else { }
+```brick
+fn somar(int a, int b) -> int { return a + b }
 
-while cond { }
-
-for int i = 0; i < 10; i++ { }
-
-return expr
-```
-
-> Controle de fluxo padrão: if/else, while, for e return.
-
-## Operadores
-
-| Operador       | O que faz                 |
-|----------------|---------------------------|
-| `+ - * /`      | Matemática básica         |
-| `== != < > <= >=` | Comparação            |
-| `&& \|\| !`    | Lógica (e, ou, não)       |
-| `= `           | Atribuição                |
-| `.`            | Acessar campo/método      |
-| `()`           | Chamar função             |
-| `[]`           | Índice de array           |
-| `@`            | Alocar em bloco específico|
-| `->`           | Tipo de retorno           |
-| `& \| ^ ~ << >>` | Operações binárias    |
-
-## Strings
-
-```
-String s = "hello"                     ← creates string
-String nome = "Felipe" @game           ← string in a block
-String empty = ""                      ← empty string
+fn main() {
+    fn(int, int)->int op    ← declara ponteiro de função
+    op = somar              ← atribui função
+    int r = op(3, 4)        ← chama através do ponteiro
+    print(r)                // 7
+}
 ```
 
-> String é um tipo nativo. Vive em blocos como qualquer outra struct.
+Sintaxe: `fn(tipos_param)->tipo_retorno nome_var`
 
-## Arrays
+### Parâmetros Default
 
-```
-int[10] arr                            ← fixed array of 10 integers
-int[5] vals = int[5] @game             ← array in a block
-```
+```brick
+fn mover(int x, int y, int velocidade = 1) {
+    // velocidade tem valor padrão 1
+}
 
-> Tamanho fixo definido na declaração.
-
-## Tratamento de Erros
-
-```
-error("something went wrong")          ← prints message and aborts
+fn main() {
+    mover(10, 20)        // usa velocidade = 1
+    mover(10, 20, 5)     // usa velocidade = 5
+}
 ```
 
-> Sem try/catch. Se algo der errado, o programa imprime o erro e sai.
+---
 
-## Visibilidade
+## 13. Controle de Fluxo
 
-```
-public int x                           ← visible everywhere (default)
-private int y                          ← visible only within own package
-```
+### If/Else
 
-> `public` é o padrão. `private` restringe a visibilidade ao pacote.
+```brick
+if hp <= 0 { print("morto") }
+else { print("vivo") }
 
-## Comentários
-
-```
-// This is a comment  ← line comment only
+if x > 0 { print("positivo") }
+else if x < 0 { print("negativo") }
+else { print("zero") }
 ```
 
-> Apenas comentários de linha (`//`). Comentários de bloco (`/* */`) não são suportados.
+### While
 
-## Macros
-
-### `$macro()` — Chamada Explícita de Macro
-
-```
-$twice(10)   // expande o macro
+```brick
+while hp > 0 { aplicar_dano(10) }
 ```
 
-Macros podem ser chamados com `$nome(args)` para clareza visual. Ambas as sintaxes funcionam:
+### For (C-Style)
 
-| Sintaxe | Exemplo |
-|---------|---------|
-| Implícita | `twice(10)` |
-| Explícita | `$twice(10)` |
-
-O `$` deixa explícito que é uma chamada de macro (não de função), útil em código complexo.
-
-Macros geram código em tempo de compilação. Você define um padrão uma vez e o compilador replica onde for chamado.
-
+```brick
+for int i = 0; i < 10; i++ { print(i) }
 ```
-macro troca(a, b) {
+
+### For x in N (Range)
+
+```brick
+fn somar_ate(int N) -> int {
+    int total = 0
+    for x in N { total = total + x }
+    return total      // somar_ate(5) = 0+1+2+3+4 = 10
+}
+```
+
+### Break / Continue
+
+```brick
+while true {
+    if pronto { break }
+    if pular { continue }
+}
+```
+
+### Return
+
+```brick
+fn somar(int a, int b) -> int { return a + b }
+
+fn log(String msg) {
+    // return não necessário para void
+}
+```
+
+---
+
+## 14. Ponteiros e Aritmética
+
+### Operações Básicas
+
+```brick
+*int p = &x             // &x = endereço de x
+int v = *p              // *p = dereferência
+
+// Aritmética (semântica C — escala por sizeof(T))
+p = p + 1               // avança 1 elemento
+p += 2
+p -= 1
+
+// Diferença de ponteiros
+isize diff = q - p      // número de elementos entre endereços
+
+// Indexação
+int v = p[0]            // *(p + 0)
+
+// Comparação
+bool eq = p == q
+bool lt = p < q
+bool nulo = p != null
+
+// Incremento / Decremento
+++p                     // p += 1
+p--                     // p -= 1
+```
+
+### Regras
+
+- `ptr + int` / `ptr - int` → contagem de elementos (não bytes)
+- `ptr - ptr` → `isize` (elementos entre)
+- `*T + *T` é erro (apenas subtração)
+- `*T + float` é erro (offset deve ser inteiro)
+- `&literal` é erro (apenas variáveis têm endereço)
+- `p[N]` funciona em qualquer `*T` como C
+
+### Ponteiro Nulo
+
+```brick
+*int p = null
+if p != null { }
+```
+
+---
+
+## 15. Operadores
+
+### Aritmética
+
+| Operador | Descrição |
+|:--------:|-----------|
+| `+` | Adição |
+| `-` | Subtração |
+| `*` | Multiplicação |
+| `/` | Divisão |
+| `++` | Incremento |
+| `--` | Decremento |
+
+### Comparação
+
+| Operador | Descrição |
+|:--------:|-----------|
+| `==` | Igual |
+| `!=` | Diferente |
+| `<` | Menor que |
+| `>` | Maior que |
+| `<=` | Menor ou igual |
+| `>=` | Maior ou igual |
+
+### Lógicos
+
+| Operador | Descrição |
+|:--------:|-----------|
+| `&&` | AND lógico |
+| `\|\|` | OR lógico |
+| `!` | NOT lógico |
+| `and` | AND lógico (keyword) |
+| `or` | OR lógico (keyword) |
+| `not` | NOT lógico (keyword) |
+
+### Bitwise
+
+| Operador | Descrição |
+|:--------:|-----------|
+| `&` | AND bitwise |
+| `\|` | OR bitwise |
+| `^` | XOR bitwise |
+| `~` | NOT bitwise |
+| `<<` | Deslocamento à esquerda |
+| `>>` | Deslocamento à direita |
+
+### Atribuição
+
+| Operador | Descrição |
+|:--------:|-----------|
+| `=` | Atribuir |
+| `+=` | Adicionar e atribuir |
+| `-=` | Subtrair e atribuir |
+| `*=` | Multiplicar e atribuir |
+| `/=` | Dividir e atribuir |
+
+### Outros
+
+| Operador | Descrição |
+|:--------:|-----------|
+| `.` | Acessar campo ou método |
+| `()` | Chamada de função/método |
+| `[]` | Índice de array/ponteiro |
+| `@` | Alocar em bloco específico |
+| `->` | Tipo de retorno |
+
+---
+
+## 16. Strings
+
+```brick
+String s = "olá"                          ← cria uma String
+String nome = "Felipe" @jogo              ← String em bloco específico
+String vazia = ""                         ← string vazia
+String saudacao = "Olá, " + "mundo!"     ← concatenação em tempo de compilação
+```
+
+- `String` é um tipo built-in com `.data` (ponteiro char) e `.len` (tamanho)
+- Strings são alocadas em blocos
+- Escape sequences: `\n` (nova linha), `\t` (tab), `\\` (barra invertida), `\"` (aspas)
+- Quando passada para parâmetros C `*u8`, `.data` é passado automaticamente
+- Concatenação usa `+` (apenas tempo de compilação para literais de string; concatenação em runtime não suportada ainda)
+
+---
+
+## 17. Arrays
+
+### Arrays Fixos
+
+```brick
+int[10] arr                          ← array fixo de 10 inteiros
+int[5] vals = {1, 2, 3, 4, 5}       ← com inicializador chaves
+u8[4] bytes = {0xFF, 0x00, 0xAA, 0x55}
+f32[4] m = {1.0, 0.0, 0.0, 1.0}
+f32[4][4] matrix                    ← array 2D
+```
+
+Tamanho fixo na declaração (constante de compilação). Inicializador chaves define todos elementos.
+
+### Arrays Dinâmicos (T[])
+
+```brick
+struct Container {
+    int[] items     ← array dinâmico (ponteiro + contagem + capacidade)
+}
+```
+
+`T[]` como campo de struct gera 3 campos C: `T* items; int64_t items_cnt; int64_t items_cap;`
+
+Propriedades built-in:
+- `.len` → contagem atual de elementos (`items_cnt`)
+- `.cap` → capacidade alocada (`items_cap`)
+- `.append(val)` → adiciona um elemento (auto-cresce)
+
+```brick
+struct Inventario {
+    int[] items
+}
+
+fn main() {
+    Inventario inv @global
+    inv.items.append(10)
+    inv.items.append(20)
+    print(inv.items.len)     // 2
+    print(inv.items.cap)     // 4 (auto-crescido)
+}
+```
+
+### Literais de Array em Expressões
+
+```brick
+fn soma_3(*i32 a) -> i32 { return a[0] + a[1] + a[2] }
+
+fn main() {
+    i32 r = soma_3({10, 20, 30})   // literal compound C99
+}
+```
+
+---
+
+## 18. Match
+
+```brick
+match valor {
+    1 { print("um") }
+    2, 3 { print("dois ou três") }     ← multi-padrão
+    _ { print("outro") }               ← wildcard (padrão)
+}
+```
+
+### Match com Guards
+
+```brick
+fn test_guard() -> int {
+    int val = 5
+    int saida = 0
+    match val {
+        5 if val > 3 { saida = 1 }       ← condição guard
+        5 { saida = 2 }                  ← fallback
+        _ { saida = 3 }
+    }
+    return saida
+}
+```
+
+Compila para `switch` C com `if` guards dentro dos cases.
+
+---
+
+## 19. Defer
+
+```brick
+fn main() {
+    defer { print("limpeza") }
+    print("fazendo trabalho")
+    // "limpeza" é chamado ao sair do escopo
+}
+```
+
+Corpos deferidos executam em ordem LIFO (último deferido, primeiro executado). Executam quando o escopo termina, inclusive antes de `return`.
+
+```brick
+fn test_multi() -> int {
+    defer { print("primeiro defer") }
+    defer { print("segundo defer") }
+    return 42
+    // Output: "segundo defer" depois "primeiro defer" depois retorna 42
+}
+```
+
+---
+
+## 20. Error Handling
+
+```brick
+error("algo deu errado")    ← imprime mensagem e aborta (panic)
+```
+
+Sem try/catch — falhe rápido com `error()`. Runtime usa `fprintf(stderr, ...); exit(1)`.
+
+---
+
+## 21. sizeof e alignof
+
+```brick
+i64 s = int.sizeof         // 4
+s = f64.sizeof             // 8
+s = MinhaStruct.sizeof     // soma dos campos + padding
+s = minha_var.sizeof       // tamanho do tipo da variável
+
+i64 a = f32.alignof        // 4
+a = f64.alignof            // 8
+a = MinhaStruct.alignof    // alinhamento da struct
+```
+
+Ambos são avaliados em tempo de compilação. Geram `sizeof(T)` / `_Alignof(T)` em C.
+
+---
+
+## 22. Visibilidade
+
+```brick
+public int x               ← visível em todo lugar (padrão)
+private int y              ← visível apenas dentro do pacote
+```
+
+`public` é o padrão. `private` restringe visibilidade ao pacote atual.
+
+Aplicável a: structs, funções, consts, enums, unions, interfaces, type aliases, macros e campos de struct.
+
+---
+
+## 23. I/O (Pacote IO)
+
+```brick
+using IO
+
+fn main() {
+    print(42)                    // "42\n"
+    print(3.14)                  // "3.140000\n"
+    print(true)                  // "true\n"
+    print('a')                   // "a\n"
+    print("olá")                 // "olá\n"
+    print()                      // "\n"
+    print("x = {0}", 10)         // "x = 10\n"
+    print("{0} + {1} = {2}", 1, 2, 3)  // "1 + 2 = 3\n"
+}
+```
+
+- `using IO` é obrigatório
+- `print()` sempre adiciona `\n` (semântica println)
+- Suportado: todos tipos numéricos, bool, char, String
+- Formatação usa `{0}`, `{1}`, etc.
+
+---
+
+## 24. Macros
+
+### Macro Básica
+
+```brick
+macro swap(a, b) {
     __tmp = $a
     $a = $b
     $b = __tmp
@@ -308,105 +955,153 @@ macro troca(a, b) {
 
 fn main() {
     x = 10; y = 20
-    troca(x, y)            // expande pro corpo do macro
-    print("{0} {1}", x, y) // → "20 10"
+    swap(x, y)
+    print("{0} {1}", x, y) // "20 10"
 }
 ```
 
-### Declaração
+### Sintaxe $macro() Explícita
 
+```brick
+$swap(x, y)   // $ explícito — equivalente a swap(x, y)
 ```
-macro nome(param1, param2, ...) { corpo }
-```
 
-- Parâmetros **não tem tipo** — contêm expressões, não valores
-- `$nome` insere o argumento passado para `nome`
-- `$(expr)` avalia `expr` em tempo de compilação e insere o resultado
-- Nomes começando com `__` ganham gensyms únicos (sem colisão)
+Ambas sintaxes funcionam.
 
-### `build {}` — Computação em Tempo de Compilação
+### build {} — Computação em Tempo de Compilação
 
-```
+```brick
 build {
     x = 42
     emit { z = x }        // gera: z = 42
 }
 ```
 
-`build` roda em tempo de compilação. Variáveis dentro de `build` não existem no binário final. Use `emit` para gerar código de verdade.
+`build` executa em tempo de compilação. Variáveis não existem no binário final.
 
-### `emit {}` — Geração de Código
+### emit {} — Geração de Código
 
-Tudo dentro de `emit` é código literal com interpolação `$`. O conteúdo é cravado na saída onde o macro for chamado.
-
-```
-macro criar_getter(nome, campo) {
+```brick
+macro vec2_add(nome) {
     emit {
-        fn get_$nome() { return $campo }
+        fn $nome(x1, y1, x2, y2, saida_x, saida_y) {
+            saida_x = x1 + x2
+            saida_y = y1 + y2
+        }
     }
 }
+
+vec2_add(add_posicoes)
 ```
 
 ### Higiene
 
-Variáveis que começam com `__` dentro de um macro ganham nomes únicos (ex: `__tmp` → `__tmp__1`), evitando colisão com código do usuário.
+Variáveis começando com `__` dentro de uma macro recebem nomes únicos (ex: `__tmp` → `__tmp__1`), prevenindo colisões com código do usuário.
 
-### Reflexão de Tipo (dentro de `build`)
+### Varargs
+
+```brick
+macro print_all(valores...) {
+    $valores[0]    // primeiro valor
+    $valores[1]    // segundo valor
+}
+```
+
+### Type Reflection (dentro de build)
 
 | Expressão | Retorna | Exemplo |
 |-----------|---------|---------|
 | `T.name` | Nome do tipo como string | `"i32"` |
 | `T.size` | Tamanho em bytes | `4` |
-| `T.fields` | Nomes dos campos | `["x", "y"]` |
+| `T.fields` | Nomes dos campos como strings | `["x", "y"]` |
 
-### Tratamento de Erros
+---
 
-| Situação | O que acontece |
-|----------|---------------|
-| Argumentos errados | Erro de compilação |
-| `$` fora de macro/build | Erro: "unexpected $" |
-| Macro recursivo | Pego após 64 níveis |
-| I/O dentro de `build` | `build` não pode chamar print() |
+## 25. Interoperabilidade com C
 
-Veja [Macros](MACROS.pt-BR.md) para documentação completa com exemplos.
+### Include de Headers C
 
-## Exemplo Completo
+```brick
+include "meu_header.h"         // #include "meu_header.h"
+include "stdio.h" @system      // #include <stdio.h>
+include "math.h" and link m    // include + link juntos
 
-```
-package GAME
-
-using IO
-
-block global = 256MB
-block game   = 64MB
-
-interface Drawable {
-    fn draw()
-}
-
-struct Player {
-    i32 hp
-    String name
-    u8 active
-
-    fn Player(i32 h, String n) {
-        hp = h
-        name = n
-        active = 1u8
-    }
-
-    fn damage(i32 dmg) {
-        hp -= dmg
-        if hp < 0 { hp = 0 }
-        print("{0} took {1} damage, hp={2}", name, dmg, hp)
-    }
-}
-
-fn main() {
-    Player p = Player(100, "Felipe") @game
-    p.damage(20)
-    game.reset()
-}
+// Ou separadamente:
+include "SDL.h"
+link SDL2
 ```
 
-> Este exemplo mostra um programa Brick completo com pacote, blocos, interface, struct e função main.
+### Funções C Externas
+
+```brick
+extern fn sqrt(f64 x) -> f64
+extern fn atoi(*u8 str) -> i32
+extern fn puts(*u8 s) -> i32
+extern fn sin(f64 x) -> f64
+extern fn cos(f64 x) -> f64
+extern fn pow(f64 b, f64 exp) -> f64
+```
+
+### Gerar Bindings C
+
+```bash
+brick bind <header.h>    # gera bindings .brc
+```
+
+---
+
+## 26. Pacotes
+
+### Declaração
+
+```brick
+package SPRITES                    ← declara pacote
+package SPRITES.EFFECTS            ← sub-pacote hierárquico
+```
+
+### Import
+
+```brick
+using SPRITES                      ← importa tudo do pacote
+using SPRITES.EFFECTS              ← importa sub-pacote aninhado
+```
+
+### export / private
+
+```brick
+export fn somar(int a, int b) -> int { return a + b }
+export const PI = 31415
+export struct Vec2 { int x; int y }
+export enum Cor { VERMELHO; VERDE; AZUL }
+export interface Desenhavel { fn desenhar() }
+
+private fn ajuda_interna() -> int { return 999 }
+private const SEGREDO = 42
+```
+
+---
+
+## 27. Compilação
+
+```bash
+brick input.brc -o output.c           # compilar para C
+brick build hello.brc -o hello        # compilar para binário (uma etapa)
+brick run hello.brc                   # compilar e executar
+brick new projeto                     # criar scaffold de projeto
+
+gcc -O3 output.c runtime/block_memory.c runtime/io.c -o programa -ldl
+```
+
+## 28. Palavras Reservadas
+
+```
+package   using     public    private   struct
+extends   interface fn        return    if
+else      while     for       block     reset
+true      false     null      error     int
+float     bool      char      String    void
+macro     build     emit      export    include
+link      extern    const     enum      match
+defer     union     type      impl      and
+or        not       is        as
+```

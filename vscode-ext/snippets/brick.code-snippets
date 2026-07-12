@@ -223,5 +223,19 @@
             "}"
         ],
         "description": "For-in range loop (0..N)"
+    },
+    "Export function": {
+        "prefix": "exportfn",
+        "body": [
+            "export fn ${1:name}(${2:params}) -> ${3:rettype} {",
+            "\t$0",
+            "}"
+        ],
+        "description": "Export a function (linker-visible, no static inline)"
+    },
+    "System include": {
+        "prefix": "incsys",
+        "body": "include \"${1:header.h}\" @system",
+        "description": "Include with @system (angle brackets for system headers)"
     }
 }

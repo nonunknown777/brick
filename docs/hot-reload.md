@@ -1,170 +1,151 @@
-# Brick Hot Reload
+# Hot Reload in Brick
 
-> Swap code without stopping your program.
-
-## Overview
-
-Hot reload lets you edit your `.brc` code, save, and see the result **without restarting** the program. Useful for game jams, live editors, and any situation where downtime is unacceptable.
-
-```
-Edit .brc   →  save   →  compile to .so/.dll   →  load   →  function swapped atomically
-```
+Brick supports native hot reload — swap code at runtime without restarting the program. Uses `dlopen`+`inotify` (Linux) or `LoadLibrary`+`ReadDirectoryChangesW` (Windows).
 
 ## How It Works
 
-### Architecture
+1. **Compile shared library**: `brick build --shared game.brc -o game.so`
+2. **Run program**: The hot reload runtime loads `game.so` via `dlopen`
+3. **Watch for changes**: `inotify` monitors the `.so` file for modifications
+4. **Swap automatically**: When recompiled, the runtime atomically swaps function pointers
+5. **Continue execution**: New code runs immediately — no restart needed
 
-Hot reload is cross-platform, using OS-specific primitives:
+## States
 
-| Platform | Dynamic Loading | File Watching | Atomic Swap |
-|---|---|---|---|
-| **Linux** | `dlopen` + `dlsym` | `inotify` | `__atomic_store_n` |
-| **Windows** | `LoadLibraryA` + `GetProcAddress` | `ReadDirectoryChangesW` (overlapped I/O) | `InterlockedExchange` |
+| State | Description |
+|-------|-------------|
+| `HR_WAITING` | Monitoring for file changes |
+| `HR_LOADING` | Reloading the shared library |
+| `HR_OK` | Code is up to date |
+| `HR_ERROR` | Reload failed (e.g., compile error) |
 
-The hot reload engine runs in a **separate thread** (`pthread` on Linux, `CreateThread` on Windows), watching the `.so`/`.dll` directory. When it detects a change, it:
+## Setup
 
-1. **Copies** the shared library to a temp file (dlopen caches by path; a copy bypasses the cache)
-2. **Loads** the new library via `dlopen` (Linux) or `LoadLibraryA` (Windows)
-3. **Atomic swap**: updates all registered function pointers atomically
-4. **Closes** the old library with `dlclose` (Linux) or `FreeLibrary` (Windows)
-5. Fires the **callback** notification
+### 1. Create Game Code
 
-### States
+`game.brc`:
 
-| State | Meaning |
-|---|---|
-| `HR_WAITING` | Waiting for initial load |
-| `HR_LOADING` | Loading new .so |
-| `HR_OK` | Ready |
-| `HR_ERROR` | dlopen failure |
+```brick
+package GAME
+using IO
 
-## How to Use
+block game = 64MB
 
-### Compile with hot reload support
-
-```bash
-brick build game.brc --release -o game
+export fn update(f32 dt) {
+    print("updating with dt={0}", dt)
+}
 ```
 
-The `--release` flag compiles each package as a separate .so.
-
-### Run
-
-```bash
-./game
-```
-
-The hot reload engine watches the .so files in the background.
-
-### Edit and see results
-
-Edit your `.brc`, save, and the binary reloads automatically. The function swap is **atomic** — there's no moment where the pointer points nowhere.
-
-### Typical development cycle
-
-```bash
-# Terminal 1: compile and run
-brick build mygame.brc --release -o mygame
-./mygame
-
-# Terminal 2: edit code
-vim mygame.brc    # make changes
-# compile new version
-brick build mygame.brc --release -o mygame
-# → hot reload detects the new .so and swaps functions automatically
-```
-
-## Hot Reload API
-
-### For end users
-
-Just use `brick build --release`. The compiler generates the .so files and the runtime handles the rest.
-
-### For C integration
+### 2. C Host Program
 
 ```c
-#include "hot_reload.h"
+// main.c
+#include "runtime/hot_reload.h"
+#include "runtime/block_memory.h"
 
-// 1. Create the engine
-HotReloadEngine* hr = hr_create("./build/mylib.so");
+int main() {
+    BlockCtx* game_mem = block_create(64 * 1024 * 1024);
+    HotReloadCtx* hr = hr_create("./game.so", game_mem);
 
-// 2. Register functions to be swapped
-void (*my_func)(void) = NULL;
-hr_register_func(hr, "my_function", (void**)&my_func);
+    while (running) {
+        hr_check(hr);  // reload if changed
 
-// 3. Load initial version
-hr_load_initial(hr);
+        void (*update)(float) = hr_sym(hr, "update");
+        if (update) update(0.016f);
 
-// 4. Start monitoring (inotify in separate thread)
-hr_start_watching(hr);
+        // optional: wait for VSync
+    }
 
-// 5. (optional) Callback after each reload
-hr_set_callback(hr, my_callback);
-
-// ... your program runs, edit the .so, and functions are swapped ...
-
-// 6. Cleanup
-hr_destroy(hr);
+    hr_destroy(hr);
+    block_destroy(game_mem);
+    return 0;
+}
 ```
 
-### API Functions
+### 3. Build and Run
 
-| Function | Description |
-|---|---|
-| `hr_create(path)` | Creates hot reload engine |
-| `hr_register_func(hr, name, ptr)` | Registers function for swap |
-| `hr_load_initial(hr)` | Loads initial symbols |
-| `hr_start_watching(hr)` | Starts inotify monitoring |
-| `hr_reload(hr)` | Forces manual reload |
-| `hr_state(hr)` | Returns current state |
-| `hr_set_callback(hr, cb)` | Sets post-reload callback |
-| `hr_destroy(hr)` | Cleans up resources |
+```bash
+# First build game as shared library
+brick build --shared game.brc -o game.so
+gcc -O3 main.c runtime/hot_reload.c runtime/block_memory.c runtime/io.c \
+    -ldl -o game
 
-## Implementation Details
+# Run — it starts with the initial game.so
+./game
 
-### Atomic swap
+# In another terminal, edit game.brc and recompile:
+brick build --shared game.brc -o game.so
 
-We use `__atomic_store` with `__ATOMIC_SEQ_CST` to ensure all function pointers are updated atomically. Readers always see a valid pointer.
+# The running program automatically picks up the change!
+```
 
-### Block freeze
+## Hot Reload with the Brick CLI
 
-During reload, the runtime **freezes all block allocations** (`block_freeze()`). No new allocations happen during the swap. After the swap, blocks are thawed (`block_thaw()`).
+```bash
+# Build with hot reload support
+brick build game.brc -o game --hot-reload
 
-### Cache busting
+# Run (hot reload enabled by default)
+./game
 
-dlopen caches by file path. To ensure a new version is loaded, we copy the .so to a temporary path before calling dlopen.
+# Edit game.brc in another terminal
+brick build game.brc -o game --hot-reload
 
-### Rollback
+# Running ./game automatically picks up changes!
+```
 
-If dlopen of the new version fails, the system keeps the old handle and the function pointers untouched. The program continues running with the previous version.
+## Memory + Hot Reload
 
-### Safety delay
+Double-buffer blocks enable zero-pause hot reload:
 
-A 50ms `nanosleep` between change detection and reload ensures the .so file write has completed fully.
+```c
+// In C host
+block_enable_double_buffer(game_mem);
 
-## Best Practices
+// When hot reload occurs:
+block_swap_buffers(game_mem);  // atomic, ~1 cycle
 
-- **Stable data structures**: don't change struct layout between versions (ABI must be compatible)
-- **Minimal global state**: global variables aren't reloaded — pass state via structs
-- **Callbacks**: use `hr_set_callback` to reconfigure state after each reload
+// Old allocations are still valid until next swap
+// New allocations use the fresh buffer
+```
+
+## Atomic Function Pointer Swap
+
+The hot reload system ensures:
+
+- **No torn reads**: function pointer swap is atomic (word-sized)
+- **No locking**: readers always see a valid pointer
+- **No deadlocks**: swap happens between frames, not during execution
+
+```c
+// Pseudo-code of the atomic swap:
+void hr_swap(HotReloadCtx* hr) {
+    void* old_lib = hr->lib;
+    hr->lib = dlopen(new_path, RTLD_NOW | RTLD_LOCAL);
+    // ... resolve symbols, update table ...
+    dlclose(old_lib);
+}
+```
 
 ## Limitations
 
-| Limitation | Reason | Workaround |
-|---|---|---|
-| .so/.dll per package | Each package becomes a separate shared library | Organize packages by module |
-| Data doesn't reload | Only code (functions) is swapped | Use stable structs |
-| ABI must be compatible | Function pointers expect the same signature | Freeze the public interface |
+- Functions must be `export fn` to be visible to the host
+- Struct layout must remain compatible across reloads
+- Global state in the host C code persists across reloads
+- Brick source changes that affect struct layout = restart required
+- Only function logic can change safely
 
-## Comparison
+## Cross-Platform
 
-| Brick Hot Reload | Live++ / C++ Modules |
-|---|---|
-| Atomic function pointer swap | Full TU recompilation |
-| No runtime cost when not in use | Instrumentation overhead |
-| Pure C, no C++ runtime | Requires C++ runtime |
-| Simple and predictable | Complex and state of the art |
+| Feature | Linux | Windows |
+|---------|-------|---------|
+| Dynamic library | `.so` | `.dll` |
+| File watching | `inotify` | `ReadDirectoryChangesW` |
+| Library loading | `dlopen`/`dlsym` | `LoadLibrary`/`GetProcAddress` |
+| Threading | `pthreads` | `CreateThread` |
+| Atomic swap | `__sync_bool_compare_and_swap` | `InterlockedExchange` |
 
-## Full Example
+## See Also
 
-See `tests/test_hot_reload.c` and `tests/test_libs_window_hr.c` for complete API usage examples.
+- [Getting Started](GETTING_STARTED.md) — Setting up your first project
+- [Architecture](ARCHITECTURE.md) — How the runtime fits together

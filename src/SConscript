@@ -38,6 +38,7 @@ lib_parser  = env.Library('#build/brick_parser',  ['parser/parser.cpp',
                                                    'parser/package.cpp',
                                                    'parser/macro_expander.cpp',
                                                    'parser/build_eval.cpp'])
+lib_bind   = env.Library('#build/brick_bind',   ['bind/bind.cpp'])
 lib_codegen = env.Library('#build/brick_codegen', ['codegen/codegen.cpp',
                                                    'codegen/type_checker.cpp'])
 lib_shared  = env.Library('#build/brick_shared',  ['shared/lsp.cpp',
@@ -45,7 +46,7 @@ lib_shared  = env.Library('#build/brick_shared',  ['shared/lsp.cpp',
 
 # ─── CLI Program ────────────────────────────────────────────
 brick_libs = [
-    'brick_lexer', 'brick_parser', 'brick_codegen', 'brick_shared',
+    'brick_lexer', 'brick_parser', 'brick_bind', 'brick_codegen', 'brick_shared',
     'brick_runtime',
 ] + platform_libs
 

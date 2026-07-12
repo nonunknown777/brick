@@ -16,9 +16,13 @@ const KEYWORDS = new Set([
     'u8', 'u16', 'u32', 'u64',
     'i8', 'i16', 'i32', 'i64',
     'f32', 'f64',
-    'usize', 'isize', 'byte',
+    'usize', 'isize', 'byte', 'short', 'long', 'double',
     'null', 'true', 'false',
-    'include', 'link', 'extern', 'and',
+    'include', 'link', 'extern', 'export', 'and', 'or',
+    'macro', 'build', 'emit',
+    'not', 'break', 'continue', 'const', 'defer',
+    'enum', 'match', 'is', 'as',
+    'union', 'impl', 'type', 'packed', 'align',
 ]);
 const KEYWORD_DOCS = {
     package: 'Declares a package namespace. Example: `package SPRITES`',
@@ -37,10 +41,10 @@ const KEYWORD_DOCS = {
     while: 'Loop while condition is true. Parentheses are optional.',
     for: 'C-style for loop: `for int i = 0; i < 10; i++ { }`',
     error: 'Panics with a message and aborts execution.',
-    int: '64-bit signed integer type.',
-    float: '64-bit floating point type.',
+    int: '32-bit signed integer type (alias for i32).',
+    float: '32-bit floating point type (alias for f32).',
     bool: 'Boolean type (`true` or `false`).',
-    char: '8-bit character type.',
+    char: '8-bit character type (alias for u8).',
     String: 'Dynamic string type (heap-allocated in a block).',
     void: 'No return type.',
     u8: 'Unsigned 8-bit integer type.',
@@ -52,17 +56,39 @@ const KEYWORD_DOCS = {
     i32: 'Signed 32-bit integer type.',
     i64: 'Signed 64-bit integer type.',
     f32: '32-bit floating point type.',
-    f64: '64-bit floating point type (same as `float`).',
+    f64: '64-bit floating point type (same as `double`).',
     usize: 'Unsigned pointer-sized integer type.',
     isize: 'Signed pointer-sized integer type.',
     byte: '8-bit byte type (alias for `u8`).',
+    short: '16-bit signed integer type (alias for i16).',
+    long: '64-bit signed integer type (alias for i64).',
+    double: '64-bit floating point type (alias for f64).',
     null: 'Null pointer literal, assignable to any type.',
     true: 'Boolean true literal.',
     false: 'Boolean false literal.',
     include: 'Include a C header. Example: `include "math.h"`',
     link: 'Link a C library. Example: `link m` or `link SDL2`',
     extern: 'Declare an external C function. Example: `extern fn sqrt(f64 x) -> f64`',
-    and: 'Connects include and link: `include "math.h" and link m`',
+    and: 'Logical AND operator / connects include and link.',
+    or: 'Logical OR operator. Example: `if a or b { }`',
+    macro: 'Declares a compile-time macro template. Usage:\n```brick\nmacro name(param1, param2, valores...) {\n    $param1 = $param2 + 1\n    emit { fn $param1() { } }\n}\n```\n- `$nome` inserts the argument\n- `$(expr)` evaluates expr at compile time\n- `valores...` captures rest args as an indexable list',
+    build: 'Compile-time computation block. Supports arithmetic, for/while/if, assignment, strings.\n```brick\nbuild {\n    x = 42\n    emit { z = x + 10 }  // z = 52 in final code\n}\n```\n- `emit { }` generates code at the build site\n- `emit nome(args)` calls a macro',
+    emit: 'Generates code at compile time:\n- `emit { /* any Brick code */ }` — inline code generation\n- `emit nome_macro(args)` — call a macro',
+    not: 'Boolean negation operator. Same as `!`. Example: `if not a { }`',
+    break: 'Exits the innermost loop or match arm. Usage: `break`',
+    continue: 'Skips to the next iteration of the innermost loop. Usage: `continue`',
+    const: 'Declares a compile-time constant. Examples:\n- `const MAX = 100` (type inferred)\n- `const int MIN = 0` (typed)',
+    defer: 'Schedules a statement to execute when the enclosing scope exits. Example: `defer { cleanup() }`',
+    enum: 'Declares an enumerated type with named constants. Example:\n```brick\nenum Color { Red = 0; Green; Blue }\n```',
+    match: 'Pattern matching on a value. Example:\n```brick\nmatch x {\n    1 { print("one") }\n    2,3 { print("two or three") }\n    _ { print("other") }\n}\n```',
+    'is': 'Type-check operator. Example: `if x is Player { }`',
+    'as': 'Type-cast operator. Example: `let p = x as Player`',
+    export: 'Marks a function as linker-visible (no `static inline` in generated C). Allows C code to call Brick functions.\n```brick\nexport fn calculate(int x) -> int {\n    return x * 2\n}\n```',
+    union: 'Declares a union type (fields share memory). Example:\n```brick\nunion Data { int i; float f }\n```',
+    impl: 'Implements an interface for a struct separately. Example:\n```brick\nimpl Arrow : Damageable {\n    fn take_damage(int d) { damage = d }\n}\n```',
+    type: 'Declares a type alias. Example: `type Coord = f64`',
+    packed: 'Struct attribute: removes padding between fields. Use: `struct Foo @packed { }`',
+    align: 'Struct attribute: sets alignment. Use: `struct Foo @align(16) { }`',
     PoolAllocator: 'Pool allocator type for fixed-size slot allocation. Created via `pool_create()`.',
     block_set_tls: 'Sets the thread-local storage block context. Used for per-thread memory blocks.',
     block_get_tls: 'Returns the thread-local storage block context.',
@@ -75,8 +101,11 @@ const KEYWORD_DOCS = {
     block_enable_double_buffer: 'Enables double-buffering on a block, keeping active and shadow buffers.',
     block_swap_buffers: 'Swaps the active and shadow buffers of a double-buffered block.',
     block_alloc_db: 'Allocates memory in a double-buffered block, returning a pointer valid in both buffers.',
+    sizeof: 'Compile-time operator: returns the size of a type or expression in bytes. Example: `int.sizeof → 4`',
+    alignof: 'Compile-time operator: returns the alignment requirement of a type. Example: `f64.alignof → 8`',
+    append: 'Dynamic array method: appends an element. Example: `items.append(val)`',
 };
-const FIXED_WIDTH_TYPES = new Set(['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte']);
+const FIXED_WIDTH_TYPES = new Set(['u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte', 'short', 'long', 'double']);
 const BUILTIN_TYPES = new Set(['int', 'float', 'bool', 'char', 'String', 'void', 'PoolAllocator', ...FIXED_WIDTH_TYPES]);
 function scanDocument(text) {
     const tokens = [];
@@ -109,6 +138,41 @@ function scanDocument(text) {
             if (ch === '/' && col + 1 < len && line[col + 1] === '/') {
                 tokens.push({ type: 'COMMENT', lexeme: line.slice(col), line: lineIdx + 1, col: col + 1 });
                 break;
+            }
+            // Block comment
+            if (ch === '/' && col + 1 < len && line[col + 1] === '*') {
+                let startLine = lineIdx;
+                let startCol = col;
+                let depth = 1;
+                col += 2;
+                let commentText = '/*';
+                while (depth > 0) {
+                    if (col >= len) {
+                        lineIdx++;
+                        if (lineIdx >= lines.length)
+                            break;
+                        line = lines[lineIdx];
+                        col = 0;
+                        commentText += '\n';
+                        continue;
+                    }
+                    if (line[col] === '/' && col + 1 < len && line[col + 1] === '*') {
+                        depth++;
+                        commentText += '/*';
+                        col += 2;
+                    }
+                    else if (line[col] === '*' && col + 1 < len && line[col + 1] === '/') {
+                        depth--;
+                        commentText += '*/';
+                        col += 2;
+                    }
+                    else {
+                        commentText += line[col];
+                        col++;
+                    }
+                }
+                tokens.push({ type: 'COMMENT', lexeme: commentText, line: startLine + 1, col: startCol + 1 });
+                continue;
             }
             // Strings
             if (ch === '"') {
@@ -146,17 +210,38 @@ function scanDocument(text) {
                 }
                 continue;
             }
-            // Numbers (int & float)
+            // Numbers (int & float, hex/octal/binary)
             if (ch >= '0' && ch <= '9') {
                 const start = col;
                 let isFloat = false;
-                while (col < len && (line[col] >= '0' && line[col] <= '9'))
-                    col++;
-                if (col < len && line[col] === '.') {
-                    isFloat = true;
-                    col++;
-                    while (col < len && (line[col] >= '0' && line[col] <= '9'))
+                // Hex 0x...
+                if (ch === '0' && col + 1 < len && (line[col + 1] === 'x' || line[col + 1] === 'X')) {
+                    col += 2;
+                    while (col < len && ((line[col] >= '0' && line[col] <= '9') || (line[col] >= 'a' && line[col] <= 'f') || (line[col] >= 'A' && line[col] <= 'F') || line[col] === '_'))
                         col++;
+                }
+                // Binary 0b...
+                else if (ch === '0' && col + 1 < len && (line[col + 1] === 'b' || line[col + 1] === 'B')) {
+                    col += 2;
+                    while (col < len && ((line[col] >= '0' && line[col] <= '1') || line[col] === '_'))
+                        col++;
+                }
+                // Octal 0o...
+                else if (ch === '0' && col + 1 < len && (line[col + 1] === 'o' || line[col + 1] === 'O')) {
+                    col += 2;
+                    while (col < len && ((line[col] >= '0' && line[col] <= '7') || line[col] === '_'))
+                        col++;
+                }
+                // Decimal
+                else {
+                    while (col < len && ((line[col] >= '0' && line[col] <= '9') || line[col] === '_'))
+                        col++;
+                    if (col < len && line[col] === '.') {
+                        isFloat = true;
+                        col++;
+                        while (col < len && ((line[col] >= '0' && line[col] <= '9') || line[col] === '_'))
+                            col++;
+                    }
                 }
                 const lexeme = line.slice(start, col);
                 tokens.push({ type: isFloat ? 'FLOAT_LITERAL' : 'INT_LITERAL', lexeme, line: lineIdx + 1, col: start + 1 });
@@ -174,6 +259,33 @@ function scanDocument(text) {
                 else {
                     tokens.push({ type: 'IDENTIFIER', lexeme, line: lineIdx + 1, col: start + 1 });
                 }
+                continue;
+            }
+            // Dollar sigil for macro args
+            if (ch === '$') {
+                const start = col;
+                col++;
+                if (col < len && line[col] === '(') {
+                    // $(expr) — compile-time expression
+                    col++;
+                    tokens.push({ type: 'DOLLAR_LPAREN', lexeme: '$(', line: lineIdx + 1, col: start + 1 });
+                }
+                else if (col < len && ((line[col] >= 'a' && line[col] <= 'z') || (line[col] >= 'A' && line[col] <= 'Z') || line[col] === '_')) {
+                    // $name — argument insertion
+                    while (col < len && ((line[col] >= 'a' && line[col] <= 'z') || (line[col] >= 'A' && line[col] <= 'Z') || (line[col] >= '0' && line[col] <= '9') || line[col] === '_'))
+                        col++;
+                    const lexeme = line.slice(start, col);
+                    tokens.push({ type: 'DOLLAR_IDENTIFIER', lexeme, line: lineIdx + 1, col: start + 1 });
+                }
+                else {
+                    tokens.push({ type: 'DOLLAR', lexeme: '$', line: lineIdx + 1, col: start + 1 });
+                }
+                continue;
+            }
+            // Ellipsis for rest parameters
+            if (ch === '.' && col + 2 < len && line[col + 1] === '.' && line[col + 2] === '.') {
+                tokens.push({ type: 'ELLIPSIS', lexeme: '...', line: lineIdx + 1, col: col + 1 });
+                col += 3;
                 continue;
             }
             // Multi-char operators
@@ -396,9 +508,13 @@ function scanDocument(text) {
             i = j;
             continue;
         }
-        // Include: include "header.h"
+        // Include: include "header.h" [@system] [and link libname]
         if (t.type === 'INCLUDE' && i + 1 < tok.length && tok[i + 1].type === 'STRING_LITERAL') {
             i += 2;
+            // Check for optional @system attribute
+            if (i < tok.length && tok[i].type === 'AT' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER' && tok[i + 1].lexeme === 'system') {
+                i += 2;
+            }
             // Check for optional "and link libname"
             if (i < tok.length && tok[i].type === 'AND' && i + 1 < tok.length && tok[i + 1].type === 'LINK' && i + 2 < tok.length && tok[i + 2].type === 'IDENTIFIER') {
                 i += 3;
@@ -442,6 +558,118 @@ function scanDocument(text) {
                 symbols.push({ name: blockName, kind: 'block', type_name: 'block', line: t.line, col: t.col });
             }
             i += 3;
+            continue;
+        }
+        // Union declaration: union NAME { fields }
+        if (t.type === 'UNION' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
+            const unionName = tok[i + 1].lexeme;
+            const unionLine = t.line;
+            i += 2;
+            symbols.push({ name: unionName, kind: 'struct', type_name: 'union', line: unionLine, col: t.col });
+            // Skip to LBRACE
+            while (i < tok.length && tok[i].type !== 'LBRACE')
+                i++;
+            if (i < tok.length && tok[i].type === 'LBRACE') {
+                let braceCount = 1;
+                i++;
+                // Parse fields within union
+                while (i < tok.length && braceCount > 0) {
+                    if (tok[i].type === 'LBRACE') {
+                        braceCount++;
+                        i++;
+                        continue;
+                    }
+                    if (tok[i].type === 'RBRACE') {
+                        braceCount--;
+                        i++;
+                        continue;
+                    }
+                    // Parse field: TYPE NAME
+                    if (i + 1 < tok.length && tok[i].type === 'IDENTIFIER' && tok[i + 1].type === 'IDENTIFIER' && tok[i + 1].lexeme !== '(') {
+                        const fieldType = tok[i].lexeme;
+                        const fieldName = tok[i + 1].lexeme;
+                        symbols.push({ name: fieldName, kind: 'field', type_name: fieldType, line: tok[i].line, col: tok[i].col, parent: unionName });
+                        i += 2;
+                        continue;
+                    }
+                    i++;
+                }
+            }
+            continue;
+        }
+        // impl declaration: impl StructName : InterfaceName { methods }
+        if (t.type === 'IMPL' && i + 3 < tok.length && tok[i + 1].type === 'IDENTIFIER' && tok[i + 2].type === 'COLON' && tok[i + 3].type === 'IDENTIFIER') {
+            const structName = tok[i + 1].lexeme;
+            const ifaceName = tok[i + 3].lexeme;
+            i += 4;
+            // Skip to LBRACE
+            while (i < tok.length && tok[i].type !== 'LBRACE')
+                i++;
+            if (i < tok.length && tok[i].type === 'LBRACE') {
+                let braceCount = 1;
+                i++;
+                while (i < tok.length && braceCount > 0) {
+                    if (tok[i].type === 'LBRACE') {
+                        braceCount++;
+                        i++;
+                        continue;
+                    }
+                    if (tok[i].type === 'RBRACE') {
+                        braceCount--;
+                        i++;
+                        continue;
+                    }
+                    // Parse methods inside impl
+                    if (tok[i].type === 'FN' && i + 1 < tok.length && tok[i + 1].type === 'IDENTIFIER') {
+                        const fnName = tok[i + 1].lexeme;
+                        const fnLine = tok[i].line;
+                        symbols.push({ name: fnName, kind: 'function', type_name: '', line: fnLine, col: tok[i].col, parent: structName });
+                        i += 2;
+                        // Skip params
+                        if (i < tok.length && tok[i].type === 'LPAREN') {
+                            let pd = 1;
+                            i++;
+                            while (i < tok.length && pd > 0) {
+                                if (tok[i].type === 'LPAREN')
+                                    pd++;
+                                if (tok[i].type === 'RPAREN')
+                                    pd--;
+                                if (pd > 0)
+                                    i++;
+                            }
+                            i++;
+                        }
+                        // Skip return type
+                        if (i < tok.length && tok[i].type === 'ARROW' && i + 1 < tok.length) {
+                            i += 2;
+                        }
+                        // Skip body
+                        if (i < tok.length && tok[i].type === 'LBRACE') {
+                            let bd = 1;
+                            i++;
+                            while (i < tok.length && bd > 0) {
+                                if (tok[i].type === 'LBRACE')
+                                    bd++;
+                                if (tok[i].type === 'RBRACE')
+                                    bd--;
+                                if (bd > 0)
+                                    i++;
+                            }
+                            i++;
+                        }
+                        continue;
+                    }
+                    i++;
+                }
+            }
+            continue;
+        }
+        // Type alias: type NAME = TYPE
+        if (t.type === 'TYPE' && i + 3 < tok.length && tok[i + 1].type === 'IDENTIFIER' && tok[i + 2].type === 'ASSIGN') {
+            const aliasName = tok[i + 1].lexeme;
+            const aliasType = tok[i + 3].lexeme;
+            symbols.push({ name: aliasName, kind: 'type', type_name: aliasType, line: t.line, col: t.col });
+            i += 4;
             continue;
         }
         // Struct declaration: struct NAME ... { ... }
@@ -563,7 +791,33 @@ function scanDocument(text) {
                             'IDENTIFIER',
                             ...Array.from(BUILTIN_TYPES).map(t => t.toUpperCase())
                         ]);
-                        // Check for array type: TYPE [ NUMBER ] NAME
+                        // Check for dynamic array field: TYPE [] NAME
+                        if (typeTokenTypes.has(tok[k].type) &&
+                            k + 2 < tok.length &&
+                            tok[k + 1].type === 'LBRACKET' &&
+                            tok[k + 2].type === 'RBRACKET' &&
+                            k + 3 < tok.length &&
+                            tok[k + 3].type === 'IDENTIFIER' &&
+                            tok[k + 3].lexeme !== '(') {
+                            const fieldType = tok[k].lexeme;
+                            const fieldName = tok[k + 3].lexeme;
+                            const fieldLine = tok[k + 3].line;
+                            symbols.push({ name: fieldName, kind: 'field', type_name: `${fieldType}[]`, line: fieldLine, col: tok[k + 3].col, parent: structName });
+                            structObj.fields.push({ name: fieldName, type: `${fieldType}[]`, line: fieldLine });
+                            k += 4;
+                            if (k < tok.length && tok[k].type === 'AT') {
+                                k++;
+                                if (k < tok.length && tok[k].type === 'IDENTIFIER')
+                                    k++;
+                            }
+                            if (k < tok.length && tok[k].type === 'ASSIGN') {
+                                k++;
+                                while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN')
+                                    k++;
+                            }
+                            continue;
+                        }
+                        // Check for fixed array type: TYPE [ NUMBER ] NAME
                         if (typeTokenTypes.has(tok[k].type) &&
                             k + 3 < tok.length &&
                             tok[k + 1].type === 'LBRACKET' &&
@@ -575,8 +829,8 @@ function scanDocument(text) {
                             const fieldType = tok[k].lexeme;
                             const fieldName = tok[k + 4].lexeme;
                             const fieldLine = tok[k + 4].line;
-                            symbols.push({ name: fieldName, kind: 'field', type_name: `${fieldType}[]`, line: fieldLine, col: tok[k + 4].col, parent: structName });
-                            structObj.fields.push({ name: fieldName, type: `${fieldType}[]`, line: fieldLine });
+                            symbols.push({ name: fieldName, kind: 'field', type_name: `${fieldType}[N]`, line: fieldLine, col: tok[k + 4].col, parent: structName });
+                            structObj.fields.push({ name: fieldName, type: `${fieldType}[N]`, line: fieldLine });
                             k += 5;
                             if (k < tok.length && tok[k].type === 'AT') {
                                 k++;
@@ -588,9 +842,10 @@ function scanDocument(text) {
                                 while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN')
                                     k++;
                             }
+                            continue;
                         }
                         // Check for scalar type: TYPE NAME
-                        else if (typeTokenTypes.has(tok[k].type) && k + 1 < tok.length && tok[k + 1].type === 'IDENTIFIER' && tok[k + 1].lexeme !== '(') {
+                        if (typeTokenTypes.has(tok[k].type) && k + 1 < tok.length && tok[k + 1].type === 'IDENTIFIER' && tok[k + 1].lexeme !== '(') {
                             const fieldType = tok[k].lexeme;
                             k++;
                             const fieldName = tok[k].lexeme;
@@ -608,9 +863,10 @@ function scanDocument(text) {
                                 while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN')
                                     k++;
                             }
+                            continue;
                         }
                         // Check for pointer type: * TYPE NAME  (e.g. *u8 data, *Player ref)
-                        else if (tok[k].type === 'STAR' && k + 2 < tok.length && (typeTokenTypes.has(tok[k + 1].type) || BUILTIN_TYPES.has(tok[k + 1].lexeme.toLowerCase())) && tok[k + 2].type === 'IDENTIFIER' && tok[k + 2].lexeme !== '(') {
+                        if (tok[k].type === 'STAR' && k + 2 < tok.length && (typeTokenTypes.has(tok[k + 1].type) || BUILTIN_TYPES.has(tok[k + 1].lexeme.toLowerCase())) && tok[k + 2].type === 'IDENTIFIER' && tok[k + 2].lexeme !== '(') {
                             const ptrType = '*' + tok[k + 1].lexeme;
                             const fieldName = tok[k + 2].lexeme;
                             const fieldLine = tok[k + 2].line;
@@ -627,9 +883,11 @@ function scanDocument(text) {
                                 while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN')
                                     k++;
                             }
+                            continue;
                         }
                         // Check for pointer array: * TYPE [ NUMBER ] NAME (e.g. *Player[10] team)
-                        else if (tok[k].type === 'STAR' && k + 4 < tok.length &&
+                        // ptrType already has '*' prefix, so the field type is ptrType + []
+                        if (tok[k].type === 'STAR' && k + 4 < tok.length &&
                             (typeTokenTypes.has(tok[k + 1].type) || BUILTIN_TYPES.has(tok[k + 1].lexeme.toLowerCase())) &&
                             tok[k + 2].type === 'LBRACKET' &&
                             (tok[k + 3].type === 'INT_LITERAL' || tok[k + 3].type === 'IDENTIFIER') &&
@@ -653,10 +911,100 @@ function scanDocument(text) {
                                 while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN')
                                     k++;
                             }
+                            continue;
                         }
-                        else {
-                            k++;
+                        // Check for bitfield type: u4/i3/u24 NAME (stored as IDENTIFIER)
+                        if (tok[k].type === 'IDENTIFIER' && k + 1 < tok.length && tok[k + 1].type === 'IDENTIFIER' &&
+                            tok[k + 1].lexeme !== '(' && /^[ui]\d+$/.test(tok[k].lexeme)) {
+                            const bitType = tok[k].lexeme;
+                            const fieldName = tok[k + 1].lexeme;
+                            const fieldLine = tok[k + 1].line;
+                            symbols.push({ name: fieldName, kind: 'field', type_name: bitType, line: fieldLine, col: tok[k + 1].col, parent: structName });
+                            structObj.fields.push({ name: fieldName, type: bitType, line: fieldLine });
+                            k += 2;
+                            if (k < tok.length && tok[k].type === 'AT') {
+                                k++;
+                                if (k < tok.length && tok[k].type === 'IDENTIFIER')
+                                    k++;
+                            }
+                            if (k < tok.length && tok[k].type === 'ASSIGN') {
+                                k++;
+                                while (k < tok.length && tok[k].type !== 'LBRACE' && tok[k].type !== 'RBRACE' && tok[k].type !== 'FN')
+                                    k++;
+                            }
+                            continue;
                         }
+                        // Check for anonymous union inside struct
+                        if (tok[k].type === 'UNION' && k + 1 < tok.length && tok[k + 1].type === 'LBRACE') {
+                            // anonymous union - flatten its fields into the struct
+                            k += 2;
+                            let anonBraceCount = 1;
+                            while (k < tok.length && anonBraceCount > 0) {
+                                if (tok[k].type === 'LBRACE') {
+                                    anonBraceCount++;
+                                    k++;
+                                    continue;
+                                }
+                                if (tok[k].type === 'RBRACE') {
+                                    anonBraceCount--;
+                                    k++;
+                                    continue;
+                                }
+                                // Parse field inside anonymous union
+                                if (k + 1 < tok.length && typeTokenTypes.has(tok[k].type) && tok[k + 1].type === 'IDENTIFIER' && tok[k + 1].lexeme !== '(') {
+                                    const fieldType = tok[k].lexeme;
+                                    const fieldName = tok[k + 1].lexeme;
+                                    symbols.push({ name: fieldName, kind: 'field', type_name: fieldType, line: tok[k].line, col: tok[k].col, parent: structName });
+                                    structObj.fields.push({ name: fieldName, type: fieldType, line: tok[k + 1].line });
+                                    k += 2;
+                                    continue;
+                                }
+                                k++;
+                            }
+                            continue;
+                        }
+                        // Check for anonymous struct inside union inside struct
+                        if (tok[k].type === 'STRUCT' && k + 1 < tok.length && tok[k + 1].type === 'LBRACE') {
+                            k += 2;
+                            let anonBraceCount = 1;
+                            while (k < tok.length && anonBraceCount > 0) {
+                                if (tok[k].type === 'LBRACE') {
+                                    anonBraceCount++;
+                                    k++;
+                                    continue;
+                                }
+                                if (tok[k].type === 'RBRACE') {
+                                    anonBraceCount--;
+                                    k++;
+                                    continue;
+                                }
+                                if (k + 1 < tok.length && typeTokenTypes.has(tok[k].type) && tok[k + 1].type === 'IDENTIFIER' && tok[k + 1].lexeme !== '(') {
+                                    const fieldType = tok[k].lexeme;
+                                    const fieldName = tok[k + 1].lexeme;
+                                    symbols.push({ name: fieldName, kind: 'field', type_name: fieldType, line: tok[k].line, col: tok[k].col, parent: structName });
+                                    structObj.fields.push({ name: fieldName, type: fieldType, line: tok[k + 1].line });
+                                    k += 2;
+                                    continue;
+                                }
+                                k++;
+                            }
+                            continue;
+                        }
+                        // Skip @packed, @align attributes
+                        if (tok[k].type === 'AT' && k + 1 < tok.length &&
+                            (tok[k + 1].lexeme === 'packed' || tok[k + 1].lexeme === 'align')) {
+                            k += 2;
+                            // Skip (N) after @align
+                            if (tok[k - 1].lexeme === 'align' && k < tok.length && tok[k].type === 'LPAREN') {
+                                k++;
+                                while (k < tok.length && tok[k].type !== 'RPAREN')
+                                    k++;
+                                if (k < tok.length)
+                                    k++;
+                            }
+                            continue;
+                        }
+                        k++;
                     }
                 }
             }
@@ -671,6 +1019,72 @@ function scanDocument(text) {
             i += 2;
             while (i < tok.length && tok[i].type !== 'LBRACE')
                 i++;
+            if (i < tok.length && tok[i].type === 'LBRACE') {
+                let braceCount = 1;
+                i++;
+                while (i < tok.length && braceCount > 0) {
+                    if (tok[i].type === 'LBRACE')
+                        braceCount++;
+                    if (tok[i].type === 'RBRACE')
+                        braceCount--;
+                    if (braceCount > 0)
+                        i++;
+                }
+                i++;
+            }
+            continue;
+        }
+        // Export function: export fn NAME ( params ) -> Type { ... }
+        // Same parsing as extern fn but without body requirement difference
+        if (t.type === 'EXPORT' && i + 1 < tok.length && tok[i + 1].type === 'FN' && i + 2 < tok.length && tok[i + 2].type === 'IDENTIFIER') {
+            const fnName = tok[i + 2].lexeme;
+            const fnLine = t.line;
+            let j = i + 3;
+            // Parameters
+            const params = [];
+            if (j < tok.length && tok[j].type === 'LPAREN') {
+                j++;
+                let paramDepth = 1;
+                while (j < tok.length && paramDepth > 0) {
+                    if (tok[j].type === 'LPAREN')
+                        paramDepth++;
+                    if (tok[j].type === 'RPAREN')
+                        paramDepth--;
+                    if (paramDepth > 0 && tok[j].type === 'IDENTIFIER' && j > 0 && tok[j - 1].type !== 'DOT') {
+                        if (j >= 2 && (tok[j - 1].type === 'IDENTIFIER' || BUILTIN_TYPES.has(tok[j - 1].lexeme.toLowerCase()))) {
+                            params.push(tok[j].lexeme);
+                        }
+                    }
+                    j++;
+                }
+            }
+            let returnType = 'void';
+            if (j < tok.length && tok[j].type === 'ARROW' && j + 1 < tok.length) {
+                j++;
+                if (tok[j].type === 'IDENTIFIER' || BUILTIN_TYPES.has(tok[j].lexeme.toLowerCase())) {
+                    returnType = tok[j].lexeme;
+                    j++;
+                }
+            }
+            symbols.push({
+                name: fnName,
+                kind: 'function',
+                type_name: returnType,
+                line: fnLine,
+                col: t.col,
+            });
+            for (const p of params) {
+                symbols.push({
+                    name: p,
+                    kind: 'param',
+                    type_name: '',
+                    line: fnLine,
+                    col: 0,
+                    parent: fnName,
+                });
+            }
+            // Skip body { ... }
+            i = j;
             if (i < tok.length && tok[i].type === 'LBRACE') {
                 let braceCount = 1;
                 i++;
@@ -979,9 +1393,11 @@ function getCompletionContext(text, line, col, triggerChar) {
     const atMatch = prefix.match(/@([a-zA-Z0-9_]*)$/);
     const colonMatch = prefix.match(/:([a-zA-Z0-9_]*)$/);
     // Check if we're after a keyword
-    const keywordMatch = prefix.match(/\b(package|using|private|public|struct|extends|interface|fn|block|if|while|for|extern|include|link)\s+([a-zA-Z0-9_]*)$/);
+    const keywordMatch = prefix.match(/\b(package|using|private|public|export|struct|extends|interface|fn|block|if|while|for|extern|include|link|macro|build|emit|enum|const|match)\s+([a-zA-Z0-9_]*)$/);
     // Check if we're after a type
     const typeMatch = prefix.match(/\b(u(?:8|16|32|64)|i(?:8|16|32|64)|f(?:32|64)|usize|isize|byte|int|float|bool|char|String|void)\s+([a-zA-Z0-9_]*)$/);
+    // Check if we're after include "..."
+    const includeStrMatch = prefix.match(/include\s+"[^"]*"\s*(@([a-zA-Z0-9_]*))?$/);
     return {
         prefix,
         triggerKind: triggerChar ? 2 : 1,
@@ -991,6 +1407,7 @@ function getCompletionContext(text, line, col, triggerChar) {
         isAfterColon: colonMatch !== null,
         isAfterKeyword: keywordMatch ? keywordMatch[1] : null,
         isAfterType: typeMatch !== null,
+        isAfterIncludeString: includeStrMatch !== null,
         currentWord: word,
         linePrefix: prefix,
     };

@@ -1,0 +1,31 @@
+package TEST_PKG
+
+using IO
+using MATH
+
+block global = 1MB
+
+fn main() {
+    // Use exported function
+    i32 result = add(3, 4)
+    print("add(3,4) = {0}", result)
+
+    // Use exported const
+    print("PI = {0}", PI)
+
+    // Use exported struct
+    Vec2 v = {10, 20}
+    print("v.x = {0}, v.y = {1}", v.x, v.y)
+
+    // Use exported enum
+    Color c = GREEN
+    if c == GREEN {
+        print("color is GREEN")
+    }
+
+    // Use exported interface + struct
+    Circle circ = {radius = 5}
+    circ.draw()
+
+    global.reset()
+}

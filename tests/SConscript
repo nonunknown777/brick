@@ -36,6 +36,10 @@ if has_hotreload:
 test_bins.append(build_test('test_macros',  ['test_macros.cpp'],
                             ['brick_parser', 'brick_lexer']))
 
+# ─── Bind tests ───────────────────────────────────────────────
+test_bins.append(build_test('test_bind',  ['test_bind.cpp'],
+                            ['brick_bind', 'brick_lexer']))
+
 # ─── Optimization tests ──────────────────────────────────────
 test_bins.append(build_test('test_pool_allocator', ['test_pool_allocator.c'],
                             ['brick_runtime']))

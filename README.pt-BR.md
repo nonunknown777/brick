@@ -1,306 +1,90 @@
-<p align="center">
-  <img src="docs/logo.png" alt="Brick Logo" width="200"/>
-</p>
+# Brick
 
-<h1 align="center">Brick</h1>
-<p align="center">
-  <em>Uma linguagem OOP de alta performance que compila para C puro.</em>
-</p>
-
-<p align="center">
-  <a href="README.md">🇬🇧 English</a>
-</p>
-
----
-
-## 👋 Demonstração Rápida
+**v1.1.0** — Uma linguagem de programação que compila para C. Performance máxima,
+gerenciamento explícito de memória por blocos, e hot reload nativo.
 
 ```brick
-package DEMO
-
+package GAME
 using IO
-
 block global = 64MB
 
-interface Damageable {
-    fn take_damage(i32 dmg)
-}
+interface Damageable { fn take_damage(i32 dmg) }
 
-struct Player {
+struct Player : Damageable {
     i32 hp
     String name
-    i32 ammo
+    int[] items
 
-    fn Player(i32 h, String n, i32 a) {
-        hp = h
-        ammo = a
-        name = n
+    fn Player(i32 h, String n) {
+        hp = h; name = n
     }
 
     fn take_damage(i32 dmg) {
         hp -= dmg
+        if hp < 0 { hp = 0 }
         print("{0} tomou {1} de dano, hp={2}", name, dmg, hp)
     }
 }
 
 fn main() {
-    Player p = Player(100, "Felipe", 30)
+    Player p = Player(100, "Felipe") @game
     p.take_damage(20)
+    game.reset()
 }
 ```
 
-## Compilar & Executar
+## Início Rápido
 
 ```bash
-brick run exemplo.brc
+git clone <repo> && cd brick
+scons                          # compilar compilador
+brick run exemplos/hello.brc   # compilar e executar
+brick build hello.brc -o hello # compilar para binário
 ```
 
-Sem `gcc` manual — `brick build` e `brick run` cuidam de tudo.
+## Features
 
----
+| Categoria | Features |
+|-----------|----------|
+| **Tipos** | Largura fixa: `u8`..`u64`, `i8`..`i64`, `f32`/`f64`, `usize`/`isize`, `byte`, `bool`, `String`. Aliases: `short`/`long`/`double`, `type NAME = TYPE`. Bitfields: `u4`, `i3` |
+| **Literais** | Hex (`0xFF`), binário (`0b1010`), octal (`0o777`), separador (`1_000_000`), sufixos de tipo (`42u8`, `3.14f64`) |
+| **Arrays** | Fixo `int[10]`, dinâmico `int[]` com `.append`/`.len`/`.cap`, literais `{1, 2, 3}` |
+| **Structs** | Métodos, construtores, herança (`extends`), interfaces (`interface`), dispatch vtbl, blocos `impl`, aninhamento anônimo struct/union, `@packed`/`@align(N)`, init nomeado |
+| **Unions** | Unions nomeadas, unions anônimas dentro de structs, structs anônimas dentro de unions |
+| **Enums** | Constantes nomeadas com valores hex (`enum Flags { A = 0xFF }`) |
+| **Ponteiros** | `*T`, aritmética completa (`+`, `-`, `+=`, `-=`, `++`, `--`, `[]`, `==`, `!=`, `<`, `>`), null |
+| **Controle** | `if`/`else`, `while`, `for` (C-style + `for x in N`), `break`/`continue`, `match` com guards, `defer` |
+| **Constantes** | `const NAME = value` com avaliação em tempo de compilação, usado em tamanhos de array |
+| **Funções** | `fn`, `->` tipo retorno, `export fn` visibilidade C, ponteiros de função `fn(int)->void`, parâmetros default |
+| **Macros** | `macro` com interpolação `$`, `build {}` eval, `emit {}` code gen, varargs `args...`, higiene, `$macro()` explícito |
+| **Pacotes** | `package NAME`, `using PACKAGE`, `export`/`private`, multi-arquivo, aninhados (`MATH.VEC2`), auto-resolução, `-I`, `BRICK_PATH` |
+| **Interop C** | `include`, `link`, `extern fn`, `@system`, `export fn`, `*u8` → `char*`, `String` → `*u8` |
+| **Operadores** | `and`/`or`/`not`, `&&`/`||`/`!`, bitwise (`&` `|` `^` `~` `<<` `>>`), `sizeof`/`alignof`, `++`/`--` |
+| **Memória** | Bump allocator por blocos (~3 ciclos), pool allocator para tipos ≤64B, TLS blocks, double-buffer hot reload |
+| **Visibilidade** | `private`/`public` em campos, funções, structs, consts, enums, unions, interfaces, types, macros |
+| **Erros** | `error("msg")` panic com mensagem e abort |
 
-## ✨ Funcionalidades
-
-- **OOP com Chaves** — `struct` com construtores, métodos, herança e interfaces.
-- **Compila para C Puro** — Código C legível com diretivas `#line` para debug. Sem VM, sem interpretador — código nativo.
-- **Memória por Blocos** — Sem `malloc`/`free`, sem GC. Declare blocos (`block nome = 64MB`) e o bump allocator cuida do resto.
-- **Sem Pilha para Dados** — Tudo vive em blocos gerenciados. Reset de bloco recupera tudo instantaneamente.
-- **Hot Reload Nativo** — Troque código sem parar o programa via `dlopen`+`inotify` (Linux) ou `LoadLibrary`+`ReadDirectoryChangesW` (Windows).
-- **Visualizador TUI** — Dashboard ncurses (Linux) ou PDCurses (Windows) mostrando estado dos blocos em tempo real.
-- **Integração GDB** — Debug no código `.brc` original com pretty-printers para `BlockCtx`.
-- **Extensão VS Code** — Syntax highlighting, LSP e webview de memória.
-- **Multiplataforma** — Linux primário. Windows com suporte nativo via MinGW-w64 e pipeline CI completo.
-- **Portabilidade Windows** — `VirtualAlloc`/`VirtualFree`, `CRITICAL_SECTION`, `LoadLibrary`/`ReadDirectoryChangesW`, biblioteca de janela Win32 (`CreateWindow`). Todos os 159 testes de código aprovados no Windows.
-- **Tipos de Largura Fixa** — `i8/i16/i32/i64`, `u8/u16/u32/u64`, `f32/f64`, `usize`/`isize`.
-
----
-
-## 🚀 Comece Agora
-
-### Pré-requisitos
-
-- **Linux**: GCC ≥ 11 ou Clang ≥ 14, ncurses (opcional)
-- **Windows**: [MinGW-w64](https://www.mingw-w64.org/) com GCC ≥ 13, SCons (`pip install scons`)
-
-### Build do Compilador
-
-**Linux:**
-```bash
-git clone https://github.com/nonunknown777/brick.git
-cd brick
-scons                        # build release
-# ou
-./build-release.sh           # release completo + extensão VS Code
-```
-
-**Windows (PowerShell):**
-```powershell
-git clone https://github.com/nonunknown777/brick.git
-cd brick
-scons target=windows profile=release
-# ou
-.\build-release.ps1          # build release completo
-```
-
-O binário `brick` (Linux) ou `brick.exe` (Windows) estará em `build/`.
-
-No Windows, você também pode usar `.\brc-run.bat` para compilar e rodar arquivos `.brc` diretamente.
-
-### Executar um Demo
+## CLI
 
 ```bash
-# Compilar e executar em um passo
-brick run examples/hello.brc
-
-# Ou compilar para binário primeiro
-brick build examples/hello.brc -o hello
-./hello
+brick <input.brc> [-o output.c]           # compilar para C
+brick build <files...> [-o output]         # compilar para binário
+brick run <input.brc>                      # compilar e executar
+brick new <projeto>                        # criar novo projeto scaffold
+brick bind <header.h>                      # gerar bindings C
+brick --visualize <file>                   # compilar + visualizador TUI
+brick --attach <pid>                       # anexar visualizador a processo
 ```
 
-### Rodar Testes
+## Documentação
 
-```bash
-scons test                   # todos os testes unitários
-```
+- [Guia de Início Rápido](docs/GETTING_STARTED.pt-BR.md) — Instalação, build, primeiro programa
+- [Referência da Linguagem](docs/LANGUAGE.pt-BR.md) — Sintaxe completa, tipos, pacotes, memória
+- [Arquitetura](docs/ARCHITECTURE.pt-BR.md) — Pipeline do compilador (Lexer → Parser → Macros → Codegen)
+- [Macros](docs/MACROS.pt-BR.md) — Geração de código em tempo de compilação
+- [Hot Reload](docs/hot-reload.pt-BR.md) — Troca de código ao vivo
+- [Otimizações](docs/OPTIMIZATIONS.pt-BR.md) — Detalhes de performance
 
-### Visualizar Memória
+## Licença
 
-```bash
-brick --visualize examples/hello.brc   # compila, executa, mostra TUI
-brick --attach <pid>                  # anexa a processo rodando
-```
-
----
-
-## ⚡ Performance
-
-### Bump Allocator
-
-| Operação              | Tempo                 | vs malloc/free           |
-|-----------------------|-----------------------|--------------------------|
-| Alocação              | ~3 ciclos de CPU      | ~50–200× mais rápido     |
-| Reset de bloco (64MB) | ~5 ns                 | 2000× mais rápido        |
-
-**Benchmark real:**
-
-```
-Block alloc: 1.000.000 allocs de 64B em 0.002s   ← 19,5× mais rápido
-malloc:      1.000.000 allocs de 64B em 0.039s   ← baseline
-```
-
-### Compilador
-
-| Entrada        | Tempo de Compilação |
-|----------------|---------------------|
-| 100 structs    | 5 ms                |
-| 1.000 linhas   | ~10 ms              |
-
----
-
-## 📝 Exemplos
-
-### Tipos de Largura Fixa e Interface
-
-```brick
-package EXEMPLO
-
-using IO
-
-block global = 64MB
-
-interface Desenhavel {
-    fn desenhar()
-}
-
-struct Circulo extends Desenhavel {
-    u32 id
-    f32 raio
-
-    fn Circulo(u32 i, f32 r) {
-        id = i
-        raio = r
-    }
-
-    fn desenhar() {
-        print("Círculo #{0} raio={1}", id, raio)
-    }
-}
-
-fn main() {
-    Circulo c = Circulo(1u32, 5.0f32)
-    c.desenhar()
-}
-```
-
-### Hot Reload
-
-```bash
-# Compilar com suporte a hot reload
-brick build jogo.brc --release -o jogo
-
-# Executar — Brick monitora arquivos via inotify
-# Edite seu .brc e salve — o binário recarrega automaticamente
-./jogo
-```
-
-### Macros (Geração de Código)
-
-Gere código em tempo de compilação com `macro`, `build` e `emit`:
-
-```brick
-macro troca(a, b) {
-    __tmp = $a
-    $a = $b
-    $b = __tmp
-}
-
-macro enum(nome, valores...) {
-    emit { $nome = 0 }
-    for i = 1; i < 4; i = i + 1 {
-        emit { ${"$" ++ valores[i]} = i }
-    }
-}
-
-enum(TipoArma, ARMA_SOCO, ARMA_PISTOLA, ARMA_RIFLE, ARMA_FOGUETE)
-
-fn main() {
-    x = 10; y = 20
-    troca(x, y)        // x=20, y=10
-    
-    if arma == ARMA_FOGUETE {
-        print("Fogo!")
-    }
-}
-```
-
-- **`macro`** — templates de código com interpolação `$`
-- **`build { }`** — computação em tempo de compilação (matemática, loops, reflection)
-- **`emit { }`** — gera saída de dentro de macros ou build
-- **`$nome`** — insere valor do argumento
-- **Varargs** — `valores...` captura argumentos restantes como lista
-- **Higiene** — variáveis `__` ganham nomes únicos automaticamente
-
-Veja o [Guia de Macros](docs/MACROS.pt-BR.md) para exemplos completos.
-
----
-
-## 📁 Estrutura do Projeto
-
-| Diretório      | Conteúdo                                               |
-|----------------|--------------------------------------------------------|
-| `src/`         | Compilador em C++20 (Lexer, Parser, Codegen)            |
-| `runtime/`     | Runtime C (alocador de blocos, IO, hot reload)          |
-| `visualizer/`  | TUI ncurses para visualização de memória                |
-| `debugger/`    | Pretty-printers GDB, comandos custom, `.gdbinit`        |
-| `examples/`    | Programas `.brc` de exemplo                              |
-| `tests/`       | Testes unitários (SCons)                                |
-| `benchmarks/`  | Scripts de benchmark                                    |
-| `vscode-ext/`  | Extensão VS Code (highlight, LSP, memory view)          |
-| `docs/`        | Site GitHub Pages (HTML + assets)                       |
-| `wiki/`        | Fonte do GitHub Wiki                                    |
-| `tasks/`       | 11 tarefas de desenvolvimento com estado por tarefa     |
-| `build/`       | Artefatos de compilação                                 |
-
----
-
-## 📚 Documentação
-
-- **[Primeiros Passos](docs/GETTING_STARTED.pt-BR.md)** — Instalação, primeiro programa, uso da CLI
-- **[Referência da Linguagem](docs/LANGUAGE.pt-BR.md)** — Sintaxe completa, tipos, pacotes, modelo de memória
-- **[Arquitetura](docs/ARCHITECTURE.pt-BR.md)** — Como compilador, runtime e ferramentas se encaixam
-- **[Guia de Hot Reload](docs/hot-reload.pt-BR.md)** — Troca de código ao vivo via dlopen + inotify
-- **[Guia de Macros](docs/MACROS.pt-BR.md)** — Geração de código em tempo de compilação com `macro`/`build`/`emit`
-- **[Otimizações](docs/OPTIMIZATIONS.pt-BR.md)** — Ajustes de performance e benchmarks
-- 🇬🇧 **[English](README.md)** — English documentation
-
----
-
-## 🤝 Contribuindo
-
-O projeto é dividido em **11 tarefas**, cada uma com seu `AGENTS.md` e `STATE.md`.
-
-Participe — abra uma issue ou PR em [github.com/nonunknown777/brick](https://github.com/nonunknown777/brick).
-
----
-
-## 🧱 O Nome
-
-**BriCk** é um jogo de palavras em três camadas:
-
-1. **Brick** (tijolo) — blocos de memória são os tijolos que constroem o runtime
-2. **C** no meio — compila para **C**
-3. **BR** na frente — **Brasil**, a origem do projeto
-
-> *BriCk — the brazilian C.*
-
----
-
-## 📄 Licença
-
-MIT License.
-
----
-
-<p align="center">
-  <sub>Feito com ❤️ em C++20 e C — porque às vezes você precisa ser rápido.</sub>
-</p>
+MIT

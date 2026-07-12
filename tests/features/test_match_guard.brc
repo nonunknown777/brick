@@ -1,0 +1,50 @@
+// Test match with guards
+// Testa match com guards (condicoes)
+
+using IO
+
+fn test_guard_matches() -> int {
+    int val = 5
+    int out = 0
+    match (val) {
+        5 if (val > 3) { out = 1 }
+        5 { out = 2 }
+        _ { out = 3 }
+    }
+    return out
+}
+
+fn test_guard_falls_through() -> int {
+    int val = 5
+    int out = 0
+    match (val) {
+        5 if (val > 10) { out = 10 }
+        5 { out = 20 }
+        _ { out = 30 }
+    }
+    return out
+}
+
+fn test_guard_wildcard() -> int {
+    int val = 99
+    int out = 0
+    match (val) {
+        1 if (val == 1) { out = 100 }
+        _ if (val == 99) { out = 200 }
+        _ { out = 300 }
+    }
+    return out
+}
+
+fn main() {
+    int r1 = test_guard_matches()
+    print("guard_matches = {0}", r1)
+
+    int r2 = test_guard_falls_through()
+    print("guard_falls_through = {0}", r2)
+
+    int r3 = test_guard_wildcard()
+    print("guard_wildcard = {0}", r3)
+
+    print("PASS: all match guard tests")
+}

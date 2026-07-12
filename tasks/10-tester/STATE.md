@@ -174,7 +174,16 @@ c:     static inline void Circle_draw(Circle* this) { ... }
 - `.len` e `.cap` continuam funcionando como propriedades readonly
 - Nota: runtime test complexo por precisar alocar data pointer; compilação validada
 
-### ✅ Arquivos modificados (nesta sessão):
+### ✅ Documentação web + wiki + README.pt-BR atualizados
+- `docs/*.html` — 12 arquivos regenerados via `md2html.py`, 1 editado manualmente (`index.html` com 3 novos cards)
+- `wiki/` — `Language-Reference.md`, `Home.md`, `FAQ.md`, `Architecture.md` atualizados
+- `README.pt-BR.md` — espelhado do `README.md`
+
+### ✅ `brick-features-needed.md` atualizado
+- Todas as 14 features originais marcadas ✅ IMPLEMENTADO
+- 3 novas seções (5.1 export fn, 5.2 $macro, 5.3 @system)
+- Tabela de arquivos com coluna Status + 3 novas linhas
+- Fases 1-5 marcadas como completas
 - `src/codegen/codegen.cpp` — include relativo (INCLUDE_DECL) + append codegen + type_map uppercase variants + normalize_type_name uppercase
 - `src/codegen/type_checker.cpp` — struct init literals (2 branches: check_statement + check_expression) + append type check + normalize_type uppercase variants
 - `tasks/10-tester/STATE.md` — atualizado

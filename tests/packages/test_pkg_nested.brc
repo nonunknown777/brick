@@ -1,0 +1,18 @@
+package TEST_NESTED
+
+using IO
+using MATH.VEC2
+
+block global = 1MB
+
+fn main() {
+    // Use exported struct from nested package
+    Vec2 v = {x = 3.0, y = 4.0}
+    print("v.x = {0}, v.y = {1}", v.x, v.y)
+
+    // Use exported function
+    f64 len = length(v)
+    print("length = {0}", len)
+
+    global.reset()
+}

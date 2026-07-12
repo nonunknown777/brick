@@ -1,0 +1,21 @@
+// Test build block with 'or' operator (top-level, not inside macro)
+// Tests that the 'or' keyword parses correctly inside build {} blocks
+// (This exercises the logical_or_build() fix in the parser)
+
+using IO
+
+build {
+    x = true or false
+    y = 1 or 0
+    emit {
+        fn get_val() -> i32 {
+            return 100
+        }
+    }
+}
+
+fn main() {
+    i32 v = get_val()
+    print("build or test: {0}", v)
+    print("PASS: build or test")
+}

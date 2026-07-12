@@ -1,170 +1,101 @@
-# Hot Reload do Brick
+# Hot Reload no Brick
 
-> Troque código sem parar o programa.
-
-## Visão Geral
-
-Hot reload permite editar seu código `.brc`, salvar, e ver o resultado **sem reiniciar** o programa. Útil para game jams, editores ao vivo, e qualquer situação onde downtime é inaceitável.
-
-```
-Edita .brc  →  salva  →  compila pra .so/.dll  →  carrega  →  função trocada atomicamente
-```
+Brick suporta hot reload nativo — troque código em tempo de execução sem reiniciar o programa. Usa `dlopen`+`inotify` (Linux) ou `LoadLibrary`+`ReadDirectoryChangesW` (Windows).
 
 ## Como Funciona
 
-### Arquitetura
+1. **Compilar biblioteca compartilhada**: `brick build --shared jogo.brc -o jogo.so`
+2. **Executar programa**: O runtime hot reload carrega `jogo.so` via `dlopen`
+3. **Observar mudanças**: `inotify` monitora o arquivo `.so` por modificações
+4. **Trocar automaticamente**: Quando recompilado, o runtime troca atomicamente os ponteiros de função
+5. **Continuar execução**: Novo código roda imediatamente — sem reinicialização
 
-O hot reload é multiplataforma, usando primitivas específicas de cada SO:
+## Estados
 
-| Plataforma | Carregamento Dinâmico | Monitoramento | Swap Atômico |
-|---|---|---|---|
-| **Linux** | `dlopen` + `dlsym` | `inotify` | `__atomic_store_n` |
-| **Windows** | `LoadLibraryA` + `GetProcAddress` | `ReadDirectoryChangesW` (I/O overlapped) | `InterlockedExchange` |
+| Estado | Descrição |
+|--------|-----------|
+| `HR_WAITING` | Monitorando mudanças no arquivo |
+| `HR_LOADING` | Recarregando a biblioteca |
+| `HR_OK` | Código atualizado |
+| `HR_ERROR` | Recarga falhou (ex: erro de compilação) |
 
-O motor de hot reload roda em uma **thread separada** (`pthread` no Linux, `CreateThread` no Windows), monitorando o diretório do .so/.dll. Quando detecta uma mudança, ele:
+## Configuração
 
-1. **Copia** a biblioteca compartilhada pra um arquivo temporário (dlopen cacheia por path, então copia contorna o cache)
-2. **Carrega** a nova biblioteca via `dlopen` (Linux) ou `LoadLibraryA` (Windows)
-3. **Swap atômico**: atualiza todos os ponteiros de função registrados atomicamente
-4. **Fecha** a biblioteca antiga com `dlclose` (Linux) ou `FreeLibrary` (Windows)
-5. Dispara o **callback** de notificação
+### 1. Criar Código do Jogo
 
-### Estados
+`jogo.brc`:
 
-| Estado | Significado |
-|---|---|
-| `HR_WAITING` | Aguardando load inicial |
-| `HR_LOADING` | Carregando novo .so |
-| `HR_OK` | Pronto |
-| `HR_ERROR` | Falha no dlopen |
+```brick
+package JOGO
+using IO
 
-## Como Usar
+block jogo = 64MB
 
-### Compilar com suporte a hot reload
-
-```bash
-brick build game.brc --release -o game
+export fn atualizar(f32 dt) {
+    print("atualizando com dt={0}", dt)
+}
 ```
 
-A flag `--release` compila cada package como um .so separado.
-
-### Executar
-
-```bash
-./game
-```
-
-O motor de hot reload monitora os .so em segundo plano.
-
-### Editar e ver resultado
-
-Edite seu `.brc`, salve, e o binário recarrega automaticamente. A troca de função é **atômica** — não há momento onde o ponteiro aponta pra lugar nenhum.
-
-### Ciclo típico de desenvolvimento
-
-```bash
-# Terminal 1: compila e roda
-brick build mygame.brc --release -o mygame
-./mygame
-
-# Terminal 2: edita o código
-vim mygame.brc    # faz alterações
-# compila a nova versão
-brick build mygame.brc --release -o mygame
-# → hot reload detecta o novo .so e troca as funções automaticamente
-```
-
-## API de Hot Reload
-
-### Para usuários finais
-
-Basta usar `brick build --release`. O compilador gera os .so e o runtime cuida do resto.
-
-### Para integração em C
+### 2. Programa Host C
 
 ```c
-#include "hot_reload.h"
+// main.c
+#include "runtime/hot_reload.h"
+#include "runtime/block_memory.h"
 
-// 1. Cria o motor
-HotReloadEngine* hr = hr_create("./build/mylib.so");
+int main() {
+    BlockCtx* jogo_mem = block_create(64 * 1024 * 1024);
+    HotReloadCtx* hr = hr_create("./jogo.so", jogo_mem);
 
-// 2. Registra funções que serão trocadas
-void (*my_func)(void) = NULL;
-hr_register_func(hr, "my_function", (void**)&my_func);
+    while (rodando) {
+        hr_check(hr);  // recarrega se mudou
 
-// 3. Carrega versão inicial
-hr_load_initial(hr);
+        void (*atualizar)(float) = hr_sym(hr, "atualizar");
+        if (atualizar) atualizar(0.016f);
+    }
 
-// 4. Inicia monitoramento (inotify em thread separada)
-hr_start_watching(hr);
-
-// 5. (opcional) Callback após cada reload
-hr_set_callback(hr, my_callback);
-
-// ... seu programa roda, edita o .so, e as funções são trocadas ...
-
-// 6. Limpeza
-hr_destroy(hr);
+    hr_destroy(hr);
+    block_destroy(jogo_mem);
+    return 0;
+}
 ```
 
-### Funções da API
+### 3. Compilar e Executar
 
-| Função | Descrição |
-|---|---|
-| `hr_create(path)` | Cria motor de hot reload |
-| `hr_register_func(hr, name, ptr)` | Registra função para swap |
-| `hr_load_initial(hr)` | Carrega símbolos iniciais |
-| `hr_start_watching(hr)` | Inicia monitoramento (inotify no Linux, ReadDirectoryChangesW no Windows) |
-| `hr_reload(hr)` | Força recarga manual |
-| `hr_state(hr)` | Retorna estado atual |
-| `hr_set_callback(hr, cb)` | Define callback pós-reload |
-| `hr_destroy(hr)` | Limpa recursos |
+```bash
+# Compilar jogo como biblioteca compartilhada
+brick build --shared jogo.brc -o jogo.so
+gcc -O3 main.c runtime/hot_reload.c runtime/block_memory.c runtime/io.c \
+    -ldl -o jogo
 
-## Detalhes da Implementação
+# Executar
+./jogo
 
-### Swap atômico
+# Em outro terminal, editar jogo.brc e recompilar:
+brick build --shared jogo.brc -o jogo.so
 
-Usamos `__atomic_store` com `__ATOMIC_SEQ_CST` para garantir que todos os ponteiros de função sejam atualizados atomicamente. Leitores sempre veem um ponteiro válido.
-
-### Congelamento de blocos
-
-Durante o reload, o runtime congela todas as **alocações em blocos** (`block_freeze()`). Nenhuma nova alocação acontece durante a troca. Após o swap, os blocos são descongelados (`block_thaw()`).
-
-### Cache busting
-
-dlopen (Linux) cacheia por path de arquivo. Para garantir que uma nova versão seja carregada, copiamos a biblioteca compartilhada para um path temporário antes de chamar dlopen/LoadLibrary.
-
-### Rollback
-
-Se o carregamento da nova versão falhar, o sistema mantém o handle antigo e os ponteiros de função intocados. O programa continua rodando com a versão anterior.
-
-### Atraso de segurança
-
-Um `nanosleep` de 50ms entre a detecção de mudança e o reload garante que a escrita do arquivo .so tenha terminado completamente.
-
-## Boas Práticas
-
-- **Estruturas de dados estáveis**: não mude o layout das structs entre versões (ABI precisa ser compatível)
-- **Estado global mínimo**: variáveis globais não são recarregadas — passe estado via structs
-- **Callbacks**: use `hr_set_callback` para reconfigurar estado após cada reload
+# O programa em execução pega a mudança automaticamente!
+```
 
 ## Limitações
 
-| Limitação | Motivo | Alternativa |
-|---|---|---|
-| .so/.dll por package | Cada package vira uma biblioteca compartilhada separada | Organize packages por módulo |
-| Dados não recarregam | Só código (funções) é trocado | Use structs estáveis |
-| ABI deve ser compatível | Ponteiros de função esperam mesma assinatura | Congele a interface pública |
+- Funções precisam ser `export fn` para serem visíveis ao host
+- Layout de struct deve permanecer compatível entre recargas
+- Estado global no código C host persiste entre recargas
+- Mudanças no layout de struct = reinicialização necessária
+- Apenas lógica de função pode mudar com segurança
 
-## Comparação
+## Cross-Platform
 
-| Brick Hot Reload | Live++ / C++ Modules |
-|---|---|
-| Swap atômico de ponteiros de função | Recompilação de TU inteiras |
-| Sem custo de runtime quando não usado | Overhead de instrumentação |
-| Em C puro, sem runtime C++ | Requer runtime C++ |
-| Simples e previsível | Complexo e estado-da-arte |
+| Feature | Linux | Windows |
+|---------|-------|---------|
+| Biblioteca dinâmica | `.so` | `.dll` |
+| Observação de arquivos | `inotify` | `ReadDirectoryChangesW` |
+| Carregamento | `dlopen`/`dlsym` | `LoadLibrary`/`GetProcAddress` |
+| Threading | `pthreads` | `CreateThread` |
+| Swap atômico | `__sync_bool_compare_and_swap` | `InterlockedExchange` |
 
-## Exemplo Completo
+## Veja Também
 
-Consulte os testes em `tests/test_hot_reload.c` e `tests/test_libs_window_hr.c` para exemplos completos de uso da API.
+- [Guia de Início Rápido](GETTING_STARTED.pt-BR.md) — Configuração do primeiro projeto
+- [Arquitetura](ARCHITECTURE.pt-BR.md) — Como o runtime se encaixa

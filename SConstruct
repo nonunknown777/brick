@@ -40,6 +40,8 @@ Opcoes:
   compiler=clang           Forca clang
   visualizer=no            Skip ncurses / PDCurses visualizer
   visualizer=no            Pula visualizador ncurses / PDCurses
+  vsix=yes                 Build VS Code extension (.vsix)
+  vsix=yes                 Build extensao VS Code (.vsix)
 
 Target:
 Alvo:
@@ -267,3 +269,19 @@ prog_path = join('build', 'brick' + prog_suffix)
 env.Alias('build', prog_path)
 env.Alias('install', env.Install(join(prefix, 'bin'), prog_path))
 Default('build')
+
+# ═════════════════════════════════════════════════════════════════════════════
+# 10. VSIX (VS Code Extension)
+# ═════════════════════════════════════════════════════════════════════════════
+vsix_opt = ARGUMENTS.get('vsix', 'no')
+if vsix_opt in ('yes', 'true', '1'):
+    vsix_dir  = Dir('#vscode-ext').abspath
+    build_dir = Dir('#build').abspath
+    vsix_out  = join(build_dir, 'brick-language-1.0.0.vsix')
+
+    # The Command runs npm install + vsce package in the vscode-ext dir
+    vsix_cmd = f'cd {vsix_dir} && npm install --silent && npx -y vsce package --out {vsix_out}'
+    env.Command(vsix_out, [], vsix_cmd)
+    env.AlwaysBuild(vsix_out)
+    env.Alias('vsix', vsix_out)
+    env.Default(vsix_out)

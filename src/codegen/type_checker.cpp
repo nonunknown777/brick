@@ -543,8 +543,31 @@ std::vector<std::string> TypeChecker::check(
                 }
                 case ASTNodeType::USING_DECL: {
                     auto* ud = static_cast<UsingDecl*>(decl.get());
+
+                    // Special case: IO (runtime native, not a package file)
+                    // Caso especial: IO (runtime nativo, nao e um arquivo de pacote)
                     if (ud->package_parts.size() == 1 && ud->package_parts[0] == "IO") {
                         using_io = true;
+                        break;
+                    }
+
+                    // Build full package name from parts
+                    // Constroi nome completo do pacote a partir das partes
+                    std::string pkg_name;
+                    for (size_t pi = 0; pi < ud->package_parts.size(); pi++) {
+                        if (pi > 0) pkg_name += ".";
+                        pkg_name += ud->package_parts[pi];
+                    }
+
+                    // Try to find the package in the resolved package table
+                    // Tenta encontrar o pacote na tabela de pacotes resolvida
+                    auto pkg_it = packages.packages.find(pkg_name);
+                    if (pkg_it != packages.packages.end()) {
+                        import_package(pkg_name, pkg_it->second);
+                    } else {
+                        add_error(ud->location.file + ":" +
+                                  std::to_string(ud->location.line) +
+                                  ": package '" + pkg_name + "' not found");
                     }
                     break;
                 }
@@ -607,9 +630,25 @@ void TypeChecker::check_struct(StructDecl* sd) {
             add_error(sd->location.file + ":" + std::to_string(sd->location.line) +
                       ": struct '" + sd->name + "' extends unknown struct '" +
                       sd->extends + "'");
+        } else {
+            // Check cyclic inheritance
+            // Verifica heranca ciclica
+            std::string cur = sd->name;
+            std::string parent = sd->extends;
+            while (!parent.empty()) {
+                if (parent == cur) {
+                    add_error(sd->location.file + ":" + std::to_string(sd->location.line) +
+                              ": cyclic inheritance detected: struct '" + sd->name +
+                              "' inherits from itself through '" + cur + "'");
+                    break;
+                }
+                if (!struct_defs.count(parent)) break;
+                auto* parent_sd = struct_defs[parent];
+                if (parent_sd->extends.empty()) break;
+                cur = parent;
+                parent = parent_sd->extends;
+            }
         }
-        // TODO: check cyclic inheritance
-        // TODO: verificar heranca ciclica
     }
 
     // Check interfaces
@@ -797,6 +836,148 @@ void TypeChecker::check_enum(EnumDecl* ed) {
     declare(ed->name, "int", false);
     for (auto& variant : ed->variants) {
         declare(variant.name, "int", false);
+    }
+}
+
+void TypeChecker::import_package(const std::string& full_name,
+                                   PackageInfo* info)
+{
+    if (!info) return;
+
+    // Import only exported (non-private) declarations
+    // Importa apenas declaracoes exportadas (nao-privadas)
+    for (auto* decl : info->declarations) {
+        // Skip private declarations: check export sets
+        // Pula declaracoes privadas: verifica conjuntos de exportacao
+        bool is_exported = false;
+        switch (decl->type) {
+            case ASTNodeType::FUNC_DECL:
+                is_exported = info->exported_functions.count(
+                    static_cast<FuncDecl*>(decl)->name) > 0;
+                break;
+            case ASTNodeType::STRUCT_DECL:
+                is_exported = info->exported_structs.count(
+                    static_cast<StructDecl*>(decl)->name) > 0;
+                break;
+            case ASTNodeType::CONST_DECL:
+                is_exported = info->exported_consts.count(
+                    static_cast<ConstDecl*>(decl)->name) > 0;
+                break;
+            case ASTNodeType::ENUM_DECL:
+                is_exported = info->exported_enums.count(
+                    static_cast<EnumDecl*>(decl)->name) > 0;
+                break;
+            case ASTNodeType::UNION_DECL:
+                is_exported = info->exported_unions.count(
+                    static_cast<UnionDecl*>(decl)->name) > 0;
+                break;
+            case ASTNodeType::INTERFACE_DECL:
+                is_exported = info->exported_interfaces.count(
+                    static_cast<InterfaceDecl*>(decl)->name) > 0;
+                break;
+            case ASTNodeType::TYPE_ALIAS:
+                is_exported = info->exported_type_aliases.count(
+                    static_cast<TypeAliasDecl*>(decl)->alias_name) > 0;
+                break;
+            case ASTNodeType::MACRO_DECL:
+                is_exported = info->exported_macros.count(
+                    static_cast<MacroDecl*>(decl)->name) > 0;
+                break;
+            default:
+                break;
+        }
+        if (!is_exported) continue;
+        import_package_decl(decl);
+    }
+}
+
+void TypeChecker::import_package_decl(ASTNode* decl) {
+    switch (decl->type) {
+        case ASTNodeType::FUNC_DECL: {
+            auto* fd = static_cast<FuncDecl*>(decl);
+            // Build function pointer type for symbol table
+            std::string fnptr_type = "fn(";
+            for (size_t i = 0; i < fd->params.size(); i++) {
+                auto* pd = static_cast<ParamDecl*>(fd->params[i].get());
+                if (i > 0) fnptr_type += ",";
+                fnptr_type += pd->type_name;
+            }
+            fnptr_type += ")->" + (fd->return_type.empty() ? "void" : fd->return_type);
+
+            // Only declare if not already in scope
+            if (!lookup(fd->name)) {
+                declare(fd->name, fnptr_type, false);
+            }
+
+            // Track extern functions for return type resolution
+            if (fd->is_extern && !extern_func_defs.count(fd->name)) {
+                extern_func_defs[fd->name] = fd;
+            }
+            break;
+        }
+
+        case ASTNodeType::CONST_DECL: {
+            auto* cd = static_cast<ConstDecl*>(decl);
+            if (!lookup(cd->name)) {
+                std::string val_type = "int";
+                if (cd->value && cd->value->type == ASTNodeType::INT_LITERAL) {
+                    auto* il = static_cast<IntLiteral*>(cd->value.get());
+                    const_values_[cd->name] = il->value;
+                }
+                std::string const_type = cd->type_name.empty() ? val_type : cd->type_name;
+                declare(cd->name, const_type, false);
+            }
+            break;
+        }
+
+        case ASTNodeType::ENUM_DECL: {
+            auto* ed = static_cast<EnumDecl*>(decl);
+            if (!enum_defs.count(ed->name)) {
+                enum_defs[ed->name] = ed;
+            }
+            // Also declare enum variants as integer constants
+            for (auto& variant : ed->variants) {
+                if (!lookup(variant.name)) {
+                    declare(variant.name, "int", false);
+                }
+            }
+            break;
+        }
+
+        case ASTNodeType::STRUCT_DECL: {
+            auto* sd = static_cast<StructDecl*>(decl);
+            if (!struct_defs.count(sd->name)) {
+                struct_defs[sd->name] = sd;
+            }
+            break;
+        }
+
+        case ASTNodeType::UNION_DECL: {
+            auto* ud = static_cast<UnionDecl*>(decl);
+            if (!ud->is_anonymous && !union_defs.count(ud->name)) {
+                union_defs[ud->name] = ud;
+            }
+            break;
+        }
+
+        case ASTNodeType::INTERFACE_DECL: {
+            auto* id = static_cast<InterfaceDecl*>(decl);
+            if (!interface_defs.count(id->name)) {
+                interface_defs[id->name] = id;
+            }
+            break;
+        }
+
+        case ASTNodeType::TYPE_ALIAS: {
+            auto* ta = static_cast<TypeAliasDecl*>(decl);
+            if (!type_aliases.count(ta->alias_name)) {
+                type_aliases[ta->alias_name] = ta->underlying_type;
+            }
+            break;
+        }
+
+        default:
+            break;
     }
 }
 
@@ -1236,8 +1417,16 @@ std::string TypeChecker::check_expression(ASTNode* expr) {
                 expr->resolved_type = fl->literal_type;
                 return fl->literal_type;
             }
-            expr->resolved_type = "float";
-            return "float";
+            // No suffix: infer type based on value range
+            // Sem sufixo: infere tipo baseado no valor
+            if (float_fits_in_type(fl->value, "f32")) {
+                expr->resolved_type = "float";
+                return "float";
+            }
+            // Value too large for f32, promote to f64 to avoid silent truncation
+            // Valor grande demais para f32, promove para f64 para evitar truncamento silencioso
+            expr->resolved_type = "f64";
+            return "f64";
         }
 
         case ASTNodeType::STRING_LITERAL:

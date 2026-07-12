@@ -1,118 +1,157 @@
 # Getting Started with Brick
 
-> Quick guide for anyone who wants to use or contribute to the language.
+## Prerequisites
 
-## What You Need
-
-- **Linux** (any distro) — GCC >= 11 or Clang >= 14, ncurses (optional)
-- **Windows** — [MinGW-w64](https://www.mingw-w64.org/) with GCC >= 13, SCons (`pip install scons`)
+- **Linux** or **Windows** with MinGW-w64
+- **C++ compiler**: gcc ≥ 9 or clang ≥ 12
+- **Python 3** and **pip**
 - **SCons** (`pip install scons`)
+- **ncurses** (Linux): `sudo apt install libncurses-dev` (optional, for visualizer)
 
 ## Build the Compiler
 
-### Linux
 ```bash
-git clone https://github.com/nonunknown777/brick.git
+git clone <repo>
 cd brick
-scons                     # build release / release build
-scons profile=debug       # build debug / debug build
+scons                    # builds the 'brick' compiler in build/
 ```
 
-### Windows (PowerShell)
-```powershell
-git clone https://github.com/nonunknown777/brick.git
-cd brick
-scons target=windows profile=release
-scons target=windows profile=debug
-```
-
-> The `brick` (Linux) or `brick.exe` (Windows) binary will be at `build/`.
-
-> On Windows, you can also use `.\build-release.ps1` for a full release build.
-
-## Compile and Run a Brick Program
-
-### Quickest way
+### Build Options
 
 ```bash
-brick run examples/hello.brc
+scons profile=debug      # debug build (no optimization, GDB-friendly)
+scons visualizer=no      # skip TUI visualizer
+scons vsix=yes           # build VS Code extension (.vsix)
 ```
 
-> This compiles `.brc` → C → binary and runs it in one step.
+## Hello World
 
-### Build to binary
+Create `hello.brc`:
+
+```brick
+using IO
+
+block global = 64MB
+
+fn main() {
+    print("Hello, Brick!")
+}
+```
+
+Compile and run:
 
 ```bash
-brick build examples/hello.brc -o hello
-./hello
+brick run hello.brc
+# Output: Hello, Brick!
 ```
 
-The `brick build` command handles the full pipeline:
-
-1. Compiles `.brc` to C
-2. Links the runtime (block memory allocator, I/O, hot reload)
-3. Runs `gcc -O3` to produce a standalone binary
-
-### Compile to C only
+Or step by step:
 
 ```bash
-brick examples/hello.brc -o hello.c
+brick hello.brc -o hello.c    # compile Brick → C
+gcc -O3 hello.c runtime/block_memory.c runtime/io.c -o hello
+./hello                        # Hello, Brick!
 ```
 
-> Useful if you want to inspect the generated C code.
+## First Real Program
 
-### Release mode (no tracking overhead)
+```brick
+package GAME
+using IO
+
+block global = 256MB
+block game = 64MB
+
+interface Damageable {
+    fn take_damage(int dmg)
+}
+
+struct Enemy : Damageable {
+    int hp
+    String name
+
+    fn Enemy(int h, String n) {
+        hp = h; name = n
+    }
+
+    fn take_damage(int dmg) {
+        hp -= dmg
+        if hp <= 0 {
+            print("{0} destroyed!", name)
+        }
+    }
+}
+
+fn main() {
+    Enemy e = Enemy(100, "Goblin") @game
+    e.take_damage(30)          # hp = 70
+    e.take_damage(80)          # hp = -10 → "Goblin destroyed!"
+    game.reset()               # cleanup
+}
+```
 
 ```bash
-brick build examples/hello.brc --release -o hello
-./hello
+brick build game.brc -o game
+./game
 ```
 
-> Omit tracking overhead for maximum performance (no visualizer support).
+## Multi-File Project
 
-## Run Tests
+```
+project/
+├── main.brc
+├── lib/
+│   └── MATH.brc
+```
+
+`lib/MATH.brc`:
+
+```brick
+package MATH
+
+export fn add(int a, int b) -> int {
+    return a + b
+}
+
+export const PI = 31415
+```
+
+`main.brc`:
+
+```brick
+package GAME
+using IO
+using MATH
+
+block global = 64MB
+
+fn main() {
+    int r = add(3, 4)
+    print("{0}", r)          # 7
+}
+```
+
+Build:
 
 ```bash
-scons test                # run unit tests
-tests/test_integration.sh # integration tests (compile .brc -> run binary)
+brick build main.brc -I lib -o program
+./program
 ```
 
-## Visualize Memory
+## VS Code Extension
 
 ```bash
-brick --visualize examples/hello.brc   # compila, roda e mostra TUI ao vivo / compile, run, show live TUI
-brick --attach <pid>                  # conecta visualizador a processo rodando / attach visualizer to running process
+cd vscode-ext
+npm install
+npm run compile
+# Then press F5 to launch Extension Development Host
 ```
 
-## Core Concepts
+Features: syntax highlighting, LSP (completions, hover, go-to-def, signature help, semantic tokens), memory webview panel.
 
-1. **Everything in blocks**: your memory lives in blocks you declare
-2. **No stack**: zero variables on the C stack (everything goes to blocks)
-3. **Bump allocator**: super fast allocation (just advances a pointer)
-4. **Reset, not free**: clears the entire block, never individual objects
-5. **Hot reload**: swap code without stopping the program
-6. **Fixed-width types**: i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize
-7. **Compile-time macros**: code generation via `macro`, `build {}`, and `emit {}`
-8. **#line directives**: debug in the original .brc code, not the generated C
+## Next Steps
 
-## Project Structure
-
-| Directory | Contents |
-|-----------|----------|
-| `src/` | Compiler (Lexer, Parser, Codegen) in C++20 |
-| `runtime/` | Block memory allocator + hot reload + IO (C) |
-| `visualizer/` | ncurses TUI for live memory visualization |
-| `debugger/` | GDB pretty-printers and custom commands (Python) |
-| `vscode-ext/` | VS Code extension (highlight, LSP, memory view) |
-| `tests/` | Unit and integration tests |
-| `examples/` | Example .brc programs |
-| `docs/` | GitHub Pages site |
-| `wiki/` | GitHub Wiki content |
-| `tasks/` | Development task breakdown (01-11) |
-| `benchmarks/` | Performance benchmarks |
-
-## Opening a Task (for contributors)
-
-> Each folder in `tasks/` has a `run.sh` that opens opencode focused on that task.
-
-> Each task has `AGENTS.md` (instructions for the AI) and `STATE.md` (where it stopped).
+- [Language Reference](LANGUAGE.md) — Complete syntax reference
+- [Architecture](ARCHITECTURE.md) — How the compiler works
+- [Macros](MACROS.md) — Compile-time code generation
+- [Hot Reload](hot-reload.md) — Live code swapping

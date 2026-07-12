@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Brick — Linguagem de Programação</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <nav class="navbar">
+        <div class="nav-content">
+            <a href="index.pt-BR.html" class="nav-logo">Brick</a>
+            <div class="nav-links">
+                <a href="#features">Features</a>
+                <a href="GETTING_STARTED.pt-BR.html">Docs</a>
+                <a href="https://github.com/brick-lang/brick">GitHub</a>
+            </div>
+        </div>
+    </nav>
+
+    <header class="hero">
+        <div class="hero-content">
+            <h1 class="hero-title">Brick</h1>
+            <p class="hero-subtitle">Linguagem que compila para C. <br>Máxima performance. Zero overhead. Controle total.</p>
+            <div class="hero-actions">
+                <a href="GETTING_STARTED.pt-BR.html" class="btn btn-primary">Começar</a>
+                <a href="LANGUAGE.pt-BR.html" class="btn btn-secondary">Referência</a>
+            </div>
+            <div class="hero-code">
+                <pre><code><span class="keyword">package</span> JOGO
+<span class="keyword">using</span> IO
+
+<span class="keyword">block</span> global = <span class="number">256MB</span>
+
+<span class="keyword">interface</span> <span class="type">Danificavel</span> {
+    <span class="keyword">fn</span> tomar_dano(<span class="type">i32</span> dmg)
+}
+
+<span class="keyword">struct</span> <span class="type">Jogador</span> : <span class="type">Danificavel</span> {
+    <span class="type">i32</span> hp
+    <span class="type">String</span> nome
+
+    <span class="keyword">fn</span> tomar_dano(<span class="type">i32</span> dmg) {
+        hp -= dmg
+        <span class="keyword">if</span> hp < <span class="number">0</span> { hp = <span class="number">0</span> }
+        <span class="builtin">print</span>(<span class="string">"{0} tomou {1} de dano"</span>, nome, dmg)
+    }
+}
+
+<span class="keyword">fn</span> main() {
+    <span class="type">Jogador</span> p = <span class="type">Jogador</span>(<span class="number">100</span>, <span class="string">"Felipe"</span>) <span class="builtin">@jogo</span>
+    p.tomar_dano(<span class="number">20</span>)
+    jogo.reset()
+}</code></pre>
+            </div>
+        </div>
+    </header>
+
+    <section id="features" class="features">
+        <h2 class="section-title">Por que Brick?</h2>
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">⚡</div>
+                <h3>Zero-Cost Abstractions</h3>
+                <p>Compila para C puro com diretivas <code>#line</code>. Cada <code>fn</code> vira <code>static inline</code> — custo zero de chamada.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🧱</div>
+                <h3>Memória por Blocos</h3>
+                <p>Bump allocator (~3 ciclos). Sem malloc/free. Sem GC. Reset de bloco em ~5 ns.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔄</div>
+                <h3>Hot Reload Nativo</h3>
+                <p>Troque código sem reiniciar. Swap atômico de ponteiros. Inotify + dlopen.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🔧</div>
+                <h3>POO com Velocidade</h3>
+                <p>Structs com métodos, interfaces com vtbl, herança, impl blocks — tudo zero-cost.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">📦</div>
+                <h3>Sistema de Pacotes</h3>
+                <p>Projetos multi-arquivo, pacotes aninhados (<code>MATH.VEC2</code>), <code>export</code>/<code>private</code>, auto-resolução.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🛠️</div>
+                <h3>Metaprogramação</h3>
+                <p><code>macro</code> com <code>$</code>, <code>build {}</code> compile-time, <code>emit {}</code> code gen, higiene, varargs.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🌐</div>
+                <h3>Interoperabilidade C</h3>
+                <p><code>include</code>, <code>link</code>, <code>extern fn</code>, <code>@system</code>. Conversão automática String → <code>*u8</code>.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">⚙️</div>
+                <h3>Tipos de Largura Fixa</h3>
+                <p><code>u8</code>..<code>u64</code>, <code>i8</code>..<code>i64</code>, <code>f32</code>/<code>f64</code>. Bitfields (<code>u4</code>, <code>i3</code>). Overflow verificado na compilação.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">🎨</div>
+                <h3>Sistema de Tipos Rico</h3>
+                <p>Arrays dinâmicos, ponteiros, structs, unions, enums, <code>match</code> com guards, <code>defer</code>, <code>sizeof</code>/<code>alignof</code>.</p>
+            </div>
+        </div>
+    </section>
+
+    <section class="cta">
+        <h2>Pronto para construir com Brick?</h2>
+        <p>Compile para código nativo. Controle sua memória. Fique no controle.</p>
+        <div class="cta-actions">
+            <a href="GETTING_STARTED.pt-BR.html" class="btn btn-primary">Começar →</a>
+            <a href="LANGUAGE.pt-BR.html" class="btn btn-secondary">Ler Docs</a>
+        </div>
+    </section>
+
+    <footer class="footer">
+        <div class="footer-content">
+            <div class="footer-links">
+                <a href="LANGUAGE.pt-BR.html">Referência</a>
+                <a href="ARCHITECTURE.pt-BR.html">Arquitetura</a>
+                <a href="MACROS.pt-BR.html">Macros</a>
+                <a href="hot-reload.pt-BR.html">Hot Reload</a>
+                <a href="OPTIMIZATIONS.pt-BR.html">Otimizações</a>
+            </div>
+            <div class="footer-lang">
+                <a href="index.html">🇺🇸 English</a>
+                <a href="index.pt-BR.html">🇧🇷 Português</a>
+            </div>
+            <p class="footer-text">Licença MIT — Brick Programming Language</p>
+        </div>
+    </footer>
+
+    <script src="script.js"></script>
+</body>
+</html>

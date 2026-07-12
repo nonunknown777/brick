@@ -442,6 +442,151 @@ echo "Testando vtbl em arrays dinamicos..."
 test_compile_and_run "test_vtbl_dynarray" "$PROJECT_DIR/tests/test_vtbl_dynarray.brc"
 
 echo ""
+echo "Testing defer statement..."
+echo "Testando defer..."
+
+test_compile_and_expect "test_defer" "$PROJECT_DIR/tests/features/test_defer.brc" \
+"=== test_basic_defer ===
+before defer
+defer ran
+=== test_lifo_order ===
+before lifo defers
+third defer
+second defer
+first defer
+=== test_defer_before_return ===
+about to return
+cleanup before return
+returned 42
+=== test_nested_block_defer ===
+inside inner block
+inner defer
+after inner block
+outer defer
+PASS: all defer tests"
+
+echo ""
+echo "Testing build or operator..."
+echo "Testando operador or em build..."
+
+test_compile_and_expect "test_build_or" "$PROJECT_DIR/tests/features/test_build_or.brc" \
+"build or test: 100
+PASS: build or test"
+
+echo ""
+echo "Testing for x in N range loop..."
+echo "Testando loop for x in N..."
+
+test_compile_and_expect "test_for_range" "$PROJECT_DIR/tests/features/test_for_range.brc" \
+"sum_to(5) = 10
+sum_to(1) = 0
+sum_to(0) = 0
+PASS: all for range tests"
+
+echo ""
+echo "Testing match with guards..."
+echo "Testando match com guards..."
+
+test_compile_and_expect "test_match_guard" "$PROJECT_DIR/tests/features/test_match_guard.brc" \
+"guard_matches = 1
+guard_falls_through = 20
+guard_wildcard = 200
+PASS: all match guard tests"
+
+echo ""
+echo "Testing nested anonymous structs/unions..."
+echo "Testando structs/unions anonimos aninhados..."
+
+test_compile_and_expect "test_nested_anon" "$PROJECT_DIR/tests/features/test_nested_anon.brc" \
+"p.id=42, p.x=10, p.y=20
+d.low=11, d.high=10
+m.r=17, m.g=34, m.b=51
+PASS: all nested anon tests"
+
+echo ""
+echo ""
+echo "Testing dynamic array with block allocation..."
+echo "Testando array dinamico com alocacao em bloco..."
+
+test_compile_and_expect "test_dynarray_block" "$PROJECT_DIR/tests/features/test_dynarray_block.brc" \
+"len=4, cap=4
+n0=10, n1=20, n2=30, n3=40
+after growth: len=6, cap=8
+n4=50, n5=60
+values[0]=1.500000, values[1]=2.500000
+PASS: all dynarray block tests"
+
+echo ""
+echo "Testing multi-file packages..."
+echo "Testando pacotes multi-arquivo..."
+
+# Test: using MATH package from test_pkg_main.brc
+# Testa: usando pacote MATH de test_pkg_main.brc
+$BRICK build "$PROJECT_DIR/tests/packages/test_pkg_main.brc" -I "$PROJECT_DIR/tests/packages" \
+  -o "$BUILD_DIR/test_pkg_main" --release 2>/dev/null
+if [ $? -eq 0 ]; then
+    output=$("$BUILD_DIR/test_pkg_main" 2>&1)
+    expected="add(3,4) = 7
+PI = 31415
+v.x = 10, v.y = 20
+color is GREEN
+Circle(radius=5)"
+    if [ "$output" = "$expected" ]; then
+        echo -e "  test_pkg_multi_file... ${GREEN}PASS${NC}"
+        PASS=$((PASS + 1))
+    else
+        echo -e "  test_pkg_multi_file... ${RED}FAIL (output mismatch)${NC}"
+        echo "  Expected: $expected"
+        echo "  Got:      $output"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo -e "  test_pkg_multi_file... ${RED}FAIL (build error)${NC}"
+    FAIL=$((FAIL + 1))
+fi
+
+echo ""
+echo "Testing nested packages (using MATH.VEC2)..."
+echo "Testando pacotes aninhados (using MATH.VEC2)..."
+
+$BRICK build "$PROJECT_DIR/tests/packages/test_pkg_nested.brc" -I "$PROJECT_DIR/tests/packages" \
+  -o "$BUILD_DIR/test_pkg_nested" --release 2>/dev/null
+if [ $? -eq 0 ]; then
+    output=$("$BUILD_DIR/test_pkg_nested" 2>&1)
+    expected="v.x = 3.000000, v.y = 4.000000
+length = 25.000000"
+    if [ "$output" = "$expected" ]; then
+        echo -e "  test_pkg_nested... ${GREEN}PASS${NC}"
+        PASS=$((PASS + 1))
+    else
+        echo -e "  test_pkg_nested... ${RED}FAIL (output mismatch)${NC}"
+        echo "  Expected: $expected"
+        echo "  Got:      $output"
+        FAIL=$((FAIL + 1))
+    fi
+else
+    echo -e "  test_pkg_nested... ${RED}FAIL (build error)${NC}"
+    FAIL=$((FAIL + 1))
+fi
+
+echo ""
+echo "Testing private symbol rejection (negative test with -I)..."
+echo "Testando rejeicao de simbolo privado (teste negativo com -I)..."
+
+echo -n "  test_pkg_private_fail... "
+$BRICK build "$PROJECT_DIR/tests/packages/test_pkg_private_fail.brc" -I "$PROJECT_DIR/tests/packages" \
+  -o "$BUILD_DIR/test_pkg_private_fail" --release 2>/dev/null
+if [ $? -ne 0 ]; then
+    echo -e "${GREEN}PASS (expected compiler error for private symbol)${NC}"
+    PASS=$((PASS + 1))
+else
+    # Even if build succeeds, verify binary does NOT have SECRET value
+    output=$("$BUILD_DIR/test_pkg_private_fail" 2>&1)
+    echo -e "${RED}FAIL (should have errored on private symbol 'SECRET', got: $output)${NC}"
+    FAIL=$((FAIL + 1))
+fi
+
+echo ""
 echo "Testing C interop..."
 echo "Testando C interop..."
 

@@ -1,0 +1,35 @@
+// Test dynamic array with block allocation (@blockname)
+// Testa array dinamico com alocacao em bloco (@blockname)
+
+using IO
+
+block frame = 1MB
+
+fn main() {
+    // Dynamic array allocated from block
+    int[] numbers @frame
+    numbers.append(10)
+    numbers.append(20)
+    numbers.append(30)
+    numbers.append(40)
+    print("len={0}, cap={1}", numbers.len, numbers.cap)
+    print("n0={0}, n1={1}, n2={2}, n3={3}", numbers[0], numbers[1], numbers[2], numbers[3])
+
+    // Append more to trigger growth
+    numbers.append(50)
+    numbers.append(60)
+    print("after growth: len={0}, cap={1}", numbers.len, numbers.cap)
+    print("n4={0}, n5={1}", numbers[4], numbers[5])
+
+    // Reset the block — everything is freed at once
+    // Nested scope with dynamic array
+    block frame {
+        f32[] values @frame
+        values.append(1.5)
+        values.append(2.5)
+        print("values[0]={0}, values[1]={1}", values[0], values[1])
+    }
+
+    print("PASS: all dynarray block tests")
+    frame.reset()
+}

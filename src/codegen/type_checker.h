@@ -79,6 +79,9 @@ private:
     void check_enum(EnumDecl* ed);
     void check_function(FuncDecl* fd, const std::string& struct_name);
     void declare_inherited_fields(StructDecl* sd);
+    void import_package(const std::string& full_name,
+                        PackageInfo* info);
+    void import_package_decl(ASTNode* decl);
     void check_block(BlockStmt* block, const std::string& return_type);
     void check_statement(ASTNode* stmt, const std::string& return_type);
     std::string check_expression(ASTNode* expr);

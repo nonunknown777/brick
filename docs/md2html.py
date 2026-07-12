@@ -1,185 +1,165 @@
 #!/usr/bin/env python3
-"""Convert .md docs to .html pages matching Brick's style."""
+"""
+Convert Brick Markdown documentation to HTML.
+Usage: python3 docs/md2html.py < input.md > output.html
+"""
 
-import json
-import os
-import re
 import sys
-from pathlib import Path
+import re
 
-from markdown_it import MarkdownIt
-from pygments import highlight
-from pygments.lexers import get_lexer_by_name
-from pygments.formatters import HtmlFormatter
-
-DOCS = Path(__file__).parent
-
-TEMPLATE = """<!DOCTYPE html>
-<html lang="{LANG}">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{TITLE} — Brick</title>
-<meta name="description" content="{DESC}">
-<link rel="stylesheet" href="style.css">
-<link rel="stylesheet" href="doc-style.css">
-</head>
-<body>
-
-<nav class="doc-nav">
-  <div class="nav-inner">
-    <a href="index.html" class="nav-logo">Brick</a>
-    <div class="nav-links">
-      <a href="LANGUAGE.html">Language</a>
-      <a href="MACROS.html">Macros</a>
-      <a href="ARCHITECTURE.html">Architecture</a>
-      <a href="GETTING_STARTED.html">Getting Started</a>
-      <a href="OPTIMIZATIONS.html">Optimizations</a>
-      <a href="hot-reload.html">Hot Reload</a>
-      <a href="index.html" class="nav-back">← Home</a>
-    </div>
-  </div>
-</nav>
-
-<main class="doc-main">
-  <div class="container doc-content">
-{CONTENT}
-  </div>
-</main>
-
-<footer>
-  <p>Brick — MIT License</p>
-  <p><a href="https://github.com/nonunknown777/brick">github.com/nonunknown777/brick</a></p>
-</footer>
-
-</body>
-</html>"""
-
-def make_title(md_file: str) -> str:
-    base = md_file.replace('.md', '').replace('.pt-BR', '')
-    names = {
-        'LANGUAGE': 'Language Reference',
-        'MACROS': 'Macro System',
-        'ARCHITECTURE': 'Architecture',
-        'GETTING_STARTED': 'Getting Started',
-        'OPTIMIZATIONS': 'Optimizations',
-        'hot-reload': 'Hot Reload',
-    }
-    return names.get(base, base.replace('-', ' ').title())
-
-def code_fence(self, tokens, idx, options, env):
-    token = tokens[idx]
-    info = token.info.strip() if token.info else ''
-    lang = info.split()[0] if info else ''
-    code = token.content
-
-    css_class = ''
-    if lang == 'brick':
-        css_class = 'language-brick'
-        lang = ''
-    elif lang:
-        css_class = f'language-{lang}'
-
-    if lang:
-        try:
-            lexer = get_lexer_by_name(lang, stripall=True)
-            formatter = HtmlFormatter(style='monokai', noclasses=True)
-            highlighted = highlight(code, lexer, formatter)
-            return f'<div class="code-block"><pre class="{css_class}">{highlighted}</pre></div>\n'
-        except:
-            pass
-
-    escaped = (code.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;'))
-    return f'<div class="code-block"><pre class="{css_class}">{escaped}</pre></div>\n'
-
-
-TABLE_RE = re.compile(r'^\|(.+)\|$', re.MULTILINE)
-SEP_RE = re.compile(r'^[\s\|:-]+$')
-
-def convert_tables(md_text):
-    """Convert markdown tables to HTML tables."""
+def md_to_html(md_text):
     lines = md_text.split('\n')
-    out = []
+    html = []
+    in_code_block = False
+    in_table = False
+    in_list = False
+    in_blockquote = False
+
+    html.append('<!DOCTYPE html>')
+    html.append('<html lang="en">')
+    html.append('<head>')
+    html.append('<meta charset="UTF-8">')
+    html.append('<meta name="viewport" content="width=device-width, initial-scale=1.0">')
+    html.append('<title>Brick Documentation</title>')
+    html.append('<link rel="stylesheet" href="doc-style.css">')
+    html.append('</head>')
+    html.append('<body>')
+    html.append('<div class="doc-wrapper">')
+    html.append('<div class="doc-content">')
+
     i = 0
     while i < len(lines):
         line = lines[i]
-        m = TABLE_RE.match(line)
-        if m and i + 1 < len(lines) and SEP_RE.match(lines[i+1].strip()):
-            headers = [c.strip() for c in m.group(1).split('|')]
-            rows = []
-            i += 2
-            while i < len(lines):
-                m2 = TABLE_RE.match(lines[i])
-                if not m2:
-                    break
-                cells = [c.strip() for c in m2.group(1).split('|')]
-                rows.append(cells)
-                i += 1
-            html = '<table>\n<thead>\n<tr>'
-            for h in headers:
-                html += f'<th>{h}</th>'
-            html += '</tr>\n</thead>\n<tbody>\n'
-            for row in rows:
-                html += '<tr>'
-                for c in row:
-                    html += f'<td>{c}</td>'
-                html += '</tr>\n'
-            html += '</tbody>\n</table>\n'
-            out.append(html)
-        else:
-            out.append(line)
+
+        # Code blocks
+        if line.startswith('```'):
+            if in_code_block:
+                html.append('</code></pre>')
+                in_code_block = False
+            else:
+                lang = line[3:].strip()
+                html.append(f'<pre><code class="language-{lang}">')
+                in_code_block = True
             i += 1
-    return '\n'.join(out)
-
-
-def convert_md(source: Path):
-    md_text = source.read_text(encoding='utf-8')
-    md_text = convert_tables(md_text)
-
-    md = MarkdownIt('commonmark',{'breaks':False,'html':True})
-    md.add_render_rule('fence', code_fence)
-    md.add_render_rule('code_block', code_fence)
-
-    html_body = md.render(md_text)
-
-    base = source.stem
-    is_pt = '.pt-BR' in base or '.pt' in base
-    lang = 'pt-BR' if is_pt else 'en'
-    title = make_title(source.name)
-
-    full = 'language specification' if 'LANGUAGE' in source.name else \
-           'macro system' if 'MACRO' in source.name else \
-           'architecture' if 'ARCHITECTURE' in source.name else \
-           'getting started' if 'GETTING_STARTED' in source.name else \
-           'optimizations' if 'OPTIMIZATIONS' in source.name else \
-           'hot reload'
-
-    desc = f'Brick {full} documentation'
-
-    out_name = base + '.html'
-    out_path = DOCS / out_name
-
-    content = TEMPLATE.format(
-        LANG=lang,
-        TITLE=title,
-        DESC=desc,
-        CONTENT=html_body,
-    )
-
-    out_path.write_text(content, encoding='utf-8')
-    print(f'  ✓ {out_name}')
-
-
-def main():
-    print('Converting markdown docs to HTML...')
-    mds = sorted(DOCS.glob('*.md'))
-    for md_file in mds:
-        if md_file.name == 'md2html.py':
             continue
-        if md_file.name.startswith('_'):
+
+        if in_code_block:
+            escaped = (line
+                .replace('&', '&amp;')
+                .replace('<', '&lt;')
+                .replace('>', '&gt;'))
+            html.append(escaped + '\n')
+            i += 1
             continue
-        convert_md(md_file)
-    print('Done.')
+
+        # Empty line
+        if not line.strip():
+            if in_table:
+                html.append('</tbody></table>')
+                in_table = False
+            if in_list:
+                html.append('</ul>')
+                in_list = False
+            if in_blockquote:
+                html.append('</blockquote>')
+                in_blockquote = False
+            html.append('')
+            i += 1
+            continue
+
+        # Tables
+        if '|' in line and line.strip().startswith('|'):
+            if not in_table:
+                html.append('<table><thead>')
+                in_table = True
+
+            cells = [c.strip() for c in line.split('|')[1:-1]]
+            is_header = all(re.match(r'^:?-+:?$', c) for c in cells if c)
+
+            if is_header:
+                html.append('</thead><tbody>')
+                i += 1
+                continue
+
+            tag = 'th' if '---' not in lines[i-1] else 'td'
+            row = '<tr>' + ''.join(f'<{tag}>{c}</{tag}>' for c in cells) + '</tr>'
+            html.append(row)
+            i += 1
+            continue
+
+        if in_table:
+            html.append('</tbody></table>')
+            in_table = False
+
+        # Blockquotes
+        if line.startswith('> '):
+            if not in_blockquote:
+                html.append('<blockquote>')
+                in_blockquote = True
+            html.append(f'<p>{line[2:]}</p>')
+            i += 1
+            continue
+
+        if in_blockquote:
+            html.append('</blockquote>')
+            in_blockquote = False
+
+        # Headers
+        if line.startswith('#'):
+            level = len(re.match(r'^#+', line).group())
+            text = line[level:].strip()
+            html.append(f'<h{level}>{text}</h{level}>')
+            i += 1
+            continue
+
+        # Horizontal rule
+        if line.strip() in ('---', '***', '___'):
+            html.append('<hr>')
+            i += 1
+            continue
+
+        # Unordered lists
+        if line.strip().startswith('- ') or line.strip().startswith('* '):
+            if not in_list:
+                html.append('<ul>')
+                in_list = True
+            text = line.strip()[2:]
+            html.append(f'<li>{text}</li>')
+            i += 1
+            continue
+
+        if in_list:
+            html.append('</ul>')
+            in_list = False
+
+        # Inline formatting
+        text = line.strip()
+        text = re.sub(r'\*\*(.+?)\*\*', r'<strong>\1</strong>', text)
+        text = re.sub(r'\*(.+?)\*', r'<em>\1</em>', text)
+        text = re.sub(r'`(.+?)`', r'<code>\1</code>', text)
+        text = re.sub(r'\[(.+?)\]\((.+?)\)', r'<a href="\2">\1</a>', text)
+
+        if text:
+            html.append(f'<p>{text}</p>')
+
+        i += 1
+
+    if in_code_block:
+        html.append('</code></pre>')
+    if in_table:
+        html.append('</tbody></table>')
+    if in_list:
+        html.append('</ul>')
+    if in_blockquote:
+        html.append('</blockquote>')
+
+    html.append('</div>')  # doc-content
+    html.append('</div>')  # doc-wrapper
+    html.append('</body>')
+    html.append('</html>')
+    return '\n'.join(html)
 
 if __name__ == '__main__':
-    main()
+    text = sys.stdin.read()
+    html = md_to_html(text)
+    sys.stdout.write(html)

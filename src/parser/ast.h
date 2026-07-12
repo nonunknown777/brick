@@ -82,6 +82,8 @@ struct TypeAliasDecl : ASTNode {
     std::string alias_name;
     std::string underlying_type;
 
+    bool is_private = false;
+
     TypeAliasDecl(std::string n, std::string t, SourceLocation loc)
         : ASTNode(ASTNodeType::TYPE_ALIAS, loc), alias_name(std::move(n)), underlying_type(std::move(t)) {}
 };
@@ -90,6 +92,8 @@ struct ConstDecl : ASTNode {
     std::string name;
     std::string type_name;  // optional, empty means inferred
     std::unique_ptr<ASTNode> value;
+
+    bool is_private = false;
 
     ConstDecl(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::CONST_DECL, loc), name(std::move(n)) {}
@@ -140,6 +144,8 @@ struct InterfaceDecl : ASTNode {
     std::string name;
     std::vector<std::unique_ptr<ASTNode>> methods;
 
+    bool is_private = false;
+
     InterfaceDecl(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::INTERFACE_DECL, loc), name(std::move(n)) {}
 };
@@ -173,6 +179,7 @@ struct FuncDecl : ASTNode {
     bool is_constructor = false;
     bool is_extern = false;
     bool is_export = false;
+    bool is_variadic = false;
 
     FuncDecl(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::FUNC_DECL, loc), name(std::move(n)) {}
@@ -327,6 +334,7 @@ struct ArrayLiteral : ASTNode {
 struct IdentExpr : ASTNode {
     std::string name;
     std::string declared_type;
+    std::string block_name;  // set when declared with @blockname, e.g. "int[] arr @global"
     IdentExpr(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::IDENT_EXPR, loc), name(std::move(n)) {}
 };
@@ -404,6 +412,8 @@ struct MacroDecl : ASTNode {
     std::vector<std::string> params;
     bool has_varargs = false;
     std::vector<std::unique_ptr<ASTNode>> body;
+
+    bool is_private = false;
 
     MacroDecl(std::string n, SourceLocation loc)
         : ASTNode(ASTNodeType::MACRO_DECL, loc), name(std::move(n)) {}

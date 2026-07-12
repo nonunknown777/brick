@@ -1,0 +1,45 @@
+package MATH
+
+using IO
+
+// ── Exported struct ──
+export struct Vec2 {
+    i32 x
+    i32 y
+}
+
+// ── Exported function ──
+export fn add(i32 a, i32 b) -> i32 {
+    return a + b
+}
+
+// ── Exported const ──
+export const PI = 31415
+
+// ── Private (not exported) ──
+private fn internal_helper() -> i32 {
+    return 999
+}
+
+private const SECRET = 42
+
+// ── Exported enum ──
+export enum Color {
+    RED = 1
+    GREEN = 2
+    BLUE = 3
+}
+
+// ── Exported interface ──
+export interface Drawable {
+    fn draw()
+}
+
+// ── Exported struct implementing interface ──
+export struct Circle {
+    i32 radius
+
+    fn draw() {
+        print("Circle(radius={0})", radius)
+    }
+}

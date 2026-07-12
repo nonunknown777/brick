@@ -1,0 +1,28 @@
+// Test for x in N range loop
+// Testa loop for x in N (intervalo numerico)
+
+using IO
+
+fn sum_to(int N) -> int {
+    int total = 0
+    for x in N {
+        total = total + x
+    }
+    return total
+}
+
+fn main() {
+    // sum_to(5) = 0+1+2+3+4 = 10
+    int s = sum_to(5)
+    print("sum_to(5) = {0}", s)
+
+    // sum_to(1) = 0
+    int s2 = sum_to(1)
+    print("sum_to(1) = {0}", s2)
+
+    // sum_to(0) = 0 (loop body never executes)
+    int s3 = sum_to(0)
+    print("sum_to(0) = {0}", s3)
+
+    print("PASS: all for range tests")
+}

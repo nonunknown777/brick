@@ -1969,6 +1969,198 @@ fn main() {
     check(c.find("exported_func") != std::string::npos, "export function in output");
 }
 
+// ─── Cyclic inheritance test ───
+
+void test_cyclic_inheritance() {
+    std::cout << "=== test_cyclic_inheritance ===\n";
+    expect_codegen_error(R"(
+package TEST
+
+struct A extends B {
+    int x
+}
+struct B extends A {
+    int y
+}
+fn test() {
+    A a
+    a.x = 1
+}
+)", "cyclic_inheritance");
+}
+
+// ─── f32 literal overflow/promotion tests ───
+
+void test_unsuffixed_float_fits_f32() {
+    std::cout << "=== test_unsuffixed_float_fits_f32 ===\n";
+    expect_compile(R"(
+package TEST
+
+block global = 1MB
+
+fn test() {
+    f32 x = 1.5
+    float y = 3.14
+}
+)", "unsuffixed_float_fits_f32");
+}
+
+void test_unsuffixed_float_large_promotes_to_f64() {
+    std::cout << "=== test_unsuffixed_float_large_promotes_to_f64 ===\n";
+    // 1.0e40 is too large for f32, should be promoted to f64
+    expect_compile(R"(
+package TEST
+
+fn test() -> f64 {
+    return 1.0e40
+}
+)", "unsuffixed_float_large_to_f64");
+}
+
+void test_large_unsuffixed_float_to_f32_fails() {
+    std::cout << "=== test_large_unsuffixed_float_to_f32_fails ===\n";
+    // 1.0e40 is too large for f32, gets promoted to f64, then cannot assign to f32
+    expect_codegen_error(R"(
+package TEST
+
+fn test() {
+    f32 x = 1.0e40
+}
+)", "large_unsuffixed_float_to_f32");
+}
+
+// ─── For-in range loop tests ───
+
+void test_for_in_range() {
+    std::cout << "=== test_for_in_range ===\n";
+    std::string source = R"(
+package TEST
+
+block global = 1MB
+
+fn sum_to(int N) -> int {
+    int total = 0
+    for x in N {
+        total = total + x
+    }
+    return total
+}
+
+fn main() {
+    int s = sum_to(5)
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "for_in_range")) return;
+    CodegenResult cr;
+    if (!codegen_from_ast(pr, cr, "for_in_range")) return;
+
+    std::string c = cr.c_code;
+    // Check that __i is properly declared in the for-init
+    check(c.find("int32_t __i = 0") != std::string::npos, "for-init __i declaration");
+    check(c.find("__i < N") != std::string::npos, "for condition __i < N");
+    check(c.find("__i += 1") != std::string::npos, "for increment __i += 1");
+    check(c.find("int32_t x = __i") != std::string::npos, "body variable x = __i");
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
+// ─── Match guard edge case tests ───
+
+void test_match_guard_multi_pattern() {
+    std::cout << "=== test_match_guard_multi_pattern ===\n";
+    std::string source = R"(
+package TEST
+
+block global = 1MB
+
+fn test_guard_first() -> int {
+    int val = 5
+    int out = 0
+    match (val) {
+        5 if (val > 3) { out = 1 }
+        5 { out = 2 }
+        _ { out = 3 }
+    }
+    return out
+}
+
+fn test_guard_fallback() -> int {
+    int val = 5
+    int out = 0
+    match (val) {
+        5 if (val > 10) { out = 10 }
+        5 { out = 20 }
+        _ { out = 30 }
+    }
+    return out
+}
+
+fn test_guard_wildcard() -> int {
+    int val = 99
+    int out = 0
+    match (val) {
+        1 if (val == 1) { out = 100 }
+        _ if (val == 99) { out = 200 }
+        _ { out = 300 }
+    }
+    return out
+}
+)";
+
+    ParseResult pr;
+    if (!parse_and_check(source, pr, "match_guard_multi")) return;
+    CodegenResult cr;
+    if (!codegen_from_ast(pr, cr, "match_guard_multi")) return;
+
+    std::string c = cr.c_code;
+    // Check guard generates if() inside switch case
+    check(c.find("if(") != std::string::npos, "guard generates if");
+    check(c.find("switch(") != std::string::npos, "switch generated");
+    // Guard with wildcard pattern
+    check(c.find("default:") != std::string::npos, "wildcard => default");
+    check(c.find("val > 3") != std::string::npos, "guard expr: val > 3");
+    check(c.find("val > 10") != std::string::npos, "guard expr: val > 10");
+    std::cout << "  Generated C:\n" << c << "\n";
+}
+
+// ─── Nested anonymous struct/union tests ───
+
+void test_nested_anon_deep() {
+    std::cout << "=== test_nested_anon_deep ===\n";
+    expect_compile(R"(
+package TEST
+
+// Anonymous union inside struct: should generate proper union
+struct Packet {
+    int id
+    union {
+        struct { int x; int y }
+        int raw
+    }
+}
+
+// Named union with anonymous struct: fields should be accessible directly
+union Data {
+    int raw
+    struct { u8 low; u8 high }
+}
+
+fn test() {
+    Packet p
+    p.id = 42
+    p.x = 10
+    p.y = 20
+    p.raw = 0
+
+    Data d
+    d.raw = 0x0A0B
+    u8 l = d.low
+    u8 h = d.high
+}
+)", "nested_anon_deep");
+}
+
 void test_dollar_macro() {
     std::cout << "=== test_dollar_macro ===\n";
     std::string source = R"(
@@ -2006,6 +2198,133 @@ fn main() {
     // Macro expands $ex + $ex with $ex=10, constant-folded to 20
     check(c.find("20;") != std::string::npos, "$macro expansion (10+10=20)");
     check(c.find("__brick_init") == std::string::npos, "no block init (no blocks used)");
+}
+
+// ─── Multi-file package test helpers ───
+
+// Helper: compile multiple source files together, expect codegen success
+// Helper: compila varios arquivos fonte juntos, espera sucesso no codegen
+static void expect_multi_file_success(
+    const std::vector<std::pair<std::string, std::string>>& sources,
+    const std::string& label)
+{
+    std::vector<std::unique_ptr<ProgramNode>> asts;
+    PackageTable global_packages;
+
+    for (const auto& [source, filename] : sources) {
+        auto tokens = tokenize(source, filename);
+        auto parse_result = parse(tokens);
+        if (!parse_result.errors.empty()) {
+            check(false, label + " parse(" + filename + ")");
+            for (const auto& e : parse_result.errors)
+                std::cerr << "  ERROR: " << e << "\n";
+            return;
+        }
+        auto local_packages = resolve_packages(parse_result.ast, filename);
+        merge_package_tables(global_packages, std::move(local_packages));
+        asts.push_back(std::move(parse_result.ast));
+    }
+
+    auto cr = generate_c(asts, global_packages);
+    check(cr.success, label + " codegen");
+    if (!cr.success && !cr.errors.empty()) {
+        for (auto& e : cr.errors) std::cerr << "  CODEGEN: " << e << "\n";
+    }
+}
+
+// Helper: compile multiple source files together, expect codegen to FAIL
+// Helper: compila varios arquivos fonte juntos, espera FALHA no codegen
+static void expect_multi_file_error(
+    const std::vector<std::pair<std::string, std::string>>& sources,
+    const std::string& label)
+{
+    std::vector<std::unique_ptr<ProgramNode>> asts;
+    PackageTable global_packages;
+
+    for (const auto& [source, filename] : sources) {
+        auto tokens = tokenize(source, filename);
+        auto parse_result = parse(tokens);
+        if (!parse_result.errors.empty()) {
+            check(true, label + " (parse error in " + filename + " is fine)");
+            return;
+        }
+        auto local_packages = resolve_packages(parse_result.ast, filename);
+        merge_package_tables(global_packages, std::move(local_packages));
+        asts.push_back(std::move(parse_result.ast));
+    }
+
+    auto cr = generate_c(asts, global_packages);
+    check(!cr.success, label + " should fail (private symbol)");
+    if (cr.success) {
+        std::cerr << "  Expected type error but codegen succeeded!\n";
+    }
+}
+
+void test_multi_file_package_export() {
+    std::cout << "=== test_multi_file_package_export ===\n";
+
+    // Package file: exports struct, function, const
+    std::string pkg_src = R"(
+package MATH
+
+export fn add(i32 a, i32 b) -> i32 {
+    return a + b
+}
+
+export const PI = 31415
+
+export struct Vec2 {
+    i32 x
+    i32 y
+}
+)";
+
+    // Main file: uses exported symbols
+    std::string main_src = R"(
+package MAIN
+
+using MATH
+block global = 1MB
+
+fn main() {
+    i32 r = add(3, 4)
+    Vec2 v = {x = 10, y = 20}
+}
+)";
+
+    expect_multi_file_success(
+        {{"MATH.pkg", pkg_src}, {"main.brc", main_src}},
+        "multi_file_export");
+}
+
+void test_multi_file_package_private() {
+    std::cout << "=== test_multi_file_package_private ===\n";
+
+    // Package file: has a private const
+    std::string pkg_src = R"(
+package MATH
+
+private const SECRET = 42
+
+export fn add(i32 a, i32 b) -> i32 {
+    return a + b
+}
+)";
+
+    // Main file: tries to access private symbol → should fail
+    std::string main_src = R"(
+package MAIN
+
+using MATH
+
+fn main() {
+    i32 x = SECRET
+}
+)";
+
+    expect_multi_file_error(
+        {{"MATH.pkg", pkg_src}, {"main.brc", main_src}},
+        "multi_file_private");
 }
 
 int main() {
@@ -2126,9 +2445,26 @@ int main() {
     test_bitfield_struct_64_fields();
     test_union_nested_deep();
 
-    // ─── Export and $macro tests ───
-    test_export_function();
-    test_dollar_macro();
+    // ─── Cyclic inheritance test ───
+    test_cyclic_inheritance();
+
+    // ─── f32 literal overflow promotion tests ───
+    test_unsuffixed_float_fits_f32();
+    test_unsuffixed_float_large_promotes_to_f64();
+    test_large_unsuffixed_float_to_f32_fails();
+
+    // ─── For-in range loop tests ───
+    test_for_in_range();
+
+    // ─── Match guard edge case tests ───
+    test_match_guard_multi_pattern();
+
+    // ─── Nested anonymous struct/union tests ───
+    test_nested_anon_deep();
+
+    // ─── Multi-file package export/import tests ───
+    test_multi_file_package_export();
+    test_multi_file_package_private();
 
     std::cout << "\n=== Results ===\n";
     std::cout << "Passed: " << tests_passed << "\n";

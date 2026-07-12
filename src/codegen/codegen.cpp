@@ -157,6 +157,35 @@ public:
             gen_block_init(asts);
             out << "\n";
 
+            // FORWARD DECLARATIONS: non-extern functions + consts (cross-file multi-package support)
+            // DECLARACOES ANTECIPADAS: funcoes nao-extern + consts (suporte multi-pacote multi-arquivo)
+            for (const auto& ast : asts) {
+                for (const auto& decl : ast->declarations) {
+                    if (decl->type == ASTNodeType::FUNC_DECL) {
+                        auto* fd = static_cast<FuncDecl*>(decl.get());
+                        if (!fd->is_extern)
+                            gen_function_declaration(fd, "");
+                    }
+                    if (decl->type == ASTNodeType::STRUCT_DECL) {
+                        auto* sd = static_cast<StructDecl*>(decl.get());
+                        for (const auto& method : sd->methods) {
+                            if (method->type == ASTNodeType::FUNC_DECL) {
+                                auto* mfd = static_cast<FuncDecl*>(method.get());
+                                gen_function_declaration(mfd, sd->name);
+                            }
+                        }
+                    }
+                    if (decl->type == ASTNodeType::CONST_DECL) {
+                        auto* cd = static_cast<ConstDecl*>(decl.get());
+                        std::string const_type = cd->type_name.empty() ? "int" : map_type(cd->type_name);
+                        indent(); out << "static const " << const_type << " " << cd->name << " = ";
+                        gen_expression(cd->value.get());
+                        out << ";\n";
+                    }
+                }
+            }
+            out << "\n";
+
             for (const auto& ast : asts) {
                 for (const auto& decl : ast->declarations) {
                     if (decl->type == ASTNodeType::STRUCT_DECL) {
@@ -220,20 +249,15 @@ public:
             }
 
             // Standalone functions (must come after vtbl wrappers)
+            // Consts are emitted in the forward declaration section above.
             // Funcoes avulsas (devem vir depois dos wrappers vtbl)
+            // Consts sao emitidos na secao de declaracoes antecipadas acima.
             for (const auto& ast : asts) {
                 for (const auto& decl : ast->declarations) {
                     if (decl->type == ASTNodeType::FUNC_DECL) {
                         auto* fd = static_cast<FuncDecl*>(decl.get());
                         if (!fd->is_extern)
                             gen_function(fd, "");
-                    }
-                    if (decl->type == ASTNodeType::CONST_DECL) {
-                        auto* cd = static_cast<ConstDecl*>(decl.get());
-                        std::string const_type = cd->type_name.empty() ? "int" : map_type(cd->type_name);
-                        indent(); out << "static const " << const_type << " " << cd->name << " = ";
-                        gen_expression(cd->value.get());
-                        out << ";\n";
                     }
                 }
             }
@@ -261,6 +285,7 @@ private:
     std::unordered_map<std::string, FuncDecl*> func_defs;
     std::unordered_set<std::string> declared_vars;
     std::unordered_map<std::string, bool> pointer_vars;
+    std::unordered_map<std::string, std::string> var_blocks_;  // dynamic array -> block name
     bool has_blocks_ = false;
     bool has_pool_ = false;
     std::unordered_set<std::string> pool_blocks_;
@@ -270,6 +295,29 @@ private:
     std::string current_struct_name;
     std::unordered_set<std::string> current_struct_fields;
 
+    // Defer queue: one queue per scope level
+    // Each entry holds the generated C code of the deferred body
+    // Fila de defer: uma fila por nivel de escopo
+    // Cada entrada contem o codigo C gerado do corpo deferido
+    std::vector<std::vector<std::string>> defer_queues;
+
+    void emit_deferred() {
+        for (auto& queue : defer_queues) {
+            for (auto it = queue.rbegin(); it != queue.rend(); ++it) {
+                out << *it;
+            }
+        }
+        defer_queues.clear();
+    }
+
+    void emit_deferred_scope() {
+        if (defer_queues.empty()) return;
+        auto& queue = defer_queues.back();
+        for (auto it = queue.rbegin(); it != queue.rend(); ++it) {
+            out << *it;
+        }
+        defer_queues.pop_back();
+    }
 
     void indent() {
         for (int i = 0; i < indent_level; i++) out << "    ";
@@ -522,9 +570,12 @@ private:
                 }
                 out << ";\n";
             }
-            // Anonymous struct inside union
+            // Anonymous struct inside union: wrap in struct { ... };
+            // to preserve struct member layout (fields don't overlap each other)
             if (uf->type == ASTNodeType::STRUCT_DECL) {
                 auto* inner_sd = static_cast<StructDecl*>(uf.get());
+                indent(); out << "struct {\n";
+                indent_level++;
                 for (const auto& inner_f : inner_sd->fields) {
                     if (inner_f->type == ASTNodeType::FIELD_DECL) {
                         auto* inner_fd = static_cast<FieldDecl*>(inner_f.get());
@@ -538,6 +589,8 @@ private:
                         out << ";\n";
                     }
                 }
+                indent_level--;
+                indent(); out << "};\n";
             }
         }
     }
@@ -747,21 +800,21 @@ private:
         out << ");\n";
     }
 
-    void gen_function(FuncDecl* fd, const std::string& struct_prefix) {
+    // Build the shared function signature prefix (attributes + return type + name + params)
+    // Constroi o prefixo de assinatura de funcao compartilhado (atributos + tipo + nome + params)
+    // Returns true if the function is main()
+    // Retorna true se a funcao e main()
+    bool build_function_signature(FuncDecl* fd, const std::string& struct_prefix,
+                                   bool track_pointer_vars) {
         emit_line(fd->location);
         std::string func_name = struct_prefix.empty()
             ? fd->name
             : mangle_name(struct_prefix, fd->name);
 
-        // main() must return int in C
-        // main() deve retornar int em C
         bool is_main = (func_name == "main");
         std::string ret_type = is_main ? "int" : map_type(
             fd->return_type.empty() ? "void" : fd->return_type);
 
-        // [OPTIMIZATION] Inline hints for gcc
-        // Add __attribute__((always_inline)) to non-main, non-extern, non-export functions
-        // Adiciona __attribute__((always_inline)) para funcoes que nao sao main nem extern nem export
         if (!is_main && !fd->is_extern && !fd->is_export) {
             indent(); out << "__attribute__((always_inline))\n";
             indent(); out << "static inline\n";
@@ -778,20 +831,25 @@ private:
         for (size_t i = 0; i < fd->params.size(); i++) {
             auto* pd = static_cast<ParamDecl*>(fd->params[i].get());
             std::string c_type = map_type(pd->type_name);
-            // Struct params become pointers (block-allocated semantics)
-            // Params de struct viram ponteiros (semantica de alocacao em bloco)
             bool is_struct_param = struct_map.count(pd->type_name) > 0;
             if (is_struct_param) {
                 c_type += "*";
-                pointer_vars[pd->name] = true;
+                if (track_pointer_vars) pointer_vars[pd->name] = true;
             }
             out << c_type << " " << pd->name;
             if (i + 1 < fd->params.size()) out << ", ";
         }
+
+        return is_main;
+    }
+
+    void gen_function(FuncDecl* fd, const std::string& struct_prefix) {
+        bool is_main = build_function_signature(fd, struct_prefix, true);
         out << ") {\n";
 
         indent_level++;
         declared_vars.clear();
+        var_blocks_.clear();
         scope_depth = 0;
 
         // Set struct context for field access (this->field)
@@ -837,6 +895,11 @@ private:
         indent(); out << "}\n\n";
     }
 
+    void gen_function_declaration(FuncDecl* fd, const std::string& struct_prefix) {
+        build_function_signature(fd, struct_prefix, false);
+        out << ");\n";
+    }
+
     void collect_fields_recursive(const std::string& struct_name) {
         if (!struct_map.count(struct_name)) return;
         auto* sd = struct_map[struct_name];
@@ -851,9 +914,13 @@ private:
     }
 
     void gen_block_stmt(BlockStmt* bs) {
+        defer_queues.emplace_back();
         for (const auto& stmt : bs->statements) {
             gen_statement(stmt.get());
         }
+        // Emit deferred bodies in reverse order (LIFO) before closing scope
+        // Emite corpos deferidos em ordem reversa (LIFO) antes de fechar escopo
+        emit_deferred_scope();
     }
 
     void gen_statement(ASTNode* node) {
@@ -873,6 +940,25 @@ private:
             case ASTNodeType::RETURN_STMT:
                 gen_return_stmt(static_cast<ReturnStmt*>(node));
                 break;
+            case ASTNodeType::DEFER_STMT: {
+                auto* ds = static_cast<DeferStmt*>(node);
+                if (!ds->body) break;
+                if (defer_queues.empty()) {
+                    defer_queues.emplace_back();
+                }
+                // Generate the deferred body's C code into a temporary stream
+                // Gera o codigo C do corpo deferido em um stream temporario
+                std::ostringstream tmp;
+                std::swap(tmp, out);
+                // Save current indent level and adjust for scope
+                int saved_indent = indent_level;
+                gen_statement(ds->body.get());
+                indent_level = saved_indent;
+                std::string code = out.str();
+                std::swap(tmp, out);
+                defer_queues.back().push_back(code);
+                break;
+            }
             case ASTNodeType::BLOCK_STMT: {
                 indent_level++;
                 indent(); out << "{\n";
@@ -893,6 +979,7 @@ private:
                 indent(); out << "{\n";
                 indent_level++;
                 scope_depth++;
+                defer_queues.emplace_back();
                 indent(); out << "BlockCtx* _old" << scope_depth << " = _current_block;\n";
                 if (!bs->block_name.empty()) {
                     indent(); out << "_current_block = " << bs->block_name << ";\n";
@@ -903,6 +990,7 @@ private:
                 if (!bs->block_name.empty()) {
                     indent(); out << "_current_block = _old" << scope_depth << ";\n";
                 }
+                emit_deferred_scope();
                 indent_level--;
                 scope_depth--;
                 indent(); out << "}\n";
@@ -916,9 +1004,6 @@ private:
                 indent(); out << "continue;\n";
                 break;
             }
-            case ASTNodeType::DEFER_STMT: {
-                break;
-            }
             case ASTNodeType::MATCH_STMT: {
                 auto* ms = static_cast<MatchStmt*>(node);
                 // Generate C switch statement
@@ -927,9 +1012,13 @@ private:
                 gen_expression(ms->value.get());
                 out << ") {\n";
                 indent_level++;
-                for (auto& arm : ms->arms) {
-                    for (size_t pi = 0; pi < arm.patterns.size(); pi++) {
-                        auto* pat = arm.patterns[pi].get();
+                // Merge consecutive arms with the same first pattern
+                // to avoid duplicate case labels when guards are used
+                for (size_t ai = 0; ai < ms->arms.size(); ) {
+                    auto& first_arm = ms->arms[ai];
+                    // Emit case labels for the first arm's patterns
+                    for (size_t pi = 0; pi < first_arm.patterns.size(); pi++) {
+                        auto* pat = first_arm.patterns[pi].get();
                         // Wildcard pattern "_" -> default
                         if (pat->type == ASTNodeType::IDENT_EXPR) {
                             auto* ident = static_cast<IdentExpr*>(pat);
@@ -943,21 +1032,47 @@ private:
                         gen_expression(pat);
                         out << ":\n";
                     }
+                    // Find consecutive arms with the same first pattern (for merging)
+                    size_t merge_end = ai + 1;
+                    while (merge_end < ms->arms.size()) {
+                        auto& next = ms->arms[merge_end];
+                        if (next.patterns.empty()) break;
+                        auto* this_pat = next.patterns[0].get();
+                        auto* first_pat = first_arm.patterns[0].get();
+                        bool same = false;
+                        if (this_pat->type == first_pat->type) {
+                            if (this_pat->type == ASTNodeType::INT_LITERAL) {
+                                same = static_cast<IntLiteral*>(this_pat)->value ==
+                                       static_cast<IntLiteral*>(first_pat)->value;
+                            } else if (this_pat->type == ASTNodeType::IDENT_EXPR &&
+                                       static_cast<IdentExpr*>(this_pat)->name == "_" &&
+                                       static_cast<IdentExpr*>(first_pat)->name == "_") {
+                                same = true;
+                            }
+                        }
+                        if (!same) break;
+                        merge_end++;
+                    }
+                    // Emit bodies for all arms in the merge group
                     indent_level++;
-                    if (arm.guard) {
-                        indent(); out << "if(";
-                        gen_expression(arm.guard.get());
-                        out << ") {\n";
-                        indent_level++;
-                        if (arm.body) gen_statement(arm.body.get());
-                        indent(); out << "break;\n";
-                        indent_level--;
-                        indent(); out << "}\n";
-                    } else {
-                        if (arm.body) gen_statement(arm.body.get());
-                        indent(); out << "break;\n";
+                    for (size_t aj = ai; aj < merge_end; aj++) {
+                        auto& arm = ms->arms[aj];
+                        if (arm.guard) {
+                            indent(); out << "if(";
+                            gen_expression(arm.guard.get());
+                            out << ") {\n";
+                            indent_level++;
+                            if (arm.body) gen_statement(arm.body.get());
+                            indent(); out << "break;\n";
+                            indent_level--;
+                            indent(); out << "}\n";
+                        } else {
+                            if (arm.body) gen_statement(arm.body.get());
+                            indent(); out << "break;\n";
+                        }
                     }
                     indent_level--;
+                    ai = merge_end;
                 }
                 indent_level--;
                 indent(); out << "}\n";
@@ -1037,6 +1152,10 @@ private:
                 if (declared_vars.find(var_key) == declared_vars.end()) {
                     std::string brick_type = ident->resolved_type.empty()
                         ? ident->declared_type : ident->resolved_type;
+                    // Track block allocation for dynamic arrays
+                    if (is_dynamic_array_type(brick_type) && !ident->block_name.empty()) {
+                        var_blocks_[ident->name] = ident->block_name;
+                    }
                     gen_var_declaration(ident->name, brick_type);
                     return;
                 }
@@ -1159,6 +1278,11 @@ private:
                         return;
                     }
 
+                    // Track block allocation for dynamic arrays with assignment
+                    if (is_dynamic_array_type(brick_type) && !ident->block_name.empty()) {
+                        var_blocks_[ident->name] = ident->block_name;
+                    }
+
                     // Regular variable assignment
                     // Atribuicao de variavel normal
                     out << " = ";
@@ -1206,12 +1330,23 @@ private:
                     } else {
                         arr_name = "_arr";
                     }
+                    // Check if this array is allocated from a block
+                    auto block_it = var_blocks_.find(arr_name);
+                    bool is_block_array = (block_it != var_blocks_.end());
+
                     // Grow array if needed
                     indent(); out << "if (" << arr_name << "_cnt >= " << arr_name << "_cap) {\n";
                     indent_level++;
                     indent(); out << arr_name << "_cap = " << arr_name << "_cap == 0 ? 4 : " << arr_name << "_cap * 2;\n";
-                    indent(); out << arr_name << " = realloc(" << arr_name
-                             << ", " << arr_name << "_cap * sizeof(" << map_type(elem_type) << "));\n";
+                    if (is_block_array) {
+                        indent(); out << map_type(elem_type) << "* _new" << arr_name << " = block_alloc(" << block_it->second
+                                 << ", " << arr_name << "_cap * sizeof(" << map_type(elem_type) << "));\n";
+                        indent(); out << "memcpy(_new" << arr_name << ", " << arr_name << ", " << arr_name << "_cnt * sizeof(" << map_type(elem_type) << "));\n";
+                        indent(); out << arr_name << " = _new" << arr_name << ";\n";
+                    } else {
+                        indent(); out << arr_name << " = realloc(" << arr_name
+                                 << ", " << arr_name << "_cap * sizeof(" << map_type(elem_type) << "));\n";
+                    }
                     indent_level--;
                     indent(); out << "}\n";
                     // Interface element type: wrap in interface struct
@@ -1277,7 +1412,39 @@ private:
         indent(); out << "for (";
         if (fs->init) {
             if (fs->init->type == ASTNodeType::EXPR_STMT) {
-                gen_expression(static_cast<ExprStmt*>(fs->init.get())->expr.get());
+                auto* es = static_cast<ExprStmt*>(fs->init.get());
+                // Detect for-init variable declaration (e.g. "int __i = 0" from "for x in N")
+                if (es->expr->type == ASTNodeType::ASSIGNMENT) {
+                    auto* assign = static_cast<Assignment*>(es->expr.get());
+                    if (assign->target->type == ASTNodeType::IDENT_EXPR &&
+                        assign->op == TokenType::ASSIGN) {
+                        auto* ident = static_cast<IdentExpr*>(assign->target.get());
+                        if (!ident->declared_type.empty()) {
+                            bool found = false;
+                            for (int d = scope_depth; d >= 0; d--)
+                                if (declared_vars.count(std::to_string(d) + ":" + ident->name))
+                                    { found = true; break; }
+                            if (!found) {
+                                std::string brick_type = ident->resolved_type.empty()
+                                    ? ident->declared_type : ident->resolved_type;
+                                declared_vars.insert(std::to_string(scope_depth) + ":" + ident->name);
+                                out << map_type(brick_type) << " " << ident->name << " = ";
+                                gen_expression(assign->value.get());
+                                out << "; ";
+                                if (fs->condition) gen_expression(fs->condition.get());
+                                out << "; ";
+                                if (fs->increment) gen_expression(fs->increment.get());
+                                out << ") {\n";
+                                indent_level++;
+                                gen_block_stmt(static_cast<BlockStmt*>(fs->body.get()));
+                                indent_level--;
+                                indent(); out << "}\n";
+                                return;
+                            }
+                        }
+                    }
+                }
+                gen_expression(es->expr.get());
             } else {
                 gen_statement(fs->init.get());
             }
@@ -1294,6 +1461,11 @@ private:
     }
 
     void gen_return_stmt(ReturnStmt* rs) {
+        // Emit all pending deferred bodies before returning (LIFO order)
+        // Emite todos os corpos deferidos pendentes antes de retornar (ordem LIFO)
+        if (!defer_queues.empty()) {
+            emit_deferred();
+        }
         indent(); out << "return";
         if (rs->value) {
             out << " ";

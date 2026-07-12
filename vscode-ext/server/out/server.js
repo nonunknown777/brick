@@ -20,14 +20,6 @@ const legend = {
     tokenModifiers: tokenModifiers,
 };
 const typeKeywordSet = new Set(['int', 'float', 'bool', 'char', 'String', 'void', 'PoolAllocator', 'u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte']);
-const keywordSet = new Set([
-    'package', 'using', 'private', 'public',
-    'struct', 'extends', 'interface', 'fn', 'return',
-    'block', 'reset',
-    'if', 'else', 'while', 'for', 'error',
-    'null', 'true', 'false',
-    'include', 'link', 'extern', 'and',
-]);
 const keywordCompletions = [
     { label: 'package', kind: node_1.CompletionItemKind.Keyword, detail: 'package declaration', insertText: 'package ', insertTextFormat: 1 },
     { label: 'using', kind: node_1.CompletionItemKind.Keyword, detail: 'import package', insertText: 'using ', insertTextFormat: 1 },
@@ -69,8 +61,25 @@ const keywordCompletions = [
     { label: 'false', kind: node_1.CompletionItemKind.Constant, detail: 'boolean false' },
     { label: 'include', kind: node_1.CompletionItemKind.Keyword, detail: 'include C header', insertText: 'include "${1:header.h}"', insertTextFormat: 2 },
     { label: 'link', kind: node_1.CompletionItemKind.Keyword, detail: 'link C library', insertText: 'link ${1:libname}', insertTextFormat: 2 },
+    { label: 'export', kind: node_1.CompletionItemKind.Keyword, detail: 'export function for C linking (no static inline)', insertText: 'export fn ${1:name}(${2:params}) -> ${3:rettype} {\n\t$0\n}', insertTextFormat: 2 },
     { label: 'extern', kind: node_1.CompletionItemKind.Keyword, detail: 'declare external C function', insertText: 'extern fn ${1:name}(${2:params}) -> ${3:ret}', insertTextFormat: 2 },
-    { label: 'and', kind: node_1.CompletionItemKind.Keyword, detail: 'connects include and link' },
+    { label: 'and', kind: node_1.CompletionItemKind.Keyword, detail: 'logical AND / connects include and link' },
+    { label: 'or', kind: node_1.CompletionItemKind.Keyword, detail: 'logical OR operator' },
+    { label: 'union', kind: node_1.CompletionItemKind.Keyword, detail: 'union type declaration', insertText: 'union ${1:Name} {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'impl', kind: node_1.CompletionItemKind.Keyword, detail: 'implement interface for struct', insertText: 'impl ${1:StructName} : ${2:Interface} {\n\tfn ${3:method}(${4:params}) {\n\t\t$0\n\t}\n}', insertTextFormat: 2 },
+    { label: 'type', kind: node_1.CompletionItemKind.Keyword, detail: 'type alias declaration', insertText: 'type ${1:NewType} = ${2:ExistingType}', insertTextFormat: 2 },
+    { label: 'macro', kind: node_1.CompletionItemKind.Keyword, detail: 'macro declaration', insertText: 'macro ${1:name}(${2:params}) {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'build', kind: node_1.CompletionItemKind.Keyword, detail: 'compile-time computation block', insertText: 'build {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'emit', kind: node_1.CompletionItemKind.Keyword, detail: 'code generation', insertText: 'emit {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'not', kind: node_1.CompletionItemKind.Keyword, detail: 'boolean negation operator' },
+    { label: 'break', kind: node_1.CompletionItemKind.Keyword, detail: 'exit loop or match arm' },
+    { label: 'continue', kind: node_1.CompletionItemKind.Keyword, detail: 'skip to next loop iteration' },
+    { label: 'const', kind: node_1.CompletionItemKind.Keyword, detail: 'compile-time constant declaration', insertText: 'const ${1:name} = ${2:value}', insertTextFormat: 2 },
+    { label: 'defer', kind: node_1.CompletionItemKind.Keyword, detail: 'defer statement to end of scope', insertText: 'defer {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'enum', kind: node_1.CompletionItemKind.Keyword, detail: 'enum type declaration', insertText: 'enum ${1:Name} {\n\t${0}\n}', insertTextFormat: 2 },
+    { label: 'match', kind: node_1.CompletionItemKind.Keyword, detail: 'pattern matching', insertText: 'match ${1:expr} {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'is', kind: node_1.CompletionItemKind.Keyword, detail: 'type check operator' },
+    { label: 'as', kind: node_1.CompletionItemKind.Keyword, detail: 'type cast operator' },
 ];
 const runtimeFunctionCompletions = [
     { label: 'block_set_tls', kind: node_1.CompletionItemKind.Function, detail: '(BlockCtx* ctx) → void', insertText: 'block_set_tls(${1:ctx})', insertTextFormat: 2 },
@@ -97,6 +106,20 @@ const snippetCompletions = [
     { label: 'package', kind: node_1.CompletionItemKind.Snippet, detail: 'package declaration', insertText: 'package $1', insertTextFormat: 2 },
     { label: 'using', kind: node_1.CompletionItemKind.Snippet, detail: 'using declaration', insertText: 'using $1', insertTextFormat: 2 },
     { label: 'main', kind: node_1.CompletionItemKind.Snippet, detail: 'main function', insertText: 'fn main() {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'macro', kind: node_1.CompletionItemKind.Snippet, detail: 'macro declaration', insertText: 'macro $1($2) {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'build', kind: node_1.CompletionItemKind.Snippet, detail: 'build block', insertText: 'build {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'emit', kind: node_1.CompletionItemKind.Snippet, detail: 'emit code', insertText: 'emit {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'emitcall', kind: node_1.CompletionItemKind.Snippet, detail: 'emit macro call', insertText: 'emit $1($2)', insertTextFormat: 2 },
+    { label: 'match', kind: node_1.CompletionItemKind.Snippet, detail: 'match statement', insertText: 'match ${1:expr} {\n\t${2:pattern} {\n\t\t$0\n\t}\n}', insertTextFormat: 2 },
+    { label: 'enum', kind: node_1.CompletionItemKind.Snippet, detail: 'enum declaration', insertText: 'enum ${1:Name} {\n\t${2:A}${3: = ${4:0}}${5:;\n\t${6:B}}\n}', insertTextFormat: 2 },
+    { label: 'defer', kind: node_1.CompletionItemKind.Snippet, detail: 'defer statement', insertText: 'defer {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'const', kind: node_1.CompletionItemKind.Snippet, detail: 'constant declaration', insertText: 'const ${1:name} = ${2:value}', insertTextFormat: 2 },
+    { label: 'exportfn', kind: node_1.CompletionItemKind.Snippet, detail: 'export function (linker-visible)', insertText: 'export fn ${1:name}(${2:params}) -> ${3:rettype} {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'forin', kind: node_1.CompletionItemKind.Snippet, detail: 'for-in range loop', insertText: 'for ${1:x} in ${2:N} {\n\t$0\n}', insertTextFormat: 2 },
+    { label: 'union', kind: node_1.CompletionItemKind.Snippet, detail: 'union declaration', insertText: 'union ${1:Name} {\n\t${2:int} ${3:field}\n}', insertTextFormat: 2 },
+    { label: 'impl', kind: node_1.CompletionItemKind.Snippet, detail: 'impl block for interface implementation', insertText: 'impl ${1:Struct} : ${2:Interface} {\n\tfn ${3:method}(${4:params}) {\n\t\t$0\n\t}\n}', insertTextFormat: 2 },
+    { label: 'typealias', kind: node_1.CompletionItemKind.Snippet, detail: 'type alias declaration', insertText: 'type ${1:NewType} = ${2:ExistingType}', insertTextFormat: 2 },
+    { label: 'incsys', kind: node_1.CompletionItemKind.Snippet, detail: 'include with @system (angle brackets)', insertText: 'include "${1:header.h}" @system', insertTextFormat: 2 },
 ];
 function getFilePath(uri) {
     return uri.replace(/^file:\/\//, '');
@@ -281,9 +304,18 @@ connection.onCompletion((params) => {
         return items;
     }
     if (context.isAfterAt) {
+        // After include "...", suggest @system
+        if (context.isAfterIncludeString) {
+            items.push({ label: 'system', kind: node_1.CompletionItemKind.Keyword, detail: 'use angle brackets for system header' });
+            return items;
+        }
         for (const b of scan.blocks) {
             items.push({ label: b.name, kind: node_1.CompletionItemKind.Struct, detail: `memory block` });
         }
+        return items;
+    }
+    if (context.isAfterIncludeString && !context.isAfterAt) {
+        items.push({ label: '@system', kind: node_1.CompletionItemKind.Keyword, detail: 'use angle brackets for system header', insertText: '@system', insertTextFormat: 1 });
         return items;
     }
     if (context.isAfterKeyword) {
@@ -296,6 +328,24 @@ connection.onCompletion((params) => {
             for (const [, s] of scan.structs) {
                 items.push({ label: s.name, kind: node_1.CompletionItemKind.Class, detail: 'struct' });
             }
+            return items;
+        }
+        if (kw === 'impl') {
+            // After 'impl', suggest struct names
+            for (const [, s] of scan.structs) {
+                items.push({ label: s.name, kind: node_1.CompletionItemKind.Class, detail: 'struct' });
+            }
+            return items;
+        }
+        if (kw === 'import' || kw === 'implements' || kw === ':') {
+            return items;
+        }
+        if (kw === 'union') {
+            items.push({ label: 'MyUnion', kind: node_1.CompletionItemKind.Class, detail: 'PascalCase union name' });
+            return items;
+        }
+        if (kw === 'type') {
+            items.push({ label: 'MyType', kind: node_1.CompletionItemKind.Class, detail: 'New type name' });
             return items;
         }
         if (kw === 'using') {
@@ -314,6 +364,23 @@ connection.onCompletion((params) => {
         }
         if (kw === 'package') {
             items.push({ label: 'PACKAGE_NAME', kind: node_1.CompletionItemKind.Module, detail: 'package name in UPPER case' });
+            return items;
+        }
+        if (kw === 'const') {
+            for (const t of ['int', 'float', 'bool', 'char', 'String', 'u8', 'u16', 'u32', 'u64', 'i8', 'i16', 'i32', 'i64', 'f32', 'f64', 'usize', 'isize', 'byte']) {
+                items.push({ label: t, kind: node_1.CompletionItemKind.Keyword, detail: `const ${t}` });
+            }
+            return items;
+        }
+        if (kw === 'enum') {
+            items.push({ label: 'MyEnum', kind: node_1.CompletionItemKind.Class, detail: 'PascalCase enum name' });
+            return items;
+        }
+        if (kw === 'match') {
+            return items;
+        }
+        if (kw === 'export') {
+            items.push({ label: 'fn', kind: node_1.CompletionItemKind.Keyword, detail: 'export fn declaration', insertText: 'fn ${1:name}(${2:params}) -> ${3:rettype} {\n\t$0\n}', insertTextFormat: 2 });
             return items;
         }
         if (kw === 'extern') {
@@ -701,7 +768,26 @@ connection.languages.semanticTokens.on((params) => {
             case 'INCLUDE':
             case 'LINK':
             case 'EXTERN':
+            case 'EXPORT':
             case 'AND':
+            case 'OR':
+            case 'MACRO':
+            case 'BUILD':
+            case 'EMIT':
+            case 'NOT':
+            case 'BREAK':
+            case 'CONTINUE':
+            case 'CONST':
+            case 'DEFER':
+            case 'ENUM':
+            case 'MATCH':
+            case 'IS':
+            case 'AS':
+            case 'UNION':
+            case 'IMPL':
+            case 'TYPE':
+            case 'PACKED':
+            case 'ALIGN':
                 pushToken(line, col, len, 0);
                 break;
             case 'TRUE':

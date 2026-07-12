@@ -1,0 +1,56 @@
+// Test defer statement: basic execution, LIFO ordering, and execution before return
+// Testa defer: execução básica, ordem LIFO, execução antes de return
+
+using IO
+
+block global = 1MB
+
+// ── Test 1: Basic defer at scope exit ──
+fn test_basic_defer() {
+    defer { print("defer ran") }
+    print("before defer")
+}
+
+// ── Test 2: LIFO ordering (last deferred runs first) ──
+fn test_lifo_order() {
+    defer { print("first defer") }
+    defer { print("second defer") }
+    defer { print("third defer") }
+    print("before lifo defers")
+}
+
+// ── Test 3: Defer before return ──
+fn test_defer_before_return() -> int {
+    defer { print("cleanup before return") }
+    print("about to return")
+    return 42
+}
+
+// ── Test 4: Multiple defer in nested blocks ──
+fn test_nested_block_defer() {
+    defer { print("outer defer") }
+    {
+        defer { print("inner defer") }
+        print("inside inner block")
+    }
+    print("after inner block")
+}
+
+fn main() {
+    print("=== test_basic_defer ===")
+    test_basic_defer()
+
+    print("=== test_lifo_order ===")
+    test_lifo_order()
+
+    print("=== test_defer_before_return ===")
+    int r = test_defer_before_return()
+    print("returned {0}", r)
+
+    print("=== test_nested_block_defer ===")
+    test_nested_block_defer()
+
+    print("PASS: all defer tests")
+
+    global.reset()
+}

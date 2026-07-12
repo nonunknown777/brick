@@ -487,6 +487,271 @@ runSuite('Hex/octal/binary literals', () => {
 });
 
 // ──────────────────────────────────────────
+// Test 26: export fn keyword
+// ──────────────────────────────────────────
+runSuite('Export keyword', () => {
+    const r = scanDocument(`
+export fn calculate(int x, int y) -> int {
+    return x + y
+}
+export fn main() {
+    calculate(1, 2)
+}
+`);
+    const exportTokens = r.tokens.filter(t => t.type === 'EXPORT');
+    assert(exportTokens.length >= 2, `has at least 2 EXPORT tokens (got ${exportTokens.length})`);
+    const calcSym = r.symbols.find(s => s.name === 'calculate');
+    assert(calcSym !== undefined, 'calculate function symbol found');
+    assert(calcSym!.kind === 'function', `calculate kind is function, got ${calcSym!.kind}`);
+    assert(calcSym!.type_name === 'int', `calculate return type is int, got ${calcSym!.type_name}`);
+});
+
+// ──────────────────────────────────────────
+// Test 27: @system attribute on includes
+// ──────────────────────────────────────────
+runSuite('@system include attribute', () => {
+    const r = scanDocument('include "math.h" @system and link m');
+    const includeTok = r.tokens.find(t => t.lexeme === 'include');
+    const strTok = r.tokens.find(t => t.lexeme === '"math.h"');
+    const atTok = r.tokens.find(t => t.lexeme === '@');
+    const sysTok = r.tokens.find(t => t.lexeme === 'system');
+    const andTok = r.tokens.find(t => t.lexeme === 'and');
+    const linkTok = r.tokens.find(t => t.lexeme === 'link');
+
+    assert(includeTok !== undefined, 'include token exists');
+    assert(includeTok!.type === 'INCLUDE', 'include type is INCLUDE');
+    assert(strTok !== undefined, 'string token exists');
+    assert(atTok !== undefined, '@ token exists');
+    assert(sysTok !== undefined, 'system token exists');
+    assert(andTok !== undefined, 'and token exists');
+    assert(linkTok !== undefined, 'link token exists');
+
+    // Test without @system
+    const r2 = scanDocument('include "local.h" and link m');
+    const atTok2 = r2.tokens.find(t => t.lexeme === '@');
+    assert(atTok2 === undefined, 'no @ token without @system');
+    assert(r2.errors.length === 0, 'no errors without @system');
+});
+
+// ──────────────────────────────────────────
+// Test 28: $macro(args) explicit macro call
+// ──────────────────────────────────────────
+runSuite('$macro(args) explicit macro call', () => {
+    const r = scanDocument(`
+macro gen_getter(name, type) {
+    emit { fn $name() -> $type { return $field } }
+}
+
+fn main() {
+    gen_getter(value, int)
+    $gen_getter(value, int)
+}
+`);
+    // Check for $name in macro body
+    const dollarTokens = r.tokens.filter(t => t.type === 'DOLLAR_IDENTIFIER');
+    assert(dollarTokens.length >= 2, `has DOLLAR_IDENTIFIER tokens (got ${dollarTokens.length})`);
+
+    // Check that macro keyword is recognized
+    assert(r.tokens.some(t => t.type === 'MACRO'), 'macro keyword found');
+    assert(r.tokens.some(t => t.type === 'MACRO' && t.lexeme === 'macro'), 'macro keyword lexeme matches');
+
+    // Check that $name followed by ( on next line works
+    const dollarGenGetter = r.tokens.find(t => t.lexeme === '$gen_getter');
+    assert(dollarGenGetter !== undefined, '$gen_getter dollar identifier found');
+});
+
+// ──────────────────────────────────────────
+// Test 29: Union declarations
+// ──────────────────────────────────────────
+runSuite('Union declarations', () => {
+    const r = scanDocument(`
+union Data {
+    int i
+    float f
+    bool b
+}
+struct Packet {
+    int id
+    union {
+        int x
+        float y
+    }
+}
+`);
+    assert(r.structs.has('Packet'), 'Packet struct found');
+    const packet = r.structs.get('Packet')!;
+    assert(packet.fields.some(f => f.name === 'id'), 'id field found');
+    assert(packet.fields.some(f => f.name === 'x'), 'anon union x found');
+    assert(packet.fields.some(f => f.name === 'y'), 'anon union y found');
+    const unionSym = r.symbols.find(s => s.name === 'Data');
+    assert(unionSym !== undefined, 'Data union symbol found');
+    assert(unionSym!.kind === 'struct', `Data kind is struct, got ${unionSym!.kind}`);
+});
+
+// ──────────────────────────────────────────
+// Test 30: impl block
+// ──────────────────────────────────────────
+runSuite('Impl block', () => {
+    const r = scanDocument(`
+struct Arrow { int damage }
+
+impl Arrow : Damageable {
+    fn take_damage(int d) {
+        damage = d
+    }
+}
+`);
+    const implSym = r.symbols.find(s => s.name === 'take_damage');
+    assert(implSym !== undefined, 'take_damage method found in impl');
+    assert(implSym!.kind === 'function', `take_damage kind is function, got ${implSym!.kind}`);
+});
+
+// ──────────────────────────────────────────
+// Test 31: Type aliases
+// ──────────────────────────────────────────
+runSuite('Type aliases', () => {
+    const r = scanDocument('type MyInt = int\ntype Coord = f64\ntype Color = u32');
+    const myInt = r.symbols.find(s => s.name === 'MyInt');
+    const coord = r.symbols.find(s => s.name === 'Coord');
+    const color = r.symbols.find(s => s.name === 'Color');
+    assert(myInt !== undefined, 'MyInt type alias found');
+    assert(coord !== undefined, 'Coord type alias found');
+    assert(color !== undefined, 'Color type alias found');
+    assert(myInt!.kind === 'type', `MyInt kind is type, got ${myInt!.kind}`);
+    assert(myInt!.type_name === 'int', `MyInt type is int, got ${myInt!.type_name}`);
+});
+
+// ──────────────────────────────────────────
+// Test 32: Dynamic arrays T[] inside struct fields
+// ──────────────────────────────────────────
+runSuite('Dynamic arrays in struct fields', () => {
+    const r = scanDocument(`
+struct Container {
+    int[] items
+    String[] names
+    float[] values
+}
+`);
+    const c = r.structs.get('Container');
+    assert(c !== undefined, 'Container struct found');
+    if (c) {
+        assert(c.fields.some(f => f.name === 'items' && f.type === 'int[]'), 'int[] items found');
+        assert(c.fields.some(f => f.name === 'names' && f.type === 'String[]'), 'String[] names found');
+        assert(c.fields.some(f => f.name === 'values' && f.type === 'float[]'), 'float[] values found');
+    }
+});
+
+// ──────────────────────────────────────────
+// Test 33: Bitfield types (u4, i3, u24, etc.)
+// ──────────────────────────────────────────
+runSuite('Bitfield types', () => {
+    const r = scanDocument(`
+struct Flags {
+    u4  low_nibble
+    i3  signed_3bit
+    u1  single_bit
+    u24 address_part
+}
+`);
+    const flags = r.structs.get('Flags');
+    assert(flags !== undefined, 'Flags struct found');
+    if (flags) {
+        assert(flags.fields.some(f => f.name === 'low_nibble' && f.type === 'u4'), 'u4 low_nibble found');
+        assert(flags.fields.some(f => f.name === 'signed_3bit' && f.type === 'i3'), 'i3 signed_3bit found');
+        assert(flags.fields.some(f => f.name === 'single_bit' && f.type === 'u1'), 'u1 single_bit found');
+        assert(flags.fields.some(f => f.name === 'address_part' && f.type === 'u24'), 'u24 address_part found');
+    }
+});
+
+// ──────────────────────────────────────────
+// Test 34: @packed and @align struct attributes
+// ──────────────────────────────────────────
+runSuite('Struct attributes @packed @align', () => {
+    const r = scanDocument(`
+struct Packed @packed {
+    u8 a
+    i32 b
+}
+struct Aligned @align(64) {
+    u8 a
+    i32 b
+}
+struct Both @packed @align(16) {
+    u8 x
+    i64 y
+}
+`);
+    assert(r.structs.has('Packed'), 'Packed struct found');
+    assert(r.structs.has('Aligned'), 'Aligned struct found');
+    assert(r.structs.has('Both'), 'Both struct found');
+});
+
+// ──────────────────────────────────────────
+// Test 35: Anonymous struct inside union inside struct
+// ──────────────────────────────────────────
+runSuite('Anonymous struct inside union inside struct', () => {
+    const r = scanDocument(`
+struct TaggedPacket {
+    u32 raw
+    union {
+        struct { u24 addr; u8 size; }
+        u32 combined
+    }
+}
+`);
+    const tp = r.structs.get('TaggedPacket');
+    assert(tp !== undefined, 'TaggedPacket struct found');
+    if (tp) {
+        assert(tp.fields.some(f => f.name === 'raw'), 'raw field found');
+        assert(tp.fields.some(f => f.name === 'addr'), 'addr field (from anon struct) found');
+        assert(tp.fields.some(f => f.name === 'size'), 'size field (from anon struct) found');
+        assert(tp.fields.some(f => f.name === 'combined'), 'combined field (from anon union) found');
+    }
+});
+
+// ──────────────────────────────────────────
+// Test 36: Variable detection with new patterns
+// ──────────────────────────────────────────
+runSuite('Variable detection new patterns', () => {
+    const r = scanDocument(`
+fn test() {
+    int[10] fixed  // fixed array variable
+    *u8 ptr        // pointer variable
+}
+`);
+    // Fixed array variable
+    assert(r.symbols.some(s => s.name === 'fixed' && s.kind === 'variable'), 'fixed variable found');
+    // Pointer variable
+    assert(r.symbols.some(s => s.name === 'ptr' && s.kind === 'variable' && s.type_name === '*u8'), 'ptr variable found');
+});
+
+// ──────────────────────────────────────────
+// Test 37: and/or/not logical keywords
+// ──────────────────────────────────────────
+runSuite('Logical keywords and or not', () => {
+    const r = scanDocument('if a and b { }\nif a or b { }\nif not a { }');
+    const andTok = r.tokens.find(t => t.lexeme === 'and');
+    const orTok = r.tokens.find(t => t.lexeme === 'or');
+    const notTok = r.tokens.find(t => t.lexeme === 'not');
+    assert(andTok !== undefined, 'and token found');
+    assert(orTok !== undefined, 'or token found');
+    assert(notTok !== undefined, 'not token found');
+});
+
+// ──────────────────────────────────────────
+// Test 38: short, long, double aliases
+// ──────────────────────────────────────────
+runSuite('Type aliases short long double', () => {
+    const r = scanDocument('short x = 5\nlong y = 10\ndouble z = 3.14');
+    const shortTok = r.tokens.find(t => t.lexeme === 'short');
+    const longTok = r.tokens.find(t => t.lexeme === 'long');
+    const doubleTok = r.tokens.find(t => t.lexeme === 'double');
+    assert(shortTok !== undefined && shortTok.type !== 'IDENTIFIER', 'short is keyword');
+    assert(longTok !== undefined && longTok.type !== 'IDENTIFIER', 'long is keyword');
+    assert(doubleTok !== undefined && doubleTok.type !== 'IDENTIFIER', 'double is keyword');
+});
+
+// ──────────────────────────────────────────
 // Summary
 // ──────────────────────────────────────────
 console.log(`\n═══════════════════════════════════`);

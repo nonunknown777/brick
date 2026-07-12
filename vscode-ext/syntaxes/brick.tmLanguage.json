@@ -83,11 +83,11 @@
             "patterns": [
                 {
                     "name": "keyword.control.package.brc",
-                    "match": "\\b(package|using|private|public|extern|include|link|and)\\b"
+                    "match": "\\b(package|using|private|public|extern|export|include|link|and|or)\\b"
                 },
                 {
                     "name": "keyword.control.struct.brc",
-                    "match": "\\b(struct|extends|interface)\\b"
+                    "match": "\\b(struct|extends|interface|union|impl|type)\\b"
                 },
                 {
                     "name": "keyword.control.function.brc",
@@ -134,6 +134,10 @@
                     "match": "\\b(not)\\b"
                 },
                 {
+                    "name": "keyword.control.attribute.brc",
+                    "match": "\\b(packed|align)\\b"
+                },
+                {
                     "name": "constant.language.brc",
                     "match": "\\b(true|false|null|error)\\b"
                 }
@@ -143,7 +147,7 @@
             "patterns": [
                 {
                     "name": "storage.type.brc",
-                    "match": "\\b(PoolAllocator|u(8|16|32|64)|i(8|16|32|64)|f(32|64)|usize|isize|byte|int|float|bool|char|String|void)\\b"
+                    "match": "\\b(PoolAllocator|u(8|16|32|64)|i(8|16|32|64)|f(32|64)|usize|isize|byte|short|long|double|int|float|bool|char|String|void)\\b"
                 }
             ]
         },
@@ -163,7 +167,7 @@
                 },
                 {
                     "name": "keyword.operator.logical.brc",
-                    "match": "&&|\\|\\||!"
+                    "match": "&&|\\|\\||!|\\band\\b|\\bor\\b"
                 },
                 {
                     "name": "keyword.operator.arithmetic.brc",
@@ -223,6 +227,10 @@
         },
         "macro-sigil": {
             "patterns": [
+                {
+                    "name": "entity.name.function.macro.brc",
+                    "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*(?=\\s*\\()"
+                },
                 {
                     "name": "keyword.operator.sigil.brc",
                     "match": "\\$[a-zA-Z_][a-zA-Z0-9_]*"

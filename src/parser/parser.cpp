@@ -921,7 +921,7 @@ private:
     std::unique_ptr<ASTNode> logical_or_build() {
         auto left = logical_and_build();
         while (peek().type == TokenType::OR) {
-            advanced(); advance();
+            advance();
             auto right = logical_and_build();
             left = std::make_unique<BinaryOp>(std::move(left), TokenType::OR, std::move(right), left->location);
         }
@@ -1173,14 +1173,6 @@ private:
         return ed;
     }
 
-    void advance_many(int n) {
-        for (int i = 0; i < n && pos < tokens.size(); i++) advance();
-    }
-
-    void advanced() {
-        advance();
-    }
-
     // ─── Existing declarations (unchanged) ───
 
     std::unique_ptr<ASTNode> package_decl() {
@@ -1209,13 +1201,15 @@ private:
         advance();
         auto decl = declaration();
         auto set_private = [](ASTNode* node) {
-            if (auto* sd = dynamic_cast<StructDecl*>(node)) {
-                sd->is_private = true;
-            } else if (auto* fd = dynamic_cast<FuncDecl*>(node)) {
-                fd->is_private = true;
-            } else if (auto* fld = dynamic_cast<FieldDecl*>(node)) {
-                fld->is_private = true;
-            }
+            if (auto* sd = dynamic_cast<StructDecl*>(node)) sd->is_private = true;
+            else if (auto* fd = dynamic_cast<FuncDecl*>(node)) fd->is_private = true;
+            else if (auto* fld = dynamic_cast<FieldDecl*>(node)) fld->is_private = true;
+            else if (auto* cd = dynamic_cast<ConstDecl*>(node)) cd->is_private = true;
+            else if (auto* ed = dynamic_cast<EnumDecl*>(node)) ed->is_private = true;
+            else if (auto* ud = dynamic_cast<UnionDecl*>(node)) ud->is_private = true;
+            else if (auto* id = dynamic_cast<InterfaceDecl*>(node)) id->is_private = true;
+            else if (auto* ta = dynamic_cast<TypeAliasDecl*>(node)) ta->is_private = true;
+            else if (auto* md = dynamic_cast<MacroDecl*>(node)) md->is_private = true;
         };
         set_private(decl.get());
         return decl;
@@ -1492,8 +1486,22 @@ private:
         auto decl = declaration();
         if (auto* fd = dynamic_cast<FuncDecl*>(decl.get())) {
             fd->is_export = true;
+        } else if (auto* sd = dynamic_cast<StructDecl*>(decl.get())) {
+            sd->is_private = false; // explicit public
+        } else if (auto* cd = dynamic_cast<ConstDecl*>(decl.get())) {
+            cd->is_private = false;
+        } else if (auto* ed = dynamic_cast<EnumDecl*>(decl.get())) {
+            ed->is_private = false;
+        } else if (auto* ud = dynamic_cast<UnionDecl*>(decl.get())) {
+            ud->is_private = false;
+        } else if (auto* id = dynamic_cast<InterfaceDecl*>(decl.get())) {
+            id->is_private = false;
+        } else if (auto* ta = dynamic_cast<TypeAliasDecl*>(decl.get())) {
+            ta->is_private = false;
+        } else if (auto* md = dynamic_cast<MacroDecl*>(decl.get())) {
+            md->is_private = false;
         } else {
-            throw std::runtime_error("'export' can only be applied to functions");
+            throw std::runtime_error("'export' can only be applied to functions, structs, consts, enums, unions, interfaces, type aliases, or macros");
         }
         return decl;
     }
@@ -1507,7 +1515,7 @@ private:
         auto fd = std::make_unique<FuncDecl>(name, loc);
         fd->is_extern = true;
 
-        param_list(fd.get());
+        param_list(fd.get(), true);  // allow variadic ...
 
         if (match(TokenType::ARROW)) {
             fd->return_type = parse_type_name();
@@ -1553,15 +1561,27 @@ private:
         return std::make_unique<LinkDecl>(lib, loc);
     }
 
-    void param_list(FuncDecl* fd) {
+    void param_list(FuncDecl* fd, bool allow_variadic = false) {
         expect(TokenType::LPAREN, "expected '(' after function name");
         if (peek().type != TokenType::RPAREN) {
             do {
+                // Variadic ... (only allowed as last param for extern fn)
+                if (allow_variadic && peek().type == TokenType::ELLIPSIS) {
+                    advance(); // consume ...
+                    fd->is_variadic = true;
+                    break;
+                }
                 SourceLocation loc = peek().location;
                 std::string type_name = parse_type_name();
-                std::string name{expect(TokenType::IDENTIFIER, "expected parameter name").lexeme};
+                // Allow unnamed params for extern fn (e.g. "int", "void" without name)
+                std::string name;
+                if (peek().type == TokenType::IDENTIFIER &&
+                    peek().lexeme != "(" && peek().lexeme != ")" &&
+                    peek().lexeme != "," && peek().lexeme != ";") {
+                    name = std::string{advance().lexeme};
+                }
                 auto pd = std::make_unique<ParamDecl>(type_name, name, loc);
-                if (peek().type == TokenType::ASSIGN) {
+                if (!allow_variadic && peek().type == TokenType::ASSIGN) {
                     advance();
                     pd->default_value = expression();
                 }
@@ -1727,16 +1747,18 @@ private:
 
         std::string name{expect(TokenType::IDENTIFIER, "expected variable name").lexeme};
 
+        std::string block_name;
         if (match(TokenType::ASSIGN)) {
             auto init = expression();
             if (peek().type == TokenType::AT) {
                 advance();
-                std::string block_name{expect(TokenType::IDENTIFIER, "expected block name after '@'").lexeme};
+                block_name = std::string{expect(TokenType::IDENTIFIER, "expected block name after '@'").lexeme};
                 init = std::make_unique<AllocInline>(std::move(init), block_name, init->location);
             }
             auto assign = std::make_unique<Assignment>(TokenType::ASSIGN, loc);
             auto target = std::make_unique<IdentExpr>(name, loc);
             target->declared_type = type_name;
+            target->block_name = block_name;
             assign->target = std::move(target);
             assign->value = std::move(init);
             return std::make_unique<ExprStmt>(std::move(assign), loc);
@@ -1744,11 +1766,12 @@ private:
 
         if (peek().type == TokenType::AT) {
             advance();
-            expect(TokenType::IDENTIFIER, "expected block name after '@'");
+            block_name = std::string{expect(TokenType::IDENTIFIER, "expected block name after '@'").lexeme};
         }
 
         auto target = std::make_unique<IdentExpr>(name, loc);
         target->declared_type = type_name;
+        target->block_name = block_name;
         return std::make_unique<ExprStmt>(std::move(target), loc);
     }
 

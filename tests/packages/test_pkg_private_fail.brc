@@ -1,0 +1,12 @@
+package TEST_PRIV
+
+using IO
+using MATH
+
+block global = 1MB
+
+fn main() {
+    // This should fail: SECRET is private in MATH package
+    print("secret = {0}", SECRET)
+    global.reset()
+}

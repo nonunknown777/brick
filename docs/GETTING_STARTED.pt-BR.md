@@ -1,118 +1,155 @@
-# Primeiros Passos com Brick
+# Guia de Início Rápido do Brick
 
-> Guia rápido pra qualquer pessoa que queira usar ou contribuir com a linguagem.
+## Pré-requisitos
 
-## O Que Você Precisa
-
-- **Linux** (qualquer distro) — GCC >= 11 ou Clang >= 14, ncurses (opcional)
-- **Windows** — [MinGW-w64](https://www.mingw-w64.org/) com GCC >= 13, SCons (`pip install scons`)
+- **Linux** ou **Windows** com MinGW-w64
+- **Compilador C++**: gcc ≥ 9 ou clang ≥ 12
+- **Python 3** e **pip**
 - **SCons** (`pip install scons`)
+- **ncurses** (Linux): `sudo apt install libncurses-dev` (opcional, para o visualizador)
 
 ## Compilar o Compilador
 
-### Linux
 ```bash
-git clone https://github.com/nonunknown777/brick.git
+git clone <repo>
 cd brick
-scons                     # build release / release build
-scons profile=debug       # build debug / debug build
+scons                    # compila o compilador 'brick' em build/
 ```
 
-### Windows (PowerShell)
-```powershell
-git clone https://github.com/nonunknown777/brick.git
-cd brick
-scons target=windows profile=release
-scons target=windows profile=debug
-```
-
-> O binário `brick` (Linux) ou `brick.exe` (Windows) vai ficar em `build/`.
-
-> No Windows, você também pode usar `.\build-release.ps1` para um build release completo.
-
-## Compilar e Rodar um Programa Brick
-
-### Forma mais rápida
+### Opções de Build
 
 ```bash
-brick run examples/hello.brc
+scons profile=debug      # build debug (sem otimização, amigável ao GDB)
+scons visualizer=no      # pular visualizador TUI
+scons vsix=yes           # compilar extensão VS Code (.vsix)
 ```
 
-> Isso compila `.brc` → C → binário e já roda tudinho de uma vez.
+## Hello World
 
-### Build pra binário
+Crie `hello.brc`:
+
+```brick
+using IO
+
+block global = 64MB
+
+fn main() {
+    print("Olá, Brick!")
+}
+```
+
+Compile e execute:
 
 ```bash
-brick build examples/hello.brc -o hello
-./hello
+brick run hello.brc
+# Output: Olá, Brick!
 ```
 
-O comando `brick build` cuida do pipeline completo:
-
-1. Compila `.brc` pra C
-2. Junta a runtime (alocador de blocos, I/O, hot reload)
-3. Roda `gcc -O3` e gera um binário independente
-
-### Compilar só pra C
+Ou passo a passo:
 
 ```bash
-brick examples/hello.brc -o hello.c
+brick hello.brc -o hello.c    # compilar Brick → C
+gcc -O3 hello.c runtime/block_memory.c runtime/io.c -o hello
+./hello                        # Olá, Brick!
 ```
 
-> Útil se você quiser dar uma olhada no código C gerado.
+## Primeiro Programa Real
 
-### Modo release (sem overhead de rastreamento)
+```brick
+package JOGO
+using IO
+
+block global = 256MB
+block jogo = 64MB
+
+interface Danificavel {
+    fn tomar_dano(int dmg)
+}
+
+struct Inimigo : Danificavel {
+    int hp
+    String nome
+
+    fn Inimigo(int h, String n) {
+        hp = h; nome = n
+    }
+
+    fn tomar_dano(int dmg) {
+        hp -= dmg
+        if hp <= 0 { print("{0} destruído!", nome) }
+    }
+}
+
+fn main() {
+    Inimigo e = Inimigo(100, "Goblin") @jogo
+    e.tomar_dano(30)
+    e.tomar_dano(80)
+    jogo.reset()
+}
+```
 
 ```bash
-brick build examples/hello.brc --release -o hello
-./hello
+brick build jogo.brc -o jogo
+./jogo
 ```
 
-> Tira o overhead de rastreamento pra ter performance máxima (sem suporte ao visualizador).
+## Projeto Multi-Arquivo
 
-## Rodar Testes
+```
+projeto/
+├── main.brc
+├── lib/
+│   └── MATH.brc
+```
+
+`lib/MATH.brc`:
+
+```brick
+package MATH
+
+export fn somar(int a, int b) -> int {
+    return a + b
+}
+
+export const PI = 31415
+```
+
+`main.brc`:
+
+```brick
+package GAME
+using IO
+using MATH
+
+block global = 64MB
+
+fn main() {
+    int r = somar(3, 4)
+    print("{0}", r)
+}
+```
+
+Build:
 
 ```bash
-scons test                # testes unitários / unit tests
-tests/test_integration.sh # testes de integração (.brc -> compila -> roda) / integration tests (.brc -> compile -> run)
+brick build main.brc -I lib -o programa
+./programa
 ```
 
-## Visualizar Memória
+## Extensão VS Code
 
 ```bash
-brick --visualize examples/hello.brc   # compila, roda e mostra TUI ao vivo / compile, run, show live TUI
-brick --attach <pid>                  # conecta visualizador a processo rodando / attach visualizer to running process
+cd vscode-ext
+npm install
+npm run compile
+# Pressione F5 para abrir Extension Development Host
 ```
 
-## Conceitos Principais
+Features: syntax highlighting, LSP (completions, hover, go-to-def, signature help, semantic tokens), memory webview.
 
-1. **Tudo em blocos**: sua memória vive em blocos que você declara
-2. **Sem stack**: zero variáveis na stack do C (tudo vai pra blocos)
-3. **Bump allocator**: alocação super rápida (só avança um ponteiro)
-4. **Reset, não free**: limpa o bloco inteiro, nunca objetos individuais
-5. **Hot reload**: troca o código sem parar o programa
-6. **Tipos de largura fixa**: i8/i16/i32/i64, u8/u16/u32/u64, f32/f64, usize/isize
-7. **Macros em tempo de compilação**: geração de código via `macro`, `build {}`, e `emit {}`
-8. **Diretivas #line**: depura no código .brc original, não no C gerado
+## Próximos Passos
 
-## Estrutura do Projeto
-
-| Diretório | Conteúdo |
-|-----------|----------|
-| `src/` | Compilador (Lexer, Parser, Codegen) em C++20 |
-| `runtime/` | Alocador de blocos + hot reload + IO (C) |
-| `visualizer/` | TUI ncurses pra visualização de memória ao vivo |
-| `debugger/` | GDB pretty-printers e comandos customizados (Python) |
-| `vscode-ext/` | Extensão VS Code (highlight, LSP, visualizador de memória) |
-| `tests/` | Testes unitários e de integração |
-| `examples/` | Programas .brc de exemplo |
-| `docs/` | Site do GitHub Pages |
-| `wiki/` | Conteúdo do GitHub Wiki |
-| `tasks/` | Divisão das tarefas de desenvolvimento (01-11) |
-| `benchmarks/` | Benchmarks de performance |
-
-## Abrir uma Task (pra contribuidores)
-
-> Cada pasta em `tasks/` tem um `run.sh` que abre o opencode focado naquela task.
-
-> Cada task tem `AGENTS.md` (instruções pra IA) e `STATE.md` (onde parou).
+- [Referência da Linguagem](LANGUAGE.pt-BR.md) — Sintaxe completa
+- [Arquitetura](ARCHITECTURE.pt-BR.md) — Como o compilador funciona
+- [Macros](MACROS.pt-BR.md) — Geração de código em tempo de compilação
+- [Hot Reload](hot-reload.pt-BR.md) — Troca de código ao vivo

@@ -1,0 +1,49 @@
+// Test nested anonymous structs/unions
+// Testa structs/unions anonimos aninhados
+
+using IO
+
+// Anonymous union inside struct
+struct Packet {
+    int id
+    union {
+        struct { int x; int y }
+        int raw
+    }
+}
+
+// Named union with anonymous struct
+union Data {
+    int raw
+    struct { u8 low; u8 high }
+}
+
+// Struct with multiple anonymous unions
+struct Multi {
+    int tag
+    union { int a; float b }
+    union { struct { u8 r; u8 g; u8 b_; u8 a_ }; int packed }
+}
+
+fn main() {
+    // Test 1: anonymous union inside struct with anonymous struct
+    Packet p
+    p.id = 42
+    p.x = 10
+    p.y = 20
+    print("p.id={0}, p.x={1}, p.y={2}", p.id, p.x, p.y)
+
+    // Test 2: named union with anonymous struct
+    Data d
+    d.raw = 0x0A0B
+    print("d.low={0}, d.high={1}", d.low, d.high)
+
+    // Test 3: multiple anonymous unions in one struct
+    Multi m
+    m.tag = 1
+    m.a = 100
+    m.packed = 0x44332211
+    print("m.r={0}, m.g={1}, m.b={2}", m.r, m.g, m.b_)
+
+    print("PASS: all nested anon tests")
+}

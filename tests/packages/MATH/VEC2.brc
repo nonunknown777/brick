@@ -1,0 +1,15 @@
+package MATH.VEC2
+
+// ── Exported struct ──
+export struct Vec2 {
+    f64 x
+    f64 y
+}
+
+// ── Exported function ──
+export fn length(Vec2 v) -> f64 {
+    return v.x * v.x + v.y * v.y
+}
+
+// ── Private (not exported) ──
+private const FACTOR = 2

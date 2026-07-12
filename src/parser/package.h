@@ -20,6 +20,12 @@ struct PackageInfo {
     // Simbolos exportados por este pacote
     std::set<std::string> exported_structs;
     std::set<std::string> exported_functions;
+    std::set<std::string> exported_consts;
+    std::set<std::string> exported_enums;
+    std::set<std::string> exported_unions;
+    std::set<std::string> exported_interfaces;
+    std::set<std::string> exported_type_aliases;
+    std::set<std::string> exported_macros;
 };
 
 struct PackageTable {
