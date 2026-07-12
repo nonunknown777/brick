@@ -1,39 +1,39 @@
-#ifndef BRICK_BIND_H
-#define BRICK_BIND_H
+#pragma once
 
 #include <string>
 #include <vector>
+#include <ostream>
 
 namespace brick {
 namespace bind {
 
-// ── Options for binding generation ──────────────────────────────────────────
-struct Options {
-    bool generate_structs   = true;
-    bool generate_enums     = true;
-    bool generate_defines   = true;
-    bool generate_functions = true;
+struct BindError {
+    std::string message;
+    int line;
+    int col;
+    std::string file;
 };
 
-// ── Result of binding generation ───────────────────────────────────────────
-struct Result {
+inline std::ostream& operator<<(std::ostream& os, const BindError& err) {
+    if (err.line > 0) {
+        os << err.file << ":" << err.line << ":" << err.col << ": " << err.message;
+    } else {
+        os << err.message;
+    }
+    return os;
+}
+
+struct BindResult {
+    bool success;
+    std::vector<BindError> errors;
     std::string brc_code;
-    std::vector<std::string> errors;
-    bool success = false;
 };
 
-// ── API ────────────────────────────────────────────────────────────────────
+struct Options {
+    // Future: namespace/package prefix, type overrides, etc.
+};
 
-/// Generate Brick bindings (.brc) from a C header file.
-/// Gera bindings Brick (.brc) a partir de um header C.
-Result generate(const std::string& header_path, const Options& opts = {});
-
-/// Generate Brick bindings (.brc) from a C header source string directly.
-/// Useful for tests and in-memory generation.
-/// Gera bindings Brick (.brc) a partir de um texto de header C diretamente.
-Result generate_from_source(const std::string& source, const Options& opts = {});
+BindResult generate(const std::string& header_path, const Options& opts);
 
 } // namespace bind
 } // namespace brick
-
-#endif // BRICK_BIND_H
